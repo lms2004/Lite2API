@@ -78,6 +78,36 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
   -H "Authorization: Bearer $LITE2API_ADMIN_TOKEN"
 ```
 
+## 批量导入账号
+
+管理页的“批量导入”支持同时选择或拖入多个 JSON 文件。浏览器会逐文件校验并合并，随后可先执行预检查，再确认一次性保存并热加载。单次最多导入 500 个账号，请求体上限为 1 MiB。
+
+支持 `lite2api-data`、`sub2api-data` 和旧版 `sub2api-bundle`。Lite2API 原生格式示例：
+
+```json
+{
+  "type": "lite2api-data",
+  "version": 1,
+  "accounts": [
+    {
+      "id": "deepseek-main",
+      "name": "DeepSeek API",
+      "type": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "concurrency": 4,
+      "enabled": true
+    }
+  ],
+  "proxies": []
+}
+```
+
+接口为 `POST /admin/api/accounts/import`，请求使用 `data`、`mode` 和 `dry_run` 字段。`mode` 可选 `skip`（跳过已有 ID）或 `upsert`（更新已有 ID；未提供密钥时保留旧密钥）。导入允许部分成功，并在 `errors` 中返回每一项失败的索引和原因。
+
+Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refresh token 等凭据不会被误当作 API Key；这类账号必须先通过外部适配器暴露 OpenAI 或 Anthropic 兼容的 `base_url`。工作流参考来源见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
+
 ## 安全边界
 
 - 网关没有配置 API Key 时默认拒绝所有模型请求。

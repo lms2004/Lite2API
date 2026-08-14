@@ -82,6 +82,17 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
+	case path == "/accounts/import" && r.Method == http.MethodPost:
+		var input AccountImportRequest
+		if err := decodeAdminJSON(w, r, &input); err != nil {
+			return
+		}
+		result, err := g.ImportAccounts(input)
+		if err != nil {
+			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_account_import")
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	case path == "/accounts" && r.Method == http.MethodPut:
 		var account config.Account
 		if err := decodeAdminJSON(w, r, &account); err != nil {
@@ -165,6 +176,11 @@ func (g *Gateway) UpsertAccount(account config.Account) error {
 		}
 		if account.APIKey == "" && account.APIKeyEnv == "" {
 			account.APIKey, account.APIKeyEnv = cfg.Accounts[i].APIKey, cfg.Accounts[i].APIKeyEnv
+		}
+		for name, value := range account.Headers {
+			if value == "********" {
+				account.Headers[name] = cfg.Accounts[i].Headers[name]
+			}
 		}
 		cfg.Accounts[i] = account
 		found = true

@@ -273,6 +273,24 @@ func TestAdminAuthenticationAndRouteUpdate(t *testing.T) {
 	}
 }
 
+func TestAdminAccountUpdatePreservesRedactedSecrets(t *testing.T) {
+	g := newTestGateway(t, []config.Account{{
+		ID: "a", Name: "Before", Type: "openai", BaseURL: "https://api.example.com/v1",
+		APIKey: "upstream-secret", Headers: map[string]string{"X-Private": "header-secret"},
+		Models: []string{"m"}, Enabled: true, Weight: 1,
+	}}, nil)
+	account := redactedConfig(g.Config()).Accounts[0]
+	account.Name = "After"
+	account.APIKey = ""
+	if err := g.UpsertAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	updated := g.Config().Accounts[0]
+	if updated.Name != "After" || updated.APIKey != "upstream-secret" || updated.Headers["X-Private"] != "header-secret" {
+		t.Fatalf("updated account=%+v", updated)
+	}
+}
+
 func TestRequestBodyLimit(t *testing.T) {
 	g := newTestGateway(t, []config.Account{{ID: "a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test", Models: []string{"m"}, Enabled: true, Weight: 1}}, nil)
 	cfg := g.Config()
