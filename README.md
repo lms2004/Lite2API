@@ -50,7 +50,7 @@ Compose 使用 Linux host network，以便直接访问同机 `127.0.0.1:45678` �
 
 - API Base URL：`https://sub2api.foresights.top/lite/v1`
 - 管理页：`https://sub2api.foresights.top/lite-admin/`（仅连接服务器 V2Ray/VPN 后可访问）
-- 旧 Sub2API 的原有路径保持不变。
+- 旧 Sub2API 已停止；域名根路径跳转到 Lite2API 的受鉴权模型列表。
 
 ## 调用
 
