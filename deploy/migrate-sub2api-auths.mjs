@@ -44,6 +44,11 @@ for (const [index, account] of data.accounts.entries()) {
   const expired = expiry(get(credentials, 'expires_at', 'expired'));
   const accessToken = get(credentials, 'access_token');
   const refreshToken = get(credentials, 'refresh_token');
+  const configuredBaseURL = get(credentials, 'base_url') || get(account.extra, 'base_url');
+  const normalizedBaseURL = String(configuredBaseURL).replace(/\/+$/, '');
+  const baseURL = platform === 'gemini' && (!normalizedBaseURL || normalizedBaseURL === 'https://generativelanguage.googleapis.com')
+    ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+    : configuredBaseURL;
 
   if (['apikey', 'api_key'].includes(type) && get(credentials, 'api_key')) {
     const modelMap = credentials.model_mapping && typeof credentials.model_mapping === 'object' && !Array.isArray(credentials.model_mapping) ? credentials.model_mapping : {};
@@ -52,7 +57,7 @@ for (const [index, account] of data.accounts.entries()) {
       name: label,
       platform,
       type: 'api_key',
-      base_url: get(credentials, 'base_url') || get(account.extra, 'base_url') || (platform === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : ''),
+      base_url: baseURL,
       api_key: get(credentials, 'api_key'),
       models: Object.keys(modelMap),
       model_map: modelMap,
