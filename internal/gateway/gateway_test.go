@@ -248,12 +248,15 @@ func TestModelsListsAliases(t *testing.T) {
 func TestAdminAuthenticationAndRouteUpdate(t *testing.T) {
 	g := newTestGateway(t, []config.Account{{ID: "a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "upstream-secret", Headers: map[string]string{"X-Private": "header-secret"}, Models: []string{"m"}, Enabled: true, Weight: 1}}, nil)
 	unauthorized := httptest.NewRecorder()
-	g.ServeAdminAPI(unauthorized, httptest.NewRequest(http.MethodGet, "/admin/api/state", nil))
+	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/admin/api/state", nil)
+	unauthorizedReq.RemoteAddr = "127.0.0.1:12345"
+	g.ServeAdminAPI(unauthorized, unauthorizedReq)
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("admin unauthorized=%d", unauthorized.Code)
 	}
 	body := `{"alias":{"accounts":["a"],"upstream_model":"m","strategy":"sticky"}}`
 	req := httptest.NewRequest(http.MethodPut, "/admin/api/routes", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Authorization", "Bearer admin-secret")
 	w := httptest.NewRecorder()
 	g.ServeAdminAPI(w, req)
@@ -261,6 +264,7 @@ func TestAdminAuthenticationAndRouteUpdate(t *testing.T) {
 		t.Fatalf("route update status=%d config=%v", w.Code, g.Config().Routes)
 	}
 	stateReq := httptest.NewRequest(http.MethodGet, "/admin/api/state", nil)
+	stateReq.RemoteAddr = "127.0.0.1:12345"
 	stateReq.Header.Set("Authorization", "Bearer admin-secret")
 	stateW := httptest.NewRecorder()
 	g.ServeAdminAPI(stateW, stateReq)

@@ -12,6 +12,8 @@ type RequestRecord struct {
 	Model         string `json:"model"`
 	UpstreamModel string `json:"upstream_model"`
 	AccountID     string `json:"account_id"`
+	ClientKeyID   string `json:"client_key_id"`
+	ClientKeyName string `json:"client_key_name,omitempty"`
 	Path          string `json:"path"`
 	Status        int    `json:"status"`
 	LatencyMS     int64  `json:"latency_ms"`
@@ -38,6 +40,7 @@ type Stats struct {
 	mu        sync.RWMutex
 	recent    []RequestRecord
 	limit     int
+	next      int
 }
 
 func NewStats(limit int) *Stats { return &Stats{started: time.Now(), limit: limit} }
@@ -52,20 +55,26 @@ func (s *Stats) End(ok bool) {
 }
 func (s *Stats) Failover() { s.failovers.Add(1) }
 func (s *Stats) Record(r RequestRecord) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recent = append(s.recent, r)
-	if len(s.recent) > s.limit {
-		copy(s.recent, s.recent[len(s.recent)-s.limit:])
-		s.recent = s.recent[:s.limit]
+	if s.limit <= 0 {
+		return
 	}
+	s.mu.Lock()
+	if len(s.recent) < s.limit {
+		s.recent = append(s.recent, r)
+		s.next = len(s.recent) % s.limit
+	} else {
+		s.recent[s.next] = r
+		s.next = (s.next + 1) % s.limit
+	}
+	s.mu.Unlock()
 }
 func (s *Stats) Snapshot() StatsSnapshot {
 	s.mu.RLock()
-	recent := append([]RequestRecord(nil), s.recent...)
-	s.mu.RUnlock()
-	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
-		recent[i], recent[j] = recent[j], recent[i]
+	recent := make([]RequestRecord, len(s.recent))
+	for i := range recent {
+		index := (s.next - 1 - i + len(s.recent)) % len(s.recent)
+		recent[i] = s.recent[index]
 	}
+	s.mu.RUnlock()
 	return StatsSnapshot{StartedAt: s.started.UTC().Format(time.RFC3339), Requests: s.requests.Load(), Successful: s.success.Load(), Failed: s.failed.Load(), Failovers: s.failovers.Load(), Active: s.active.Load(), Recent: recent}
 }

@@ -16,7 +16,10 @@
 - 连续失败熔断和自动恢复
 - 模型别名与上游模型重写
 - 管理页面、账号增删改、实时状态和最近 200 条请求
-- 网关 Key 与管理 Token 分离
+- Sub2API/OpenAI 风格 `Authorization: Bearer` 与 `X-Api-Key` 接口
+- 托管客户端 Key：模型白名单、RPM、并发、过期、禁用、撤销和使用统计
+- Key 热路径使用 O(1) 内存快照、SHA-256 摘要和原子限流，不访问磁盘或数据库
+- 管理 Token 与客户端 Key 分离；管理页面使用短期 HttpOnly Cookie、CSRF 和登录防爆破
 - 上游密钥支持环境变量，配置文件强制以 `0600` 原子写入
 - 限制请求体、过滤敏感与 hop-by-hop Header、禁止上游重定向
 - 入口总并发保护、慢请求读取保护和流空闲超时
@@ -42,6 +45,12 @@ docker compose up -d --build
 - API Base URL：`http://127.0.0.1:45679/v1`
 
 Compose 使用 Linux host network，以便直接访问同机 `127.0.0.1:45678` 上的 AtomCode2Api。对外服务时建议继续由 Nginx 终止 TLS，不要把管理端口直接暴露公网。
+
+当前服务器的正式入口：
+
+- API Base URL：`https://sub2api.foresights.top/lite/v1`
+- 管理页：`https://sub2api.foresights.top/lite-admin/`（仅连接服务器 V2Ray/VPN 后可访问）
+- 旧 Sub2API 的原有路径保持不变。
 
 ## 调用
 
@@ -73,14 +82,18 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
 
 - 网关没有配置 API Key 时默认拒绝所有模型请求。
 - 管理 Token 没有配置时默认关闭管理 API。
-- 管理页面本身不包含数据；浏览器提交管理 Token 后才会读取状态。
+- 管理页和管理 API 同时受 Nginx 来源白名单与应用层可信代理/CIDR 校验保护；伪造 `X-Real-IP` 无效。
+- 浏览器只在登录请求中提交管理 Token；服务端签发短期、`HttpOnly`、`Secure`、`SameSite=Strict` 会话，写操作另需 CSRF Token。
+- 托管客户端 Key 的明文只显示一次；磁盘仅保存 SHA-256 摘要，撤销通过原子内存快照立即生效。
 - 建议所有上游密钥只通过 `.env` 提供。
 - HTTP 上游默认仅允许 loopback；AtomCode2Api 等同机服务需要显式开启 `allow_private_http_upstream`。
 - 生产入口必须使用 HTTPS，并限制 `/admin` 的来源 IP 或仅通过 VPN 访问。
 
 ## 与完整 Sub2API 的取舍
 
-Lite2API 只面向单机、单管理员。它不提供跨节点并发一致性、用户余额、套餐计费、OAuth 登录流程、支付、团队权限和复杂协议转换。这些能力如果以后确实需要，应作为独立 Provider 或模块增加，而不是重新引入整套 SaaS 架构。
+Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状态，避免 Redis 网络往返并减少故障点。未来只有在多实例部署时才需要接入 Redis 来同步全局 RPM、并发租约和撤销事件。
+
+它不提供用户余额、套餐计费、OAuth 登录流程、支付、团队权限和复杂协议转换。这些能力如果以后确实需要，应作为独立 Provider 或模块增加，而不是重新引入整套 SaaS 架构。
 
 详细设计与运维说明见 [Architecture](docs/ARCHITECTURE.md) 和 [Operations](docs/OPERATIONS.md)。
 

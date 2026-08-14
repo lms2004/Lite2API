@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,11 +25,13 @@ import (
 )
 
 type runtimeState struct {
-	cfg         config.Config
-	scheduler   *Scheduler
-	clients     map[string]*http.Client
-	gatewayKeys []string
-	adminToken  string
+	cfg             config.Config
+	scheduler       *Scheduler
+	clients         map[string]*http.Client
+	legacyKeyHashes map[[sha256.Size]byte]struct{}
+	adminToken      string
+	adminAllowed    []*net.IPNet
+	trustedProxies  []*net.IPNet
 }
 
 type Gateway struct {
@@ -37,6 +41,8 @@ type Gateway struct {
 	reloadMu     sync.Mutex
 	stats        *Stats
 	globalActive atomic.Int64
+	clientKeys   *ClientKeyStore
+	adminAuth    *AdminAuthenticator
 }
 
 func New(configPath string) (*Gateway, error) {
@@ -44,6 +50,14 @@ func New(configPath string) (*Gateway, error) {
 	if err := g.Reload(); err != nil {
 		return nil, err
 	}
+	state := g.state.Load()
+	keyPath := ResolveClientKeysPath(configPath, state.cfg.Server.ClientKeysPath)
+	clientKeys, err := NewClientKeyStore(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	g.clientKeys = clientKeys
+	g.adminAuth = NewAdminAuthenticator(state.cfg.Server.AdminSessionTTL.Duration)
 	return g, nil
 }
 
@@ -58,6 +72,15 @@ func (g *Gateway) Reload() error {
 	if err != nil {
 		return err
 	}
+	if g.clientKeys != nil {
+		keyPath := ResolveClientKeysPath(g.configPath, state.cfg.Server.ClientKeysPath)
+		if filepath.Clean(keyPath) != filepath.Clean(g.clientKeys.Path()) {
+			return errors.New("server.client_keys_path cannot change during hot reload")
+		}
+	}
+	if g.adminAuth != nil {
+		g.adminAuth.SetTTL(state.cfg.Server.AdminSessionTTL.Duration)
+	}
 	g.swapState(state)
 	return nil
 }
@@ -68,7 +91,24 @@ func (g *Gateway) buildState(cfg config.Config) (*runtimeState, error) {
 	if old := g.state.Load(); old != nil {
 		previous = old.scheduler
 	}
-	state := &runtimeState{cfg: cfg, scheduler: NewSchedulerWithPrevious(cfg, previous), clients: make(map[string]*http.Client, len(cfg.Accounts)), gatewayKeys: cfg.GatewayKeys(), adminToken: cfg.ResolvedAdminToken()}
+	adminAllowed, err := parseNetworks(cfg.Server.AdminAllowedCIDRs)
+	if err != nil {
+		return nil, fmt.Errorf("admin allowed networks: %w", err)
+	}
+	trustedProxies, err := parseNetworks(cfg.Server.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, fmt.Errorf("trusted proxy networks: %w", err)
+	}
+	legacyHashes := make(map[[sha256.Size]byte]struct{})
+	for _, key := range cfg.GatewayKeys() {
+		legacyHashes[sha256.Sum256([]byte(key))] = struct{}{}
+	}
+	state := &runtimeState{
+		cfg: cfg, scheduler: NewSchedulerWithPrevious(cfg, previous),
+		clients:         make(map[string]*http.Client, len(cfg.Accounts)),
+		legacyKeyHashes: legacyHashes, adminToken: cfg.ResolvedAdminToken(),
+		adminAllowed: adminAllowed, trustedProxies: trustedProxies,
+	}
 	for _, account := range cfg.Accounts {
 		runtimeAccount := state.scheduler.Get(account.ID)
 		if account.Enabled && account.AuthHeader != "none" && runtimeAccount.UpstreamKey == "" {
@@ -121,12 +161,25 @@ func (g *Gateway) Accounts() []AccountSnapshot { return g.state.Load().scheduler
 
 func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	state := g.state.Load()
-	if !authenticate(r, state.gatewayKeys) {
-		writeAPIError(w, http.StatusUnauthorized, "invalid API key", "authentication_error")
+	lease, authFailure := g.clientKeys.Authenticate(apiBearerToken(r), state.legacyKeyHashes)
+	switch authFailure {
+	case KeyAuthInvalid:
+		writeAPIErrorCode(w, http.StatusUnauthorized, "invalid API key", "authentication_error", "invalid_api_key")
+		return
+	case KeyAuthRateLimited:
+		w.Header().Set("Retry-After", "60")
+		writeAPIErrorCode(w, http.StatusTooManyRequests, "API key rate limit exceeded", "rate_limit_error", "rate_limit_exceeded")
+		return
+	case KeyAuthConcurrency:
+		w.Header().Set("Retry-After", "1")
+		writeAPIErrorCode(w, http.StatusTooManyRequests, "API key concurrency limit reached", "rate_limit_error", "concurrency_limit_exceeded")
 		return
 	}
+	ok := false
+	defer func() { lease.Complete(ok) }()
 	if r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/v1/models" {
-		g.serveModels(w, state)
+		g.serveModels(w, state, lease)
+		ok = true
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -159,17 +212,22 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "model is required", "invalid_request_error")
 		return
 	}
+	if !lease.AllowsModel(model) {
+		writeAPIErrorCode(w, http.StatusForbidden, "model is not allowed for this API key", "permission_error", "model_not_allowed")
+		return
+	}
 	session := sessionKey(r, envelope)
 	requestID := requestID()
 	start := time.Now()
 	g.stats.Begin()
-	ok := false
 	var record RequestRecord
 	defer func() {
 		g.stats.End(ok)
 		record.Time = time.Now().UTC().Format(time.RFC3339Nano)
 		record.RequestID = requestID
 		record.Model = model
+		record.ClientKeyID = lease.ID
+		record.ClientKeyName = lease.Name
 		record.Path = r.URL.Path
 		record.LatencyMS = time.Since(start).Milliseconds()
 		g.stats.Record(record)
@@ -302,25 +360,17 @@ func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *
 	return state.clients[account.Config.ID].Do(req)
 }
 
-func (g *Gateway) serveModels(w http.ResponseWriter, state *runtimeState) {
+func (g *Gateway) serveModels(w http.ResponseWriter, state *runtimeState, lease *KeyLease) {
 	now := time.Now().Unix()
 	models := state.scheduler.Models()
 	data := make([]map[string]any, 0, len(models))
 	for _, model := range models {
+		if !lease.AllowsModel(model) {
+			continue
+		}
 		data = append(data, map[string]any{"id": model, "object": "model", "created": now, "owned_by": "lite2api"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
-}
-
-func authenticate(r *http.Request, keys []string) bool {
-	if len(keys) == 0 {
-		return false
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if token == "" {
-		token = strings.TrimSpace(r.Header.Get("X-Api-Key"))
-	}
-	return config.SecureEqual(token, keys)
 }
 
 func allowedGatewayPath(path string) bool {
@@ -516,7 +566,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 func writeAPIError(w http.ResponseWriter, status int, message, kind string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"message": message, "type": kind, "code": status}})
+	writeAPIErrorCode(w, status, message, kind, kind)
+}
+func writeAPIErrorCode(w http.ResponseWriter, status int, message, kind, code string) {
+	writeJSON(w, status, map[string]any{"error": map[string]any{"message": message, "type": kind, "param": nil, "code": code}})
 }
 
 func (g *Gateway) LogState() {

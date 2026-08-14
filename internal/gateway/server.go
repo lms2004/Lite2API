@@ -19,11 +19,16 @@ func (g *Gateway) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", g.serveHealth)
 	mux.HandleFunc("/admin/api/", g.ServeAdminAPI)
-	mux.HandleFunc("/admin", serveAdminPage)
-	mux.HandleFunc("/admin/", serveAdminPage)
+	mux.HandleFunc("/admin", g.serveAdminPage)
+	mux.HandleFunc("/admin/", g.serveAdminPage)
 	mux.HandleFunc("/v1/", g.ServeGateway)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		state := g.state.Load()
+		if !adminNetworkAllowed(r, state.adminAllowed, state.trustedProxies) {
 			http.NotFound(w, r)
 			return
 		}
@@ -72,7 +77,12 @@ func (g *Gateway) serveHealth(w http.ResponseWriter, _ *http.Request) {
 	state := g.state.Load()
 	writeJSON(w, 200, map[string]any{"status": "ok", "service": "lite2api", "accounts": len(state.cfg.Accounts), "models": len(state.scheduler.Models())})
 }
-func serveAdminPage(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) serveAdminPage(w http.ResponseWriter, r *http.Request) {
+	state := g.state.Load()
+	if !adminNetworkAllowed(r, state.adminAllowed, state.trustedProxies) {
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", 405)
 		return

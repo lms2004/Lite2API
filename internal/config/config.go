@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,10 @@ type ServerConfig struct {
 	APIKeyEnv                string   `json:"api_key_env,omitempty"`
 	AdminToken               string   `json:"admin_token,omitempty"`
 	AdminTokenEnv            string   `json:"admin_token_env,omitempty"`
+	ClientKeysPath           string   `json:"client_keys_path,omitempty"`
+	AdminAllowedCIDRs        []string `json:"admin_allowed_cidrs,omitempty"`
+	TrustedProxyCIDRs        []string `json:"trusted_proxy_cidrs,omitempty"`
+	AdminSessionTTL          Duration `json:"admin_session_ttl,omitempty"`
 	MaxBodyBytes             int64    `json:"max_body_bytes"`
 	MaxInFlightRequests      int      `json:"max_inflight_requests"`
 	RequestReadTimeout       Duration `json:"request_read_timeout"`
@@ -104,6 +109,10 @@ func Defaults() Config {
 			Listen:                "127.0.0.1:45679",
 			APIKeyEnv:             "LITE2API_API_KEYS",
 			AdminTokenEnv:         "LITE2API_ADMIN_TOKEN",
+			ClientKeysPath:        "client_keys.json",
+			AdminAllowedCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+			TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+			AdminSessionTTL:       Duration{30 * time.Minute},
 			MaxBodyBytes:          DefaultMaxBodyBytes,
 			MaxInFlightRequests:   256,
 			RequestReadTimeout:    Duration{30 * time.Second},
@@ -155,12 +164,32 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.AdminTokenEnv == "" {
 		cfg.Server.AdminTokenEnv = d.AdminTokenEnv
 	}
+	if cfg.Server.ClientKeysPath == "" {
+		cfg.Server.ClientKeysPath = d.ClientKeysPath
+	}
+	if len(cfg.Server.AdminAllowedCIDRs) == 0 {
+		cfg.Server.AdminAllowedCIDRs = append([]string(nil), d.AdminAllowedCIDRs...)
+	}
+	if value := strings.TrimSpace(os.Getenv("LITE2API_ADMIN_ALLOWED_CIDRS")); value != "" {
+		cfg.Server.AdminAllowedCIDRs = splitCommaList(value)
+	}
+	if len(cfg.Server.TrustedProxyCIDRs) == 0 {
+		cfg.Server.TrustedProxyCIDRs = append([]string(nil), d.TrustedProxyCIDRs...)
+	}
+	if value := strings.TrimSpace(os.Getenv("LITE2API_TRUSTED_PROXY_CIDRS")); value != "" {
+		cfg.Server.TrustedProxyCIDRs = splitCommaList(value)
+	}
+	if cfg.Server.AdminSessionTTL.Duration == 0 {
+		cfg.Server.AdminSessionTTL = d.AdminSessionTTL
+	}
 	if cfg.Server.MaxBodyBytes <= 0 {
 		cfg.Server.MaxBodyBytes = d.MaxBodyBytes
 	}
+	applyPositiveInt64Env(&cfg.Server.MaxBodyBytes, "LITE2API_MAX_BODY_BYTES")
 	if cfg.Server.MaxInFlightRequests <= 0 {
 		cfg.Server.MaxInFlightRequests = d.MaxInFlightRequests
 	}
+	applyPositiveIntEnv(&cfg.Server.MaxInFlightRequests, "LITE2API_MAX_INFLIGHT_REQUESTS")
 	if cfg.Server.RequestReadTimeout.Duration <= 0 {
 		cfg.Server.RequestReadTimeout = d.RequestReadTimeout
 	}
@@ -177,12 +206,15 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.MaxIdleConns <= 0 {
 		cfg.Server.MaxIdleConns = d.MaxIdleConns
 	}
+	applyPositiveIntEnv(&cfg.Server.MaxIdleConns, "LITE2API_MAX_IDLE_CONNS")
 	if cfg.Server.MaxIdleConnsPerHost <= 0 {
 		cfg.Server.MaxIdleConnsPerHost = d.MaxIdleConnsPerHost
 	}
+	applyPositiveIntEnv(&cfg.Server.MaxIdleConnsPerHost, "LITE2API_MAX_IDLE_CONNS_PER_HOST")
 	if cfg.Server.MaxConnsPerHost <= 0 {
 		cfg.Server.MaxConnsPerHost = d.MaxConnsPerHost
 	}
+	applyPositiveIntEnv(&cfg.Server.MaxConnsPerHost, "LITE2API_MAX_CONNS_PER_HOST")
 	if cfg.Server.FailureThreshold <= 0 {
 		cfg.Server.FailureThreshold = d.FailureThreshold
 	}
@@ -216,9 +248,49 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
+func splitCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
+func applyPositiveIntEnv(target *int, name string) {
+	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name))); err == nil && value > 0 {
+		*target = value
+	}
+}
+
+func applyPositiveInt64Env(target *int64, name string) {
+	if value, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 64); err == nil && value > 0 {
+		*target = value
+	}
+}
+
 func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
 		return fmt.Errorf("server.listen: %w", err)
+	}
+	if c.Server.AdminSessionTTL.Duration < 5*time.Minute || c.Server.AdminSessionTTL.Duration > 24*time.Hour {
+		return errors.New("server.admin_session_ttl must be between 5m and 24h")
+	}
+	if filepath.IsAbs(c.Server.ClientKeysPath) && filepath.Clean(c.Server.ClientKeysPath) == string(filepath.Separator) {
+		return errors.New("server.client_keys_path cannot be the filesystem root")
+	}
+	for field, values := range map[string][]string{
+		"server.admin_allowed_cidrs": c.Server.AdminAllowedCIDRs,
+		"server.trusted_proxy_cidrs": c.Server.TrustedProxyCIDRs,
+	} {
+		for _, value := range values {
+			if _, _, err := net.ParseCIDR(value); err != nil {
+				return fmt.Errorf("%s contains invalid CIDR %q", field, value)
+			}
+		}
 	}
 	seen := make(map[string]struct{}, len(c.Accounts))
 	for _, a := range c.Accounts {

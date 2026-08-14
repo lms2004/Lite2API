@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/lms2004/lite2api/internal/config"
@@ -11,15 +12,70 @@ import (
 
 func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	state := g.state.Load()
-	if !adminAuthenticated(r, state.adminToken) {
-		writeAPIError(w, http.StatusUnauthorized, "invalid admin token", "authentication_error")
+	if !adminNetworkAllowed(r, state.adminAllowed, state.trustedProxies) {
+		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	path := strings.TrimPrefix(r.URL.Path, "/admin/api")
+	if path == "/login" && r.Method == http.MethodPost {
+		g.serveAdminLogin(w, r, state)
+		return
+	}
+	principal, authenticated := g.adminAuth.Authenticate(r, state.adminToken)
+	if !authenticated {
+		writeAPIErrorCode(w, http.StatusUnauthorized, "authentication required", "authentication_error", "invalid_admin_credentials")
+		return
+	}
+	if !csrfAllowed(r, principal) {
+		writeAPIErrorCode(w, http.StatusForbidden, "invalid CSRF token", "permission_error", "invalid_csrf_token")
+		return
+	}
 	switch {
+	case path == "/session" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": principal.CSRF, "session": principal.Session})
+	case path == "/logout" && r.Method == http.MethodPost:
+		g.adminAuth.Logout(r)
+		setAdminSessionCookie(w, r, state.trustedProxies, "", -1)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"stats": g.Stats(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+	case path == "/client-keys" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"data": g.clientKeys.List()})
+	case path == "/client-keys" && r.Method == http.MethodPost:
+		var input ClientKeyCreate
+		if err := decodeAdminJSON(w, r, &input); err != nil {
+			return
+		}
+		key, secret, err := g.clientKeys.Create(input)
+		if err != nil {
+			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_client_key")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"client_key": key, "secret": secret, "warning": "This secret is shown only once."})
+	case strings.HasPrefix(path, "/client-keys/") && r.Method == http.MethodPut:
+		id := strings.TrimSpace(strings.TrimPrefix(path, "/client-keys/"))
+		var input ClientKeyUpdate
+		if id == "" || strings.Contains(id, "/") || decodeAdminJSON(w, r, &input) != nil {
+			return
+		}
+		key, err := g.clientKeys.Update(id, input)
+		if err != nil {
+			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_client_key")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"client_key": key})
+	case strings.HasPrefix(path, "/client-keys/") && r.Method == http.MethodDelete:
+		id := strings.TrimSpace(strings.TrimPrefix(path, "/client-keys/"))
+		if id == "" || strings.Contains(id, "/") {
+			writeAPIError(w, http.StatusBadRequest, "client key id is required", "invalid_request_error")
+			return
+		}
+		if err := g.clientKeys.Delete(id); err != nil {
+			writeAPIErrorCode(w, http.StatusNotFound, err.Error(), "invalid_request_error", "client_key_not_found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/reload" && r.Method == http.MethodPost:
 		if err := g.Reload(); err != nil {
 			writeAPIError(w, 400, err.Error(), "config_error")
@@ -62,15 +118,31 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func adminAuthenticated(r *http.Request, expected string) bool {
-	if expected == "" {
-		return false
+func (g *Gateway) serveAdminLogin(w http.ResponseWriter, r *http.Request, state *runtimeState) {
+	var input struct {
+		Token string `json:"token"`
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if token == "" {
-		token = strings.TrimSpace(r.Header.Get("X-Admin-Token"))
+	if err := decodeAdminJSON(w, r, &input); err != nil {
+		return
 	}
-	return config.SecureEqual(token, []string{expected})
+	clientIP := effectiveClientIP(r, state.trustedProxies)
+	ip := "unknown"
+	if clientIP != nil {
+		ip = clientIP.String()
+	}
+	session, csrf, err := g.adminAuth.Login(ip, input.Token, state.adminToken)
+	if errors.Is(err, ErrAdminLoginLocked) {
+		w.Header().Set("Retry-After", strconv.Itoa(15*60))
+		writeAPIErrorCode(w, http.StatusTooManyRequests, "too many login attempts", "rate_limit_error", "admin_login_locked")
+		return
+	}
+	if err != nil {
+		writeAPIErrorCode(w, http.StatusUnauthorized, "invalid admin credentials", "authentication_error", "invalid_admin_credentials")
+		return
+	}
+	ttl := state.cfg.Server.AdminSessionTTL.Duration
+	setAdminSessionCookie(w, r, state.trustedProxies, session, int(ttl.Seconds()))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": csrf, "expires_in": int(ttl.Seconds())})
 }
 
 func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
