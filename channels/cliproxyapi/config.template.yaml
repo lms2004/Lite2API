@@ -1,0 +1,37 @@
+host: "127.0.0.1"
+port: 45682
+
+tls:
+  enable: false
+  cert: ""
+  key: ""
+
+remote-management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: true
+
+auth-dir: "/run/cliproxyapi/auths"
+api-keys:
+  - "REPLACE_WITH_RANDOM_KEY"
+
+debug: false
+pprof:
+  enable: false
+  addr: "127.0.0.1:45683"
+logging-to-file: false
+usage-statistics-enabled: false
+passthrough-headers: false
+request-retry: 2
+max-retry-credentials: 3
+max-retry-interval: 15
+force-model-prefix: false
+enable-gemini-cli-endpoint: false
+routing:
+  strategy: "round-robin"
+  session-affinity: true
+  session-affinity-ttl: "1h"
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+  antigravity-credits: true

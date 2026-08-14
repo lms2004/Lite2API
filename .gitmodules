@@ -4,3 +4,6 @@
 [submodule "third_party/gemini-web2api"]
 	path = third_party/gemini-web2api
 	url = git@github.com:lms2004/gemini-web2api.git
+[submodule "third_party/cliproxyapi"]
+	path = third_party/cliproxyapi
+	url = https://github.com/router-for-me/CLIProxyAPI.git

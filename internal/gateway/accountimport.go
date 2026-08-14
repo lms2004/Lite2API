@@ -69,6 +69,9 @@ type AccountImportRequest struct {
 }
 
 type AccountImportResult struct {
+	ProxyCreated   int                  `json:"proxy_created"`
+	ProxyReused    int                  `json:"proxy_reused"`
+	ProxyFailed    int                  `json:"proxy_failed"`
 	AccountCreated int                  `json:"account_created"`
 	AccountUpdated int                  `json:"account_updated"`
 	AccountSkipped int                  `json:"account_skipped"`
@@ -79,11 +82,12 @@ type AccountImportResult struct {
 }
 
 type AccountImportError struct {
-	Kind    string `json:"kind"`
-	Index   int    `json:"index"`
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Message string `json:"message"`
+	Kind      string `json:"kind"`
+	Index     int    `json:"index"`
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	AdapterID string `json:"adapter_id,omitempty"`
+	Message   string `json:"message"`
 }
 
 func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportResult, error) {
@@ -99,7 +103,7 @@ func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportRes
 		return result, errors.New("mode must be skip or upsert")
 	}
 
-	proxyURLs := importProxyURLs(request.Data.Proxies)
+	proxyURLs := validateImportProxies(request.Data.Proxies, &result)
 	candidate := cloneConfig(g.state.Load().cfg)
 	seen := make(map[string]struct{}, len(request.Data.Accounts))
 	for index, item := range request.Data.Accounts {
@@ -154,7 +158,14 @@ func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportRes
 func (r *AccountImportResult) addError(index int, id, name string, err error) {
 	r.AccountFailed++
 	r.Errors = append(r.Errors, AccountImportError{
-		Kind: "account", Index: index, ID: id, Name: name, Message: err.Error(),
+		Kind: "account", Index: index, ID: id, Name: name, AdapterID: adapterForImport(name, err.Error()), Message: err.Error(),
+	})
+}
+
+func (r *AccountImportResult) addProxyError(index int, id string, err error) {
+	r.ProxyFailed++
+	r.Errors = append(r.Errors, AccountImportError{
+		Kind: "proxy", Index: index, ID: id, Message: err.Error(),
 	})
 }
 
@@ -222,6 +233,9 @@ func (item AccountImportItem) toAccount(index int, proxyURLs map[string]string) 
 	if len(modelMap) == 0 {
 		modelMap = stringMapValue(item.Extra, "model_map")
 	}
+	if len(modelMap) == 0 {
+		modelMap = stringMapValue(item.Credentials, "model_mapping")
+	}
 	enabled := true
 	if item.Enabled != nil {
 		enabled = *item.Enabled
@@ -231,7 +245,14 @@ func (item AccountImportItem) toAccount(index int, proxyURLs map[string]string) 
 	authScheme := firstNonEmpty(item.AuthScheme, stringValue(item.Extra, "auth_scheme"))
 	proxyURL := strings.TrimSpace(item.ProxyURL)
 	if proxyURL == "" && item.ProxyKey != nil {
-		proxyURL = proxyURLs[strings.TrimSpace(*item.ProxyKey)]
+		proxyKey := strings.TrimSpace(*item.ProxyKey)
+		if proxyKey != "" {
+			var found bool
+			proxyURL, found = proxyURLs[proxyKey]
+			if !found {
+				return config.Account{}, fmt.Errorf("referenced proxy %q was not found or is invalid", proxyKey)
+			}
+		}
 	}
 	account := config.Account{
 		ID: id, Name: name, Type: kind, BaseURL: baseURL,
@@ -270,24 +291,41 @@ func accountIndex(accounts []config.Account, id string) int {
 	return -1
 }
 
-func importProxyURLs(proxies []AccountImportProxy) map[string]string {
-	result := make(map[string]string, len(proxies))
-	for _, proxy := range proxies {
+func validateImportProxies(proxies []AccountImportProxy, importResult *AccountImportResult) map[string]string {
+	urls := make(map[string]string, len(proxies))
+	for index, proxy := range proxies {
 		scheme := strings.ToLower(strings.TrimSpace(proxy.Protocol))
 		host := strings.TrimSpace(proxy.Host)
-		if proxy.ProxyKey == "" || host == "" || proxy.Port < 1 || proxy.Port > 65535 {
+		key := strings.TrimSpace(proxy.ProxyKey)
+		if key == "" {
+			importResult.addProxyError(index, "", errors.New("proxy_key is required"))
 			continue
 		}
-		if scheme != "http" && scheme != "https" && scheme != "socks5" {
+		if host == "" || proxy.Port < 1 || proxy.Port > 65535 {
+			importResult.addProxyError(index, key, errors.New("proxy host and a port between 1 and 65535 are required"))
+			continue
+		}
+		if scheme != "http" && scheme != "https" && scheme != "socks5" && scheme != "socks5h" {
+			importResult.addProxyError(index, key, fmt.Errorf("unsupported proxy protocol %q", proxy.Protocol))
 			continue
 		}
 		parsed := &url.URL{Scheme: scheme, Host: net.JoinHostPort(host, strconv.Itoa(proxy.Port))}
 		if proxy.Username != "" {
 			parsed.User = url.UserPassword(proxy.Username, proxy.Password)
 		}
-		result[strings.TrimSpace(proxy.ProxyKey)] = parsed.String()
+		proxyURL := parsed.String()
+		if existing, ok := urls[key]; ok {
+			if existing == proxyURL {
+				importResult.ProxyReused++
+			} else {
+				importResult.addProxyError(index, key, errors.New("duplicate proxy_key has conflicting settings"))
+			}
+			continue
+		}
+		urls[key] = proxyURL
+		importResult.ProxyCreated++
 	}
-	return result
+	return urls
 }
 
 func importAccountID(platform, name string, index int) string {

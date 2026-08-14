@@ -1,4 +1,37 @@
 services:
+  cliproxyapi:
+    profiles: ["oauth"]
+    build:
+      context: ./third_party/cliproxyapi
+      dockerfile: Dockerfile
+      args:
+        VERSION: v6.10.9
+        COMMIT: 785b00c3127eea6aa207f1207ead8a2aa93690a3
+        BUILD_DATE: fixed-source
+    image: lite2api/cliproxyapi:v6.10.9
+    container_name: lite2api-cliproxyapi
+    restart: unless-stopped
+    network_mode: host
+    user: "10001:10001"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.75
+    mem_limit: 256m
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    volumes:
+      - ./channels/runtime/cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./channels/runtime/cliproxyapi/auths:/run/cliproxyapi/auths
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:45682/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   grok2api:
     profiles: ["grok"]
     image: "${GROK2API_IMAGE:-ghcr.io/chenyme/grok2api:latest}"

@@ -15,7 +15,7 @@
 - 401/403/429/5xx 与网络错误自动换号
 - 连续失败熔断和自动恢复
 - 模型别名与上游模型重写
-- 管理页面、账号增删改、实时状态和最近 200 条请求
+- 管理页面、账号增删改、批量导入/导出、适配器目录、实时状态和最近 200 条请求
 - Sub2API/OpenAI 风格 `Authorization: Bearer` 与 `X-Api-Key` 接口
 - 托管客户端 Key：模型白名单、RPM、并发、过期、禁用、撤销和使用统计
 - Key 热路径使用 O(1) 内存快照、SHA-256 摘要和原子限流，不访问磁盘或数据库
@@ -24,7 +24,7 @@
 - 限制请求体、过滤敏感与 hop-by-hop Header、禁止上游重定向
 - 入口总并发保护、慢请求读取保护和流空闲超时
 - 单 Go 二进制，无第三方 Go 依赖
-- AtomCode、Grok2API、Gemini Web 采用故障隔离的外置渠道适配器
+- AtomCode、Grok2API、Gemini Web、CLIProxyAPI 采用故障隔离的外置渠道适配器
 
 > `type: anthropic` 表示使用 `x-api-key` 认证并透传 Anthropic 格式；第一版不在 OpenAI Chat Completions 与 Anthropic Messages 之间自动翻译。
 
@@ -78,9 +78,9 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
   -H "Authorization: Bearer $LITE2API_ADMIN_TOKEN"
 ```
 
-## 批量导入账号
+## 批量导入与导出账号
 
-管理页的“批量导入”支持同时选择或拖入多个 JSON 文件。浏览器会逐文件校验并合并，随后可先执行预检查，再确认一次性保存并热加载。单次最多导入 500 个账号，请求体上限为 1 MiB。
+管理页账号页右上角的“更多操作”包含“数据导入”和“数据导出”；勾选账号后会变为“导出选中”。导入支持同时选择或拖入多个 JSON 文件，浏览器逐文件校验并合并，随后可先执行预检查，再确认一次性保存并热加载。单次最多导入 500 个账号，请求体上限为 1 MiB。
 
 支持 `lite2api-data`、`sub2api-data` 和旧版 `sub2api-bundle`。Lite2API 原生格式示例：
 
@@ -106,6 +106,8 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
 
 接口为 `POST /admin/api/accounts/import`，请求使用 `data`、`mode` 和 `dry_run` 字段。`mode` 可选 `skip`（跳过已有 ID）或 `upsert`（更新已有 ID；未提供密钥时保留旧密钥）。导入允许部分成功，并在 `errors` 中返回每一项失败的索引和原因。
 
+导出接口为 `POST /admin/api/accounts/export`，可指定账号 ID，并可选择是否包含代理定义。导出文件包含可恢复的账号凭据，管理页会明确警告，文件应按密钥材料保管。两个写接口都要求登录会话和 CSRF；管理页面不会通过不安全的 GET 暴露凭据。
+
 Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refresh token 等凭据不会被误当作 API Key；这类账号必须先通过外部适配器暴露 OpenAI 或 Anthropic 兼容的 `base_url`。工作流参考来源见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
 
 ## 安全边界
@@ -127,6 +129,8 @@ Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状
 
 详细设计与运维说明见 [Architecture](docs/ARCHITECTURE.md) 和 [Operations](docs/OPERATIONS.md)。
 
-## 可选渠道
+## 适配器目录与可选渠道
 
-Grok2API 与 Gemini Web 已作为固定提交的 Git 子模块接入，并使用独立 Compose profile，不会增加 Lite2API 核心镜像的体积。初始化、启动、账号导入和升级流程见 [channels/README.md](channels/README.md)。
+管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分内置、已配置和仅收录待审计的实现，并展示支持平台、协议、认证方式、迁移方式与本机接入状态。当前目录覆盖原生 API Key、OAuth/setup-token、Cookie/Web 会话、编码订阅聚合和本地推理运行时；“收录”不等同于自动安装或信任第三方代码。
+
+Grok2API、Gemini Web 与 CLIProxyAPI 已作为固定提交的 Git 子模块或固定源码接入，并使用独立 Compose profile，不增加 Lite2API 核心镜像体积。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)。

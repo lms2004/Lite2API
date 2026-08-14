@@ -40,6 +40,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+	case path == "/adapters" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"data": AdapterCatalog(state.cfg.Accounts)})
 	case path == "/client-keys" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"data": g.clientKeys.List()})
 	case path == "/client-keys" && r.Method == http.MethodPost:
@@ -82,6 +84,17 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
+	case path == "/accounts/export" && r.Method == http.MethodPost:
+		var input AccountExportRequest
+		if err := decodeAdminJSON(w, r, &input); err != nil {
+			return
+		}
+		data, err := ExportAccounts(state.cfg, input)
+		if err != nil {
+			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_account_export")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": data})
 	case path == "/accounts/import" && r.Method == http.MethodPost:
 		var input AccountImportRequest
 		if err := decodeAdminJSON(w, r, &input); err != nil {
