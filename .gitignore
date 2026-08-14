@@ -1,0 +1,5 @@
+/lite2api
+/data/
+/.env
+/channels/runtime/
+*.log

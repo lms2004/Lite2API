@@ -1,0 +1,24 @@
+[Unit]
+Description=Lite2API personal AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lite2api
+Group=lite2api
+EnvironmentFile=/etc/lite2api/lite2api.env
+ExecStart=/usr/local/bin/lite2api -config /etc/lite2api/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/lite2api
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

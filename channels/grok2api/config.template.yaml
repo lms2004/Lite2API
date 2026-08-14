@@ -1,0 +1,35 @@
+server:
+  listen: "127.0.0.1:45680"
+  maxConcurrentRequests: 64
+
+auth:
+  secureCookies: false
+
+secrets:
+  jwtSecret: "__JWT_SECRET__"
+  credentialEncryptionKey: "__CREDENTIAL_KEY__"
+
+bootstrapAdmin:
+  username: "admin"
+  password: "__ADMIN_PASSWORD__"
+
+frontend:
+  publicApiBaseURL: "http://127.0.0.1:45680"
+
+database:
+  driver: sqlite
+  sqlite:
+    path: "/app/data/backend.db"
+
+runtimeStore:
+  driver: memory
+
+deployment:
+  replicas: 1
+  clusterID: "lite2api-grok"
+  sharedMedia: false
+
+media:
+  driver: local
+  local:
+    path: "/app/data/media"

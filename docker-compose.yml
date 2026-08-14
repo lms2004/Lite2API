@@ -1,0 +1,32 @@
+services:
+  lite2api:
+    build: .
+    image: lite2api:local
+    container_name: lite2api
+    restart: unless-stopped
+    network_mode: host
+    user: "10001:10001"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    volumes:
+      - lite2api-data:/app/data
+    environment:
+      LITE2API_API_KEYS: ${LITE2API_API_KEYS:?LITE2API_API_KEYS is required}
+      LITE2API_ADMIN_TOKEN: ${LITE2API_ADMIN_TOKEN:?LITE2API_ADMIN_TOKEN is required}
+      ATOMCODE2API_KEY: ${ATOMCODE2API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GROK2API_KEY: ${GROK2API_KEY:-}
+      GEMINI_WEB2API_KEY: ${GEMINI_WEB2API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:45679/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  lite2api-data:

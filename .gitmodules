@@ -1,0 +1,6 @@
+[submodule "third_party/grok2api"]
+	path = third_party/grok2api
+	url = git@github.com:lms2004/grok2api.git
+[submodule "third_party/gemini-web2api"]
+	path = third_party/gemini-web2api
+	url = git@github.com:lms2004/gemini-web2api.git

@@ -1,0 +1,96 @@
+{
+  "server": {
+    "listen": "127.0.0.1:45679",
+    "api_key_env": "LITE2API_API_KEYS",
+    "admin_token_env": "LITE2API_ADMIN_TOKEN",
+    "max_body_bytes": 67108864,
+    "max_inflight_requests": 256,
+    "request_read_timeout": "30s",
+    "queue_timeout": "30s",
+    "response_header_timeout": "5m",
+    "stream_idle_timeout": "15m",
+    "idle_conn_timeout": "90s",
+    "max_idle_conns": 256,
+    "max_idle_conns_per_host": 128,
+    "max_conns_per_host": 256,
+    "failure_threshold": 3,
+    "circuit_cooldown": "30s",
+    "max_failover_attempts": 3,
+    "allow_private_http_upstream": true
+  },
+  "accounts": [
+    {
+      "id": "atom-main",
+      "name": "AtomCode Lite",
+      "type": "openai",
+      "base_url": "http://127.0.0.1:45678/v1",
+      "api_key_env": "ATOMCODE2API_KEY",
+      "models": ["deepseek-v4-flash", "Qwen/Qwen3-VL-8B-Instruct"],
+      "model_map": {
+        "deepseek-fast": "deepseek-v4-flash",
+        "deepseek": "deepseek-v4-flash"
+      },
+      "priority": 0,
+      "weight": 1,
+      "concurrency": 1,
+      "enabled": true
+    },
+    {
+      "id": "deepseek-main",
+      "name": "DeepSeek API",
+      "type": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "model_map": {
+        "deepseek": "deepseek-chat"
+      },
+      "priority": 0,
+      "weight": 1,
+      "concurrency": 4,
+      "enabled": false
+    },
+    {
+      "id": "gemini-local",
+      "name": "Gemini Web",
+      "type": "openai",
+      "base_url": "http://127.0.0.1:45681/v1",
+      "api_key_env": "GEMINI_WEB2API_KEY",
+      "models": ["gemini-3.6-flash", "gemini-3.5-flash-thinking", "gemini-3.1-pro", "gemini-auto", "gemini-flash-lite"],
+      "model_map": {
+        "gemini": "gemini-3.6-flash"
+      },
+      "priority": 0,
+      "weight": 1,
+      "concurrency": 2,
+      "enabled": false
+    },
+    {
+      "id": "grok-local",
+      "name": "Grok2API",
+      "type": "openai",
+      "base_url": "http://127.0.0.1:45680/v1",
+      "api_key_env": "GROK2API_KEY",
+      "models": ["grok-4.5", "grok-4.3", "grok-chat-fast", "grok-chat-auto", "grok-chat-expert"],
+      "priority": 0,
+      "weight": 1,
+      "concurrency": 4,
+      "enabled": false
+    }
+  ],
+  "routes": {
+    "deepseek-fast": {
+      "accounts": ["atom-main"],
+      "strategy": "sticky"
+    },
+    "deepseek": {
+      "accounts": ["deepseek-main", "atom-main"],
+      "strategy": "least_loaded"
+    },
+    "gemini": {
+      "accounts": ["gemini-local"],
+      "upstream_model": "gemini-3.6-flash",
+      "strategy": "sticky"
+    }
+  }
+}

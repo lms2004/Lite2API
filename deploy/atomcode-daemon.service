@@ -1,0 +1,32 @@
+[Unit]
+Description=AtomCode local daemon for Lite2API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root
+Environment=HOME=/root
+ExecStart=/usr/local/bin/atomcode daemon --port 13456 --idle-timeout 0 --no-telemetry
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/.atomcode
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
