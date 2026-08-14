@@ -67,6 +67,23 @@ func TestManagedClientKeyLifecycle(t *testing.T) {
 	}
 }
 
+func TestManagedClientKeyCreateUsesDefaultName(t *testing.T) {
+	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, secret, err := store.Create(ClientKeyCreate{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(snapshot.Name, "API Key ") || !strings.HasPrefix(secret, managedKeyPrefix) {
+		t.Fatalf("default key = %+v secret_prefix=%t", snapshot, strings.HasPrefix(secret, managedKeyPrefix))
+	}
+	if len(snapshot.Models) != 0 || snapshot.RPM != 0 || snapshot.Concurrency != 0 || snapshot.ExpiresAt != "" {
+		t.Fatalf("unexpected quick-create restrictions: %+v", snapshot)
+	}
+}
+
 func TestLegacyKeyUsesDigestLookup(t *testing.T) {
 	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
 	if err != nil {

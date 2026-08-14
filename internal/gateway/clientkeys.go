@@ -271,6 +271,10 @@ func acquireRPM(bucket *atomic.Uint64, rpm int, now time.Time) bool {
 }
 
 func (s *ClientKeyStore) Create(input ClientKeyCreate) (ClientKeySnapshot, string, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" {
+		input.Name = "API Key " + time.Now().UTC().Format("20060102-150405")
+	}
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
