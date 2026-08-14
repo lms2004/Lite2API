@@ -432,7 +432,7 @@ func buildUpstreamURL(base, requestPath, rawQuery string) (string, error) {
 	}
 	basePath := strings.TrimSuffix(u.Path, "/")
 	path := requestPath
-	if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(path, "/v1/") {
+	if (strings.HasSuffix(basePath, "/v1") || strings.HasSuffix(basePath, "/openai")) && strings.HasPrefix(path, "/v1/") {
 		path = strings.TrimPrefix(path, "/v1")
 	}
 	u.Path = basePath + "/" + strings.TrimPrefix(path, "/")

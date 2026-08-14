@@ -61,6 +61,29 @@ func gatewayRequest(body string) *http.Request {
 	return req
 }
 
+func TestBuildUpstreamURLCompatibilityRoots(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{name: "OpenAI v1 root", base: "https://api.example.com/v1", want: "https://api.example.com/v1/chat/completions?trace=1"},
+		{name: "Gemini OpenAI root", base: "https://generativelanguage.googleapis.com/v1beta/openai", want: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?trace=1"},
+		{name: "custom prefix keeps v1", base: "https://api.example.com/proxy", want: "https://api.example.com/proxy/v1/chat/completions?trace=1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := buildUpstreamURL(test.base, "/v1/chat/completions", "trace=1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("URL = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestGatewayRewritesModelAndAuthenticates(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer upstream-secret" {
