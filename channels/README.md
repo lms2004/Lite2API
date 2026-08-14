@@ -44,3 +44,7 @@ git submodule update --remote third_party/gemini-web2api
 ```
 
 CLIProxyAPI 生产版本必须显式修改子模块 revision 和 Compose 的 `VERSION`/`COMMIT`，不使用 `--remote` 自动升级。所有适配器升级后先在回环端口完成健康检查和真实请求，再切换 Lite2API 路由。不要自动跟随 `main` 部署。
+
+## 快捷 OAuth 添加
+
+生产环境为 CLIProxyAPI 设置独立的 `CLIPROXYAPI_MANAGEMENT_KEY`，同时注入 Lite2API 与 CLIProxyAPI。CLIProxyAPI 仍只监听 `127.0.0.1:45682`，管理面板保持关闭；Lite 管理页仅代理 Codex、Claude、Gemini CLI、Antigravity 和 Kimi 的授权链接、回调与状态。授权成功后凭据直接写入 `channels/runtime/cliproxyapi/auths/`，浏览器无法读取管理密钥或凭据文件。

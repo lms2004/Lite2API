@@ -34,6 +34,16 @@ func TestStoreUsesPrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestAdminAutoLoginEnvironmentIsExplicit(t *testing.T) {
+	if Normalize(Defaults()).Server.AdminAutoLogin {
+		t.Fatal("admin auto login must default to disabled")
+	}
+	t.Setenv("LITE2API_ADMIN_AUTO_LOGIN", "true")
+	if !Normalize(Defaults()).Server.AdminAutoLogin {
+		t.Fatal("admin auto login environment override was not applied")
+	}
+}
+
 func TestEnvironmentSecretsWin(t *testing.T) {
 	t.Setenv("TEST_UPSTREAM_KEY", "from-env")
 	a := Account{APIKey: "from-file", APIKeyEnv: "TEST_UPSTREAM_KEY"}

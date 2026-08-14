@@ -13,6 +13,8 @@ services:
     restart: unless-stopped
     network_mode: host
     user: "10001:10001"
+    environment:
+      MANAGEMENT_PASSWORD: ${CLIPROXYAPI_MANAGEMENT_KEY:?CLIPROXYAPI_MANAGEMENT_KEY is required for OAuth account setup}
     read_only: true
     cap_drop: ["ALL"]
     security_opt:

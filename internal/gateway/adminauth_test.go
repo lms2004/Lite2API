@@ -55,6 +55,43 @@ func TestAdminCookieSessionRequiresCSRF(t *testing.T) {
 	}
 }
 
+func TestAdminAutoLoginRequiresExplicitConfigAndAllowedNetwork(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	withoutOptIn := httptest.NewRequest(http.MethodPost, "/admin/api/login", strings.NewReader(`{}`))
+	withoutOptIn.RemoteAddr = "127.0.0.1:1234"
+	withoutW := httptest.NewRecorder()
+	g.ServeAdminAPI(withoutW, withoutOptIn)
+	if withoutW.Code != http.StatusUnauthorized {
+		t.Fatalf("tokenless login without opt-in status=%d", withoutW.Code)
+	}
+
+	cfg := g.Config()
+	cfg.Server.AdminAutoLogin = true
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	allowed := httptest.NewRequest(http.MethodPost, "/admin/api/login", strings.NewReader(`{}`))
+	allowed.RemoteAddr = "127.0.0.1:1234"
+	allowedW := httptest.NewRecorder()
+	g.ServeAdminAPI(allowedW, allowed)
+	if allowedW.Code != http.StatusOK || len(allowedW.Result().Cookies()) != 1 {
+		t.Fatalf("VPN auto login status=%d body=%s", allowedW.Code, allowedW.Body.String())
+	}
+
+	blocked := httptest.NewRequest(http.MethodPost, "/admin/api/login", strings.NewReader(`{}`))
+	blocked.RemoteAddr = "127.0.0.1:1234"
+	blocked.Header.Set("X-Real-IP", "198.51.100.8")
+	blockedW := httptest.NewRecorder()
+	g.ServeAdminAPI(blockedW, blocked)
+	if blockedW.Code != http.StatusNotFound {
+		t.Fatalf("non-VPN auto login status=%d", blockedW.Code)
+	}
+}
+
 func requestWithCookie(method string, cookie *http.Cookie) *http.Request {
 	r := httptest.NewRequest(method, "/admin/api/routes", nil)
 	r.RemoteAddr = "127.0.0.1:1234"

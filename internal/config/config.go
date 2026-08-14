@@ -32,6 +32,7 @@ type ServerConfig struct {
 	APIKeys                  []string `json:"api_keys,omitempty"`
 	APIKeyEnv                string   `json:"api_key_env,omitempty"`
 	AdminToken               string   `json:"admin_token,omitempty"`
+	AdminAutoLogin           bool     `json:"admin_auto_login,omitempty"`
 	AdminTokenEnv            string   `json:"admin_token_env,omitempty"`
 	ClientKeysPath           string   `json:"client_keys_path,omitempty"`
 	AdminAllowedCIDRs        []string `json:"admin_allowed_cidrs,omitempty"`
@@ -163,6 +164,11 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Server.AdminTokenEnv == "" {
 		cfg.Server.AdminTokenEnv = d.AdminTokenEnv
+	}
+	if value := strings.TrimSpace(os.Getenv("LITE2API_ADMIN_AUTO_LOGIN")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.Server.AdminAutoLogin = enabled
+		}
 	}
 	if cfg.Server.ClientKeysPath == "" {
 		cfg.Server.ClientKeysPath = d.ClientKeysPath

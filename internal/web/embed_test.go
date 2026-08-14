@@ -15,11 +15,27 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="view-adapters"`,
 		`id="selectAllAccounts"`,
 		`<tbody id="accounts">`,
+		`id="quickAuthDialog"`,
 		`id="accountDialog"`,
 		`id="importDialog"`,
 		`id="exportDialog"`,
 		`function showView(`,
+		`function openQuickAdd(`,
+		`function startOAuth(`,
+		`function submitOAuthCallback(`,
+		`function pollOAuthStatus(`,
 		`function openAccount(`,
+		`function selectAccountTemplate(`,
+		`const accountTemplates=`,
+		`name="credential_mode"`,
+		`id="accountAdvanced"`,
+		`VPN 自动授权`,
+		`无需填写 Token、Base URL 或模型`,
+		`复制链接`,
+		`提交并自动添加`,
+		`'/oauth/start'`,
+		`'/oauth/callback'`,
+		`'/oauth/status'`,
 		`function openImport(`,
 		`function runImport(`,
 		`function runExport(`,
@@ -46,6 +62,9 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
+	}
+	if strings.Contains(page, `id="token"`) || strings.Contains(page, `placeholder="管理员 Token"`) {
+		t.Error("VPN-only admin page must not ask the user to enter an admin token")
 	}
 	if strings.Contains(page, `$('accounts').innerHTML=d.accounts.map(a=>`+"`<div") {
 		t.Error("account table body must render table rows, not div elements")

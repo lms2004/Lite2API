@@ -84,6 +84,12 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
+	case path == "/oauth/start" && r.Method == http.MethodPost:
+		g.serveOAuthStart(w, r)
+	case path == "/oauth/callback" && r.Method == http.MethodPost:
+		g.serveOAuthCallback(w, r)
+	case path == "/oauth/status" && r.Method == http.MethodPost:
+		g.serveOAuthStatus(w, r)
 	case path == "/accounts/export" && r.Method == http.MethodPost:
 		var input AccountExportRequest
 		if err := decodeAdminJSON(w, r, &input); err != nil {
@@ -154,7 +160,13 @@ func (g *Gateway) serveAdminLogin(w http.ResponseWriter, r *http.Request, state 
 	if clientIP != nil {
 		ip = clientIP.String()
 	}
-	session, csrf, err := g.adminAuth.Login(ip, input.Token, state.adminToken)
+	var session, csrf string
+	var err error
+	if state.cfg.Server.AdminAutoLogin {
+		session, csrf, err = g.adminAuth.IssueSession(ip)
+	} else {
+		session, csrf, err = g.adminAuth.Login(ip, input.Token, state.adminToken)
+	}
 	if errors.Is(err, ErrAdminLoginLocked) {
 		w.Header().Set("Retry-After", strconv.Itoa(15*60))
 		writeAPIErrorCode(w, http.StatusTooManyRequests, "too many login attempts", "rate_limit_error", "admin_login_locked")

@@ -95,6 +95,19 @@ func (a *AdminAuthenticator) Login(clientIP, candidate, expected string) (string
 		return "", "", errors.New("invalid admin credentials")
 	}
 	delete(a.attempts, clientIP)
+	return a.issueSessionLocked(now)
+}
+
+// IssueSession creates a browser session after the caller has independently
+// authenticated the request, for example through the admin CIDR/VPN boundary.
+func (a *AdminAuthenticator) IssueSession(clientIP string) (string, string, error) {
+	now := time.Now()
+	a.mu.Lock()
+	delete(a.attempts, clientIP)
+	return a.issueSessionLocked(now)
+}
+
+func (a *AdminAuthenticator) issueSessionLocked(now time.Time) (string, string, error) {
 	a.removeExpiredSessionsLocked(now)
 	if len(a.sessions) >= 32 {
 		var oldestHash [sha256.Size]byte
