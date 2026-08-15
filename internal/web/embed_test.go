@@ -36,7 +36,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`const accountTemplates=`,
 		`name="credential_mode"`,
 		`id="accountAdvanced"`,
-		`VPN 自动授权`,
+		`授权凭据由本机隔离适配器保存`,
 		`无需填写 Token、Base URL 或模型`,
 		`复制链接`,
 		`提交并自动添加`,
@@ -52,13 +52,31 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`'/adapters'`,
 		`dry_run:dryRun`,
 		`include_proxies:`,
-		`一键生成 API Key`,
+		`快速创建`,
 		`立即生成并复制`,
 		`仅显示一次`,
 		`更多操作`,
 		`数据导入`,
 		`数据导出`,
 		`a.api_key==='********'?'':`,
+		`id="b-openai"`,
+		`id="b-anthropic"`,
+		`id="b-gemini"`,
+		`id="b-deepseek"`,
+		`id="b-x"`,
+		`function providerKey(`,
+		`function providerMark(`,
+		`provider-icon provider-`,
+		`id="routeRows"`,
+		`id="routeJSONDialog"`,
+		`id="monitorMetrics"`,
+		`id="requestChart"`,
+		`id="requestSearch"`,
+		`id="adapterChips"`,
+		`function renderRoutes(`,
+		`function renderMonitor(`,
+		`function drawRequestChart(`,
+		`function setAdapterStatus(`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -78,5 +96,8 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	if strings.Contains(page, `$('accounts').innerHTML=d.accounts.map(a=>`+"`<div") {
 		t.Error("account table body must render table rows, not div elements")
+	}
+	if strings.Contains(page, `>×</button>`) || strings.Contains(page, `<div class="drop-icon">⇧</div>`) {
+		t.Error("dashboard controls must use the shared icon system instead of character glyphs")
 	}
 }
