@@ -1,5 +1,5 @@
 diff --git a/internal/api/handlers/management/auth_files.go b/internal/api/handlers/management/auth_files.go
-index 285b3ae..329d1e3 100644
+index 285b3ae..56a84d6 100644
 --- a/internal/api/handlers/management/auth_files.go
 +++ b/internal/api/handlers/management/auth_files.go
 @@ -245,6 +245,7 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
@@ -10,7 +10,7 @@ index 285b3ae..329d1e3 100644
  	files := make([]gin.H, 0, len(auths))
  	for _, auth := range auths {
  		if entry := h.buildAuthFileEntry(auth); entry != nil {
-@@ -391,6 +392,12 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
+@@ -391,6 +392,15 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
  	entry["success"] = auth.Success
  	entry["failed"] = auth.Failed
  	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
@@ -20,11 +20,14 @@ index 285b3ae..329d1e3 100644
 +	if auth.Quota.Exceeded || !auth.Quota.NextRecoverAt.IsZero() {
 +		entry["quota"] = auth.Quota
 +	}
++	if snapshot, ok := coreauth.PromptUsageSnapshotForAuth(auth.ID); ok {
++		entry["prompt_usage"] = snapshot
++	}
  	if email := authEmail(auth); email != "" {
  		entry["email"] = email
  	}
 diff --git a/internal/api/handlers/management/auth_files_recent_requests_test.go b/internal/api/handlers/management/auth_files_recent_requests_test.go
-index 979040f..195d6e4 100644
+index 979040f..e5ae15e 100644
 --- a/internal/api/handlers/management/auth_files_recent_requests_test.go
 +++ b/internal/api/handlers/management/auth_files_recent_requests_test.go
 @@ -6,6 +6,7 @@ import (
@@ -46,7 +49,19 @@ index 979040f..195d6e4 100644
  		Attributes: map[string]string{
  			"runtime_only": "true",
  		},
-@@ -68,6 +73,14 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+@@ -27,6 +32,11 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+ 			"type": "codex",
+ 		},
+ 	}
++	coreauth.SetPromptUsageSnapshot(record.ID, coreauth.PromptUsageSnapshot{
++		Provider: "codex", Model: "gpt-5", InputTokens: 128, CachedTokens: 64, TotalTokens: 192,
++		ObservedAt: time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC), Source: "provider_usage",
++	})
++	t.Cleanup(func() { coreauth.ClearPromptUsageSnapshot(record.ID) })
+ 	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+ 		t.Fatalf("failed to register auth record: %v", errRegister)
+ 	}
+@@ -68,6 +78,18 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
  	if _, ok := fileEntry["failed"].(float64); !ok {
  		t.Fatalf("expected failed number, got %#v", fileEntry["failed"])
  	}
@@ -58,10 +73,14 @@ index 979040f..195d6e4 100644
 +	if !ok || quotaEntry["kind"] != "five_hour" || quotaEntry["used_percentage"] != 72.5 {
 +		t.Fatalf("unexpected quota window: %#v", quotaRaw[0])
 +	}
++	promptRaw, ok := fileEntry["prompt_usage"].(map[string]any)
++	if !ok || promptRaw["provider"] != "codex" || promptRaw["input_tokens"] != float64(128) || promptRaw["total_tokens"] != float64(192) {
++		t.Fatalf("unexpected prompt usage snapshot: %#v", fileEntry["prompt_usage"])
++	}
  
  	recentRaw, ok := fileEntry["recent_requests"].([]any)
  	if !ok {
-@@ -92,3 +105,5 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+@@ -92,3 +114,5 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
  		}
  	}
  }
@@ -89,8 +108,99 @@ index 9abc8a5..6b83984 100644
  	}
  	h.startAttemptCleanup()
  	return h
+diff --git a/internal/runtime/executor/helps/usage_helpers.go b/internal/runtime/executor/helps/usage_helpers.go
+index 312a1d3..522b5ed 100644
+--- a/internal/runtime/executor/helps/usage_helpers.go
++++ b/internal/runtime/executor/helps/usage_helpers.go
+@@ -55,10 +55,12 @@ func (r *UsageReporter) Publish(ctx context.Context, detail usage.Detail) {
+ }
+ 
+ func (r *UsageReporter) PublishAdditionalModel(ctx context.Context, model string, detail usage.Detail) {
++	detail = normalizeUsageDetailTotal(detail)
+ 	record, ok := r.buildAdditionalModelRecord(model, detail)
+ 	if !ok {
+ 		return
+ 	}
++	r.recordPromptUsage(detail)
+ 	usage.PublishRecord(ctx, record)
+ }
+ 
+@@ -95,6 +97,7 @@ func (r *UsageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
+ 		return
+ 	}
+ 	detail = normalizeUsageDetailTotal(detail)
++	r.recordPromptUsage(detail)
+ 	r.once.Do(func() {
+ 		usage.PublishRecord(ctx, r.buildRecord(detail, failed))
+ 	})
+@@ -664,3 +667,22 @@ func jsonPayload(line []byte) []byte {
+ 	}
+ 	return trimmed
+ }
++
++func (r *UsageReporter) recordPromptUsage(detail usage.Detail) {
++	detail = normalizeUsageDetailTotal(detail)
++	if r == nil || strings.TrimSpace(r.authID) == "" || !hasNonZeroTokenUsage(detail) {
++		return
++	}
++	cliproxyauth.SetPromptUsageSnapshot(r.authID, cliproxyauth.PromptUsageSnapshot{
++		Provider:        r.provider,
++		Model:           r.model,
++		InputTokens:     detail.InputTokens,
++		OutputTokens:    detail.OutputTokens,
++		ReasoningTokens: detail.ReasoningTokens,
++		CachedTokens:    detail.CachedTokens,
++		TotalTokens:     detail.TotalTokens,
++		ObservedAt:      time.Now().UTC(),
++		Source:          "provider_usage",
++		LatencyMS:       r.latency().Milliseconds(),
++	})
++}
+diff --git a/internal/runtime/executor/helps/usage_helpers_test.go b/internal/runtime/executor/helps/usage_helpers_test.go
+index ef2c7de..da1618f 100644
+--- a/internal/runtime/executor/helps/usage_helpers_test.go
++++ b/internal/runtime/executor/helps/usage_helpers_test.go
+@@ -5,6 +5,7 @@ import (
+ 	"testing"
+ 	"time"
+ 
++	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+ 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
+ )
+ 
+@@ -138,3 +139,30 @@ func TestUsageReporterBuildAdditionalModelRecordSkipsZeroTokens(t *testing.T) {
+ 		t.Fatalf("expected non-zero cached token usage to be recorded")
+ 	}
+ }
++
++func TestUsageReporterCapturesProviderUsageForAuth(t *testing.T) {
++	const authID = "prompt-usage-reporter"
++	cliproxyauth.ClearPromptUsageSnapshot(authID)
++	t.Cleanup(func() { cliproxyauth.ClearPromptUsageSnapshot(authID) })
++
++	reporter := &UsageReporter{
++		provider:    "anthropic",
++		model:       "claude-sonnet-4",
++		authID:      authID,
++		requestedAt: time.Now().Add(-250 * time.Millisecond),
++	}
++	reporter.recordPromptUsage(usage.Detail{
++		InputTokens: 128, CachedTokens: 64, OutputTokens: 24, ReasoningTokens: 8,
++	})
++
++	snapshot, ok := cliproxyauth.PromptUsageSnapshotForAuth(authID)
++	if !ok {
++		t.Fatal("provider usage was not captured")
++	}
++	if snapshot.Provider != "anthropic" || snapshot.Model != "claude-sonnet-4" || snapshot.InputTokens != 128 || snapshot.CachedTokens != 64 || snapshot.OutputTokens != 24 || snapshot.ReasoningTokens != 8 || snapshot.TotalTokens != 160 {
++		t.Fatalf("unexpected provider usage snapshot: %+v", snapshot)
++	}
++	if snapshot.Source != "provider_usage" || snapshot.LatencyMS < 0 {
++		t.Fatalf("unexpected provider usage metadata: %+v", snapshot)
++	}
++}
 diff --git a/sdk/cliproxy/auth/conductor.go b/sdk/cliproxy/auth/conductor.go
-index ab3eca4..5479d1d 100644
+index ab3eca4..d617d18 100644
 --- a/sdk/cliproxy/auth/conductor.go
 +++ b/sdk/cliproxy/auth/conductor.go
 @@ -852,6 +852,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
@@ -111,7 +221,17 @@ index ab3eca4..5479d1d 100644
  			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
  				auth.ModelStates = existing.ModelStates
  			}
-@@ -1334,6 +1338,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req
+@@ -1141,6 +1145,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
+ 	authClone := auth.Clone()
+ 	m.auths[auth.ID] = authClone
+ 	m.mu.Unlock()
++	if auth.Disabled || auth.Status == StatusDisabled {
++		ClearPromptUsageSnapshot(auth.ID)
++	}
+ 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
+ 	if m.scheduler != nil {
+ 		m.scheduler.upsertAuth(authClone)
+@@ -1334,6 +1341,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req
  			execReq := req
  			execReq.Model = upstreamModel
  			resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
@@ -119,7 +239,7 @@ index ab3eca4..5479d1d 100644
  			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
  			if errExec != nil {
  				if errCtx := execCtx.Err(); errCtx != nil {
-@@ -1413,6 +1418,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
+@@ -1413,6 +1421,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
  			execReq := req
  			execReq.Model = upstreamModel
  			resp, errExec := executor.CountTokens(execCtx, auth, execReq, opts)
@@ -127,7 +247,7 @@ index ab3eca4..5479d1d 100644
  			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
  			if errExec != nil {
  				if errCtx := execCtx.Err(); errCtx != nil {
-@@ -2042,6 +2048,34 @@ func waitForCooldown(ctx context.Context, wait time.Duration) error {
+@@ -2042,6 +2051,34 @@ func waitForCooldown(ctx context.Context, wait time.Duration) error {
  	}
  }
  
@@ -589,6 +709,154 @@ index 0000000..c7f4f2b
 +	}
 +	if windows[0].Kind != "model_cooldown" || windows[0].ResetAt == nil {
 +		t.Fatalf("cooldown = %+v", windows[0])
++	}
++}
+diff --git a/sdk/cliproxy/auth/prompt_usage.go b/sdk/cliproxy/auth/prompt_usage.go
+new file mode 100644
+index 0000000..8ec8c57
+--- /dev/null
++++ b/sdk/cliproxy/auth/prompt_usage.go
+@@ -0,0 +1,62 @@
++package auth
++
++import (
++	"strings"
++	"sync"
++	"time"
++)
++
++// PromptUsageSnapshot is the latest provider-reported token usage for one
++// credential. It is deliberately runtime-only: raw prompts, responses and
++// credential material never enter this snapshot or the auth file.
++type PromptUsageSnapshot struct {
++	Provider        string    `json:"provider,omitempty"`
++	Model           string    `json:"model,omitempty"`
++	InputTokens     int64     `json:"input_tokens"`
++	OutputTokens    int64     `json:"output_tokens"`
++	ReasoningTokens int64     `json:"reasoning_tokens"`
++	CachedTokens    int64     `json:"cached_tokens"`
++	TotalTokens     int64     `json:"total_tokens"`
++	ObservedAt      time.Time `json:"observed_at"`
++	Source          string    `json:"source"`
++	LatencyMS       int64     `json:"latency_ms,omitempty"`
++}
++
++var promptUsageSnapshots sync.Map // map[string]PromptUsageSnapshot
++
++// SetPromptUsageSnapshot replaces the latest non-empty usage observation for
++// one credential. The data is process-local and intentionally not persisted.
++func SetPromptUsageSnapshot(authID string, snapshot PromptUsageSnapshot) {
++	authID = strings.TrimSpace(authID)
++	if authID == "" || !validPromptUsageSnapshot(snapshot) {
++		return
++	}
++	if snapshot.ObservedAt.IsZero() {
++		snapshot.ObservedAt = time.Now().UTC()
++	} else {
++		snapshot.ObservedAt = snapshot.ObservedAt.UTC()
++	}
++	promptUsageSnapshots.Store(authID, snapshot)
++}
++
++func validPromptUsageSnapshot(snapshot PromptUsageSnapshot) bool {
++	if snapshot.InputTokens < 0 || snapshot.OutputTokens < 0 || snapshot.ReasoningTokens < 0 || snapshot.CachedTokens < 0 || snapshot.TotalTokens < 0 {
++		return false
++	}
++	return snapshot.InputTokens > 0 || snapshot.OutputTokens > 0 || snapshot.ReasoningTokens > 0 || snapshot.CachedTokens > 0 || snapshot.TotalTokens > 0
++}
++
++// PromptUsageSnapshotForAuth returns the latest runtime-only observation.
++func PromptUsageSnapshotForAuth(authID string) (PromptUsageSnapshot, bool) {
++	value, ok := promptUsageSnapshots.Load(strings.TrimSpace(authID))
++	if !ok {
++		return PromptUsageSnapshot{}, false
++	}
++	snapshot, ok := value.(PromptUsageSnapshot)
++	return snapshot, ok
++}
++
++// ClearPromptUsageSnapshot drops runtime usage when a credential is removed.
++func ClearPromptUsageSnapshot(authID string) {
++	promptUsageSnapshots.Delete(strings.TrimSpace(authID))
++}
+diff --git a/sdk/cliproxy/auth/prompt_usage_test.go b/sdk/cliproxy/auth/prompt_usage_test.go
+new file mode 100644
+index 0000000..ea7c52b
+--- /dev/null
++++ b/sdk/cliproxy/auth/prompt_usage_test.go
+@@ -0,0 +1,74 @@
++package auth
++
++import (
++	"context"
++	"encoding/json"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestPromptUsageSnapshotsAreRuntimeOnly(t *testing.T) {
++	authID := "prompt-usage-test"
++	ClearPromptUsageSnapshot(authID)
++	t.Cleanup(func() { ClearPromptUsageSnapshot(authID) })
++
++	SetPromptUsageSnapshot(authID, PromptUsageSnapshot{
++		Provider:     "anthropic",
++		Model:        "claude-sonnet",
++		InputTokens:  128,
++		CachedTokens: 64,
++		TotalTokens:  192,
++		ObservedAt:   time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC),
++		Source:       "provider_usage",
++		LatencyMS:    321,
++	})
++	got, ok := PromptUsageSnapshotForAuth(authID)
++	if !ok || got.InputTokens != 128 || got.CachedTokens != 64 || got.TotalTokens != 192 {
++		t.Fatalf("unexpected prompt usage snapshot: %+v, ok=%v", got, ok)
++	}
++
++	payload, err := json.Marshal(&Auth{ID: authID})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if strings.Contains(string(payload), "prompt_usage") {
++		t.Fatalf("runtime prompt usage leaked into persisted auth JSON: %s", payload)
++	}
++
++	ClearPromptUsageSnapshot(authID)
++	if _, ok := PromptUsageSnapshotForAuth(authID); ok {
++		t.Fatal("prompt usage snapshot was not cleared")
++	}
++}
++
++func TestPromptUsageSnapshotRejectsEmptyAndNegativeUsage(t *testing.T) {
++	authID := "prompt-usage-invalid"
++	ClearPromptUsageSnapshot(authID)
++	t.Cleanup(func() { ClearPromptUsageSnapshot(authID) })
++
++	SetPromptUsageSnapshot(authID, PromptUsageSnapshot{})
++	if _, ok := PromptUsageSnapshotForAuth(authID); ok {
++		t.Fatal("empty prompt usage snapshot should not be stored")
++	}
++	SetPromptUsageSnapshot(authID, PromptUsageSnapshot{InputTokens: -1})
++	if _, ok := PromptUsageSnapshotForAuth(authID); ok {
++		t.Fatal("negative prompt usage snapshot should not be stored")
++	}
++}
++
++func TestManagerUpdateClearsPromptUsageWhenDisabled(t *testing.T) {
++	const authID = "prompt-usage-disabled"
++	manager := NewManager(nil, nil, nil)
++	if _, err := manager.Register(context.Background(), &Auth{ID: authID, Provider: "claude"}); err != nil {
++		t.Fatal(err)
++	}
++	SetPromptUsageSnapshot(authID, PromptUsageSnapshot{InputTokens: 12, TotalTokens: 12})
++
++	if _, err := manager.Update(context.Background(), &Auth{ID: authID, Provider: "claude", Disabled: true, Status: StatusDisabled}); err != nil {
++		t.Fatal(err)
++	}
++	if _, ok := PromptUsageSnapshotForAuth(authID); ok {
++		t.Fatal("disabling an auth must clear its prompt usage snapshot")
 +	}
 +}
 diff --git a/sdk/cliproxy/auth/quota_snapshot.go b/sdk/cliproxy/auth/quota_snapshot.go
