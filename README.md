@@ -10,6 +10,7 @@
 - `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、embeddings、images 和 rerank
 - `/v1/models` 汇总模型别名
 - 多账号与账号级连接池
+- 按请求操作类型筛选适配器能力，避免跨协议误路由
 - `least_loaded`、`round_robin`、`priority`、`sticky` 四种调度策略
 - 原子并发槽、最长等待时间、客户端取消传递
 - 401/403/429/5xx 与网络错误自动换号
@@ -65,7 +66,7 @@ curl http://127.0.0.1:45679/v1/chat/completions \
   -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
 
-模型别名通过 `routes` 切换。例如客户端一直使用 `deepseek-fast`，只需修改该路由的 `accounts` 或 `upstream_model`，客户端配置不用改变。
+模型别名通过 `routes.<alias>` 编排：路由只选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取。
 
 ## 热加载
 
@@ -84,9 +85,15 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
 
 ## 快捷添加 OAuth 账号
 
-在 VPN 内打开账号页并点击“添加账号”，可直接选择 OpenAI/Codex、Claude、Gemini CLI、Antigravity 或 Kimi。页面会生成并复制授权链接；完成认证后，将浏览器地址栏中的 localhost 回调 URL 粘贴回来，页面会自动提交、轮询结果、保存适配器凭据，并确认 `cliproxy-oauth` 账号池已热加载。Kimi 使用设备授权，页面自动检测完成状态，无需粘贴回调。
+在 VPN 内打开“渠道账号”并点击“接入新账号”，可直接选择 OpenAI/Codex、Claude、Gemini CLI、Antigravity 或 Kimi。页面会生成并复制授权链接；完成认证后，将浏览器地址栏中的 localhost 回调 URL 粘贴回来，页面会自动提交、轮询结果、保存适配器凭据，并确认 `cliproxy-oauth` 路由池已热加载。Kimi 使用设备授权，页面自动检测完成状态，无需粘贴回调。
 
-OAuth 凭据只写入 CLIProxyAPI 的隔离凭据目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY` 或模型 API Key；Lite2API 只通过回环地址代理三个受 CSRF 保护的管理接口：`POST /admin/api/oauth/start`、`POST /admin/api/oauth/callback` 和 `POST /admin/api/oauth/status`。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
+账号页按渠道归组认证凭据；路由连接收进次级折叠区。每次 OAuth 登录新增或更新的是隔离凭据，不应重复增加 `cliproxy-oauth` 路由行。Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、Gemini CLI 与 Antigravity 在账号页可见时异步读取各自官方额度接口，每个凭据 10 分钟内最多一次。反重力的 Credits、模型桶以及所有渠道的 429 冷却/重置时间采用同一展示协议。CLIProxyAPI 只把脱敏的百分比、余额、模型、重置和观测时间保存在内存；没有可信数据时页面显示“等待观测”，不会伪装成 0%，也不打开全局响应头透传。
+
+凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理受 CSRF 保护的 `POST /admin/api/oauth/start`、`POST /admin/api/oauth/callback`、`POST /admin/api/oauth/status` 和只读 `GET /admin/api/oauth/accounts`。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
+
+Gemini Web 与 Grok Web/Console 属于 Cookie/SSO 型接入。管理页只在本地浏览器整理扩展导出的 Cookie-Editor JSON、Netscape Cookie、单行 Cookie 或 SSO 文本，然后提示写入对应隔离适配器；Lite2API 核心不会接收或保存这些内容。为节省资源，未配置凭据的 Web 适配器保持停止，配置完成后才按需启动。
+
+Docker Compose 与 systemd 两种部署方式均受支持。systemd 服务器可执行 `deploy/install-cliproxyapi-systemd.sh` 安装或升级固定版本适配器；脚本会校验固定子模块提交、幂等应用仓库维护的额度快照补丁、同步两把服务端密钥、启动服务，并验证管理与模型鉴权路径。完整步骤和凭据位置见 [渠道适配层](channels/README.md)。
 
 ## 批量导入与导出账号
 
@@ -103,6 +110,9 @@ OAuth 凭据只写入 CLIProxyAPI 的隔离凭据目录。浏览器不会收到 
       "id": "deepseek-main",
       "name": "DeepSeek API",
       "type": "openai",
+      "adapter_id": "generic-openai",
+      "instance_id": "deepseek",
+      "operations": ["openai.chat"],
       "base_url": "https://api.deepseek.com/v1",
       "api_key_env": "DEEPSEEK_API_KEY",
       "models": ["deepseek-chat", "deepseek-reasoner"],
@@ -141,6 +151,6 @@ Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状
 
 ## 适配器目录与可选渠道
 
-管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分内置、已配置和仅收录待审计的实现，并展示支持平台、协议、认证方式、迁移方式与本机接入状态。当前目录覆盖原生 API Key、OAuth/setup-token、Cookie/Web 会话、编码订阅聚合和本地推理运行时；“收录”不等同于自动安装或信任第三方代码。
+管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分原生就绪、运行就绪、待授权、运行未配置、未运行和仅收录状态，并展示操作类型、认证方式、本机延迟与模型数量。运行探针只在读取管理目录时按需执行，结果缓存 60 秒；普通请求路径没有轮询、注册中心或额外网络开销。“收录”不等同于自动安装或信任第三方代码。
 
-Grok2API、Gemini Web 与 CLIProxyAPI 已作为固定提交的 Git 子模块或固定源码接入，并使用独立 Compose profile，不增加 Lite2API 核心镜像体积。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)。
+Grok2API、Gemini Web 与 CLIProxyAPI 已作为固定提交的 Git 子模块或固定源码接入，并使用独立进程隔离，不增加 Lite2API 核心镜像体积。开发或整套容器部署可使用独立 Compose profile；当前单机生产也提供 CLIProxyAPI systemd 安装器。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)；新增适配器的类型选择、能力契约和资源预算见 [Adapter Design](docs/ADAPTER_DESIGN.md)。

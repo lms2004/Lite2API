@@ -4,6 +4,8 @@
 审计对象：`/root/lite2api` 当前生产候选版本 `oauth-ui-20260814`
 生产入口：模型 API `https://sub2api.foresights.top/lite/v1`；管理页 `https://sub2api.foresights.top/lite-admin/`（仅 VPN）
 
+> 本文是 2026-08-14 的不可变审计快照，其中账号数量、容器状态和真实上游结果不代表当前生产状态。当前部署拓扑、服务状态检查、备份范围与固定版本以 `deploy/server-ops/README.md` 和 `deploy/server-ops/VERSION-MANIFEST.md` 为准。
+
 ## 1. 结论摘要
 
 - 线上已部署快捷 OAuth 添加账号：选择平台后生成并复制授权链接，完成认证后粘贴回调 URL，页面自动提交、轮询、保存凭据并确认账号池热加载；Kimi 使用设备授权自动检测。
