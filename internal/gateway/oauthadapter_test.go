@@ -41,6 +41,7 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 				"id": "codex-user@example.com.json", "auth_index": "safe-index", "provider": "codex",
 				"label": "user@example.com", "account_type": "plus", "status": "active", "success": 3, "failed": 1,
 				"quota_windows": []map[string]any{{"kind": "five_hour", "used_percentage": 42.5, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_response"}},
+				"prompt_usage":  map[string]any{"provider": "codex", "model": "gpt-5", "input_tokens": 128, "cached_tokens": 64, "output_tokens": 24, "reasoning_tokens": 8, "total_tokens": 160, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_usage"},
 			}}})
 		case "/v1/models":
 			if r.Header.Get("Authorization") != "Bearer "+serviceKey {
@@ -92,7 +93,7 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	accounts := adminOAuthRequest(http.MethodGet, "/admin/api/oauth/accounts", "", cookie, csrf)
 	accountsW := httptest.NewRecorder()
 	g.ServeAdminAPI(accountsW, accounts)
-	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
+	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || !strings.Contains(accountsW.Body.String(), `"input_tokens":128`) || !strings.Contains(accountsW.Body.String(), `"cached_tokens":64`) || !strings.Contains(accountsW.Body.String(), `"reasoning_tokens":8`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
 		t.Fatalf("accounts status=%d body=%s", accountsW.Code, accountsW.Body.String())
 	}
 }

@@ -103,4 +103,8 @@ systemd 安装器按当前生产要求直接原子替换二进制和配置，不
 
 适配器状态探针同样保持无守护轮询：只有管理端读取目录才触发，500 ms 超时、60 秒内存缓存。不要为单机增加数据库、消息队列、服务注册中心或独立监控 Agent。
 
+请求监控只保留最近 512 条记录在内存；每条记录只包含路由、状态、耗时、模态、字节数和上游返回的 Token usage，不保存正文。摘要日志默认写到配置文件同目录的 `request.log`，单文件 8 MiB、保留 2 个备份，达到上限后循环覆盖；可用 `server.request_log_path`、`server.request_log_max_bytes` 和 `server.request_log_backups` 调整。
+
+OAuth 账号卡片中的 Prompt usage 只来自 CLIProxyAPI 对真实 provider `usage.Detail` 的最新观测：输入字段标为“注入后输入 / 上游 input tokens”，不能解读为纯 system prompt 或纯注入长度。快照仅驻留进程内，账号禁用或删除时清理；原始 prompt、响应正文和凭据不会写入 auth 持久化 JSON。无真实观测时管理台显示“暂无真实 usage”，不会按请求字符串估算 token。
+
 安装脚本不会创建配置、凭据或旧二进制备份。额度快照只在内存中存在，不属于备份或恢复范围。
