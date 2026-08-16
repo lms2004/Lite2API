@@ -93,6 +93,7 @@ host. `/health` is expected to report `models: 0` until accounts are added.
 Ubuntu kernel `6.8.0-137-generic` is installed but the host was last verified
 running `6.8.0-48-generic`. A controlled reboot is required to load the newer
 OS kernel; this is separate from the V2Fly 5.x application-core upgrade.
+
 ## Alternate admin egress
 
 The admin allowlist includes `64.83.25.68/32` and `70.39.198.196/32`.
