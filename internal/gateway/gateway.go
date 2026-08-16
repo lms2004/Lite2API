@@ -38,6 +38,7 @@ type Gateway struct {
 	configPath   string
 	store        *config.Store
 	state        atomic.Pointer[runtimeState]
+	requestLog   atomic.Pointer[requestLogWriter]
 	reloadMu     sync.Mutex
 	stats        *Stats
 	globalActive atomic.Int64
@@ -48,7 +49,7 @@ type Gateway struct {
 
 func New(configPath string) (*Gateway, error) {
 	g := &Gateway{
-		configPath: configPath, store: config.NewStore(configPath), stats: NewStats(200),
+		configPath: configPath, store: config.NewStore(configPath), stats: NewStats(512),
 		adapterProbe: newAdapterProbeCache(time.Minute),
 	}
 	if err := g.Reload(); err != nil {
@@ -85,7 +86,19 @@ func (g *Gateway) Reload() error {
 	if g.adminAuth != nil {
 		g.adminAuth.SetTTL(state.cfg.Server.AdminSessionTTL.Duration)
 	}
+	requestLog, err := newRequestLogWriter(
+		resolveRequestLogPath(g.configPath, state.cfg.Server.RequestLogPath),
+		state.cfg.Server.RequestLogMaxBytes,
+		state.cfg.Server.RequestLogBackups,
+	)
+	if err != nil {
+		return fmt.Errorf("request log: %w", err)
+	}
 	g.swapState(state)
+	oldLog := g.requestLog.Swap(requestLog)
+	if oldLog != nil {
+		oldLog.Close()
+	}
 	return nil
 }
 
@@ -162,6 +175,12 @@ func newHTTPClient(server config.ServerConfig, account config.Account) (*http.Cl
 func (g *Gateway) Config() config.Config       { return g.state.Load().cfg }
 func (g *Gateway) Stats() StatsSnapshot        { return g.stats.Snapshot() }
 func (g *Gateway) Accounts() []AccountSnapshot { return g.state.Load().scheduler.Snapshot() }
+func (g *Gateway) RequestLog() RequestLogStatus {
+	if logger := g.requestLog.Load(); logger != nil {
+		return logger.Status()
+	}
+	return RequestLogStatus{}
+}
 
 func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	state := g.state.Load()
@@ -225,7 +244,21 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	requestID := requestID()
 	start := time.Now()
 	g.stats.Begin()
-	var record RequestRecord
+	input := inspectRequest(envelope, operation)
+	var stream bool
+	_ = json.Unmarshal(envelope["stream"], &stream)
+	record := RequestRecord{
+		Operation:    operation,
+		InputType:    input.Kind(),
+		InputParts:   input.Total(),
+		TextParts:    input.Text,
+		ImageParts:   input.Image,
+		AudioParts:   input.Audio,
+		VideoParts:   input.Video,
+		FileParts:    input.File,
+		RequestBytes: int64(len(body)),
+		Stream:       stream,
+	}
 	defer func() {
 		g.stats.End(ok)
 		record.Time = time.Now().UTC().Format(time.RFC3339Nano)
@@ -235,7 +268,11 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		record.ClientKeyName = lease.Name
 		record.Path = r.URL.Path
 		record.LatencyMS = time.Since(start).Milliseconds()
+		record.Error = truncate(record.Error, 1024)
 		g.stats.Record(record)
+		if logger := g.requestLog.Load(); logger != nil {
+			logger.Enqueue(record)
+		}
 	}()
 
 	excluded := make(map[string]struct{})
@@ -252,6 +289,10 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			if last != nil {
 				last.write(w)
 				record.Status = last.status
+				applyBufferedResponseMetadata(&record, last.header, last.body)
+				if record.OutputType == "" && operation == config.OperationImages {
+					record.OutputType = "image"
+				}
 				return
 			}
 			writeAPIError(w, http.StatusServiceUnavailable, err.Error(), "upstream_unavailable")
@@ -305,14 +346,24 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			buffered.write(w)
 			record.Status = buffered.status
 			record.Error = "upstream returned " + strconv.Itoa(buffered.status)
+			applyBufferedResponseMetadata(&record, buffered.header, buffered.body)
+			if record.OutputType == "" && operation == config.OperationImages {
+				record.OutputType = "image"
+			}
 			return
 		}
 		record.Status = resp.StatusCode
 		ok = resp.StatusCode < 400
+		capture := newResponseCapture(resp.Body, resp.Header.Get("Content-Type"))
+		resp.Body = capture
 		streamErr := func() error {
 			defer selection.Release()
 			return streamResponse(w, resp, state.cfg.Server.StreamIdleTimeout.Duration)
 		}()
+		applyCapturedResponseMetadata(&record, capture)
+		if record.OutputType == "" && operation == config.OperationImages {
+			record.OutputType = "image"
+		}
 		if streamErr != nil {
 			ok = false
 			record.Error = streamErr.Error()

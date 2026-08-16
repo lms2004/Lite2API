@@ -112,6 +112,28 @@ func TestGatewayRewritesModelAndAuthenticates(t *testing.T) {
 	}
 }
 
+func TestGatewayRecordsUsageAndModalities(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":3}},"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "upstream-secret", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 {
+		t.Fatalf("recent=%+v", recent)
+	}
+	got := recent[0]
+	if got.InputType != "text+image" || got.OutputType != "text" || got.InputTokens != 12 || got.OutputTokens != 4 || got.CacheRate != 25 {
+		t.Fatalf("record=%+v", got)
+	}
+}
+
 func TestGatewayFailsOver(t *testing.T) {
 	var firstCalls, secondCalls atomic.Int64
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { firstCalls.Add(1); http.Error(w, "busy", 503) }))

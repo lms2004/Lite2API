@@ -8,9 +8,13 @@ Type=simple
 User=lite2api
 Group=lite2api
 EnvironmentFile=/etc/lite2api/lite2api.env
+Environment=GOMAXPROCS=2
+Environment=GOMEMLIMIT=160MiB
 ExecStart=/usr/local/bin/lite2api -config /etc/lite2api/config.json
 Restart=on-failure
 RestartSec=3
+MemoryMax=192M
+TasksMax=128
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

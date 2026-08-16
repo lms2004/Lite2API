@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	DefaultMaxBodyBytes = 64 << 20
-	DefaultConfigPath   = "data/config.json"
+	DefaultMaxBodyBytes       = 64 << 20
+	DefaultConfigPath         = "data/config.json"
+	DefaultRequestLogMaxBytes = 8 << 20
+	DefaultRequestLogBackups  = 2
 )
 
 type Config struct {
@@ -52,6 +54,9 @@ type ServerConfig struct {
 	CircuitCooldown          Duration `json:"circuit_cooldown"`
 	MaxFailoverAttempts      int      `json:"max_failover_attempts"`
 	AllowPrivateHTTPUpstream bool     `json:"allow_private_http_upstream"`
+	RequestLogPath           string   `json:"request_log_path,omitempty"`
+	RequestLogMaxBytes       int64    `json:"request_log_max_bytes,omitempty"`
+	RequestLogBackups        int      `json:"request_log_backups,omitempty"`
 }
 
 type Account struct {
@@ -153,6 +158,9 @@ func Defaults() Config {
 			FailureThreshold:      3,
 			CircuitCooldown:       Duration{30 * time.Second},
 			MaxFailoverAttempts:   3,
+			RequestLogPath:        "request.log",
+			RequestLogMaxBytes:    DefaultRequestLogMaxBytes,
+			RequestLogBackups:     DefaultRequestLogBackups,
 		},
 		Routes: make(map[string]Route),
 	}
@@ -256,6 +264,17 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.MaxFailoverAttempts <= 0 {
 		cfg.Server.MaxFailoverAttempts = d.MaxFailoverAttempts
 	}
+	if cfg.Server.RequestLogPath == "" {
+		cfg.Server.RequestLogPath = d.RequestLogPath
+	}
+	if cfg.Server.RequestLogMaxBytes <= 0 {
+		cfg.Server.RequestLogMaxBytes = d.RequestLogMaxBytes
+	}
+	applyPositiveInt64Env(&cfg.Server.RequestLogMaxBytes, "LITE2API_REQUEST_LOG_MAX_BYTES")
+	if cfg.Server.RequestLogBackups < 0 {
+		cfg.Server.RequestLogBackups = d.RequestLogBackups
+	}
+	applyNonNegativeIntEnv(&cfg.Server.RequestLogBackups, "LITE2API_REQUEST_LOG_BACKUPS")
 	if cfg.Routes == nil {
 		cfg.Routes = make(map[string]Route)
 	}
@@ -323,12 +342,24 @@ func applyPositiveInt64Env(target *int64, name string) {
 	}
 }
 
+func applyNonNegativeIntEnv(target *int, name string) {
+	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name))); err == nil && value >= 0 {
+		*target = value
+	}
+}
+
 func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
 		return fmt.Errorf("server.listen: %w", err)
 	}
 	if c.Server.AdminSessionTTL.Duration < 5*time.Minute || c.Server.AdminSessionTTL.Duration > 24*time.Hour {
 		return errors.New("server.admin_session_ttl must be between 5m and 24h")
+	}
+	if c.Server.RequestLogMaxBytes < 64<<10 || c.Server.RequestLogMaxBytes > 256<<20 {
+		return errors.New("server.request_log_max_bytes must be between 64KiB and 256MiB")
+	}
+	if c.Server.RequestLogBackups < 0 || c.Server.RequestLogBackups > 8 {
+		return errors.New("server.request_log_backups must be between 0 and 8")
 	}
 	if filepath.IsAbs(c.Server.ClientKeysPath) && filepath.Clean(c.Server.ClientKeysPath) == string(filepath.Separator) {
 		return errors.New("server.client_keys_path cannot be the filesystem root")

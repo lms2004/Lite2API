@@ -20,7 +20,10 @@
     "failure_threshold": 3,
     "circuit_cooldown": "30s",
     "max_failover_attempts": 3,
-    "allow_private_http_upstream": true
+    "allow_private_http_upstream": true,
+    "request_log_path": "request.log",
+    "request_log_max_bytes": 8388608,
+    "request_log_backups": 2
   },
   "accounts": [
     {

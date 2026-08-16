@@ -7,28 +7,49 @@ import (
 )
 
 type RequestRecord struct {
-	Time            string `json:"time"`
-	RequestID       string `json:"request_id"`
-	Model           string `json:"model"`
-	UpstreamModel   string `json:"upstream_model"`
-	AccountID       string `json:"account_id"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	ClientKeyID     string `json:"client_key_id"`
-	ClientKeyName   string `json:"client_key_name,omitempty"`
-	Path            string `json:"path"`
-	Status          int    `json:"status"`
-	LatencyMS       int64  `json:"latency_ms"`
-	Error           string `json:"error,omitempty"`
+	Time             string  `json:"time"`
+	RequestID        string  `json:"request_id"`
+	Model            string  `json:"model"`
+	UpstreamModel    string  `json:"upstream_model"`
+	AccountID        string  `json:"account_id"`
+	Operation        string  `json:"operation,omitempty"`
+	ReasoningEffort  string  `json:"reasoning_effort,omitempty"`
+	ClientKeyID      string  `json:"client_key_id"`
+	ClientKeyName    string  `json:"client_key_name,omitempty"`
+	Path             string  `json:"path"`
+	Status           int     `json:"status"`
+	LatencyMS        int64   `json:"latency_ms"`
+	InputType        string  `json:"input_type,omitempty"`
+	OutputType       string  `json:"output_type,omitempty"`
+	InputParts       int     `json:"input_parts,omitempty"`
+	TextParts        int     `json:"text_parts,omitempty"`
+	ImageParts       int     `json:"image_parts,omitempty"`
+	AudioParts       int     `json:"audio_parts,omitempty"`
+	VideoParts       int     `json:"video_parts,omitempty"`
+	FileParts        int     `json:"file_parts,omitempty"`
+	RequestBytes     int64   `json:"request_bytes,omitempty"`
+	ResponseBytes    int64   `json:"response_bytes,omitempty"`
+	Stream           bool    `json:"stream,omitempty"`
+	UsageAvailable   bool    `json:"usage_available,omitempty"`
+	InputTokens      int64   `json:"input_tokens,omitempty"`
+	OutputTokens     int64   `json:"output_tokens,omitempty"`
+	TotalTokens      int64   `json:"total_tokens,omitempty"`
+	CachedTokens     int64   `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
+	CacheRate        float64 `json:"cache_rate,omitempty"`
+	CacheRateKnown   bool    `json:"cache_rate_known,omitempty"`
+	Error            string  `json:"error,omitempty"`
 }
 
 type StatsSnapshot struct {
-	StartedAt  string          `json:"started_at"`
-	Requests   int64           `json:"requests"`
-	Successful int64           `json:"successful"`
-	Failed     int64           `json:"failed"`
-	Failovers  int64           `json:"failovers"`
-	Active     int64           `json:"active"`
-	Recent     []RequestRecord `json:"recent"`
+	StartedAt   string          `json:"started_at"`
+	Requests    int64           `json:"requests"`
+	Successful  int64           `json:"successful"`
+	Failed      int64           `json:"failed"`
+	Failovers   int64           `json:"failovers"`
+	Active      int64           `json:"active"`
+	RecentLimit int             `json:"recent_limit"`
+	Recent      []RequestRecord `json:"recent"`
 }
 
 type Stats struct {
@@ -56,6 +77,7 @@ func (s *Stats) End(ok bool) {
 }
 func (s *Stats) Failover() { s.failovers.Add(1) }
 func (s *Stats) Record(r RequestRecord) {
+	r.Error = truncate(r.Error, 1024)
 	if s.limit <= 0 {
 		return
 	}
@@ -77,5 +99,12 @@ func (s *Stats) Snapshot() StatsSnapshot {
 		recent[i] = s.recent[index]
 	}
 	s.mu.RUnlock()
-	return StatsSnapshot{StartedAt: s.started.UTC().Format(time.RFC3339), Requests: s.requests.Load(), Successful: s.success.Load(), Failed: s.failed.Load(), Failovers: s.failovers.Load(), Active: s.active.Load(), Recent: recent}
+	return StatsSnapshot{StartedAt: s.started.UTC().Format(time.RFC3339), Requests: s.requests.Load(), Successful: s.success.Load(), Failed: s.failed.Load(), Failovers: s.failovers.Load(), Active: s.active.Load(), RecentLimit: s.limit, Recent: recent}
+}
+
+func truncate(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "…"
 }

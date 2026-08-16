@@ -39,7 +39,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		setAdminSessionCookie(w, r, state.trustedProxies, "", -1)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "request_log": g.RequestLog(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
 	case path == "/adapters" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"data": g.AdapterCatalog(r.Context(), state.cfg.Accounts)})
 	case path == "/prompt-test" && r.Method == http.MethodPost:
