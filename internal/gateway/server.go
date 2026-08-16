@@ -75,7 +75,21 @@ func shutdown(server *http.Server) error {
 
 func (g *Gateway) serveHealth(w http.ResponseWriter, _ *http.Request) {
 	state := g.state.Load()
-	writeJSON(w, 200, map[string]any{"status": "ok", "service": "lite2api", "accounts": len(state.cfg.Accounts), "models": len(state.scheduler.Models())})
+	stats, accounts := g.Stats(), state.scheduler.Snapshot()
+	operations := buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats)
+	statusCode := http.StatusOK
+	if operations.State == HealthUnavailable {
+		statusCode = http.StatusServiceUnavailable
+	}
+	writeJSON(w, statusCode, map[string]any{
+		"liveness": "ok",
+		"status":   operations.State,
+		"reason":   operations.Reason,
+		"service":  "lite2api",
+		"accounts": len(state.cfg.Accounts),
+		"models":   len(state.scheduler.Models()),
+		"routes":   len(operations.Routes),
+	})
 }
 func (g *Gateway) serveAdminPage(w http.ResponseWriter, r *http.Request) {
 	state := g.state.Load()

@@ -1,10 +1,10 @@
-FROM golang:1.23-alpine AS build
+FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/lite2api ./cmd/lite2api
+RUN GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/lite2api ./cmd/lite2api
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata && addgroup -g 10001 lite2api && adduser -D -H -u 10001 -G lite2api lite2api && install -d -o 10001 -g 10001 -m 700 /app/data

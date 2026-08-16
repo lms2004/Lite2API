@@ -99,7 +99,18 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`dry_run:dryRun`,
 		`include_proxies:`,
 		`快速创建`,
-		`立即生成并复制`,
+		`创建并复制`,
+		`data-key-preset="personal"`,
+		`data-key-preset="temporary"`,
+		`data-key-preset="service"`,
+		`function verifyCreatedKey(`,
+		`id="latencyChart"`,
+		`id="chartSummary"`,
+		`id="routeChangeSummary"`,
+		`function routeChangeLines(`,
+		`function openDialog(`,
+		`const viewIDCollisions=`,
+		`function targetOperationalState(`,
 		`仅显示一次`,
 		`更多操作`,
 		`数据导入`,
@@ -166,5 +177,20 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	if strings.Contains(page, `Promise.all([api('/state'),api('/client-keys'),api('/adapters'),oauthRequest])`) {
 		t.Error("inactive pages must not poll keys, adapters and OAuth accounts every five seconds")
+	}
+	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
+		t.Error("admin page styles must be consolidated into one maintained cascade")
+	}
+	if strings.Contains(page, `models:[],rpm:0,concurrency:0,expires_at:''`) || strings.Contains(page, `不限速率 · 永不过期`) {
+		t.Error("quick key creation must not default to unlimited, non-expiring access")
+	}
+	if strings.Contains(page, `for(const account of compatible){`) {
+		t.Error("route intent changes must not silently append every compatible upstream")
+	}
+	if !strings.Contains(page, `.nav{grid-template-columns:repeat(4,1fr)}`) {
+		t.Error("mobile navigation must stay limited to the four core tasks")
+	}
+	if !strings.Contains(page, `if(!rows.length)return{label:'未知',tone:'unknown'`) {
+		t.Error("route targets without recent samples must render as unknown")
 	}
 }

@@ -22,6 +22,8 @@ curl -fsS http://127.0.0.1:45679/health
 docker stats --no-stream lite2api
 ```
 
+`/health` 将进程存活（`liveness: ok`）与模型访问状态分开：无近期样本为 `unknown`，最近请求验证通过为 `ready`，部分失败为 `degraded`，路由目标缺失或无可尝试目标为 `unavailable`。只有 `unavailable` 返回 HTTP 503，避免把无流量启动期误判为进程故障。
+
 systemd 生产主机使用统一检查脚本：
 
 ```bash

@@ -55,7 +55,7 @@ type AccountSnapshot struct {
 	Failures         int64    `json:"consecutive_failures"`
 	Total            int64    `json:"total_requests"`
 	Success          int64    `json:"successful_requests"`
-	AverageLatencyMS int64    `json:"average_latency_ms"`
+	AverageLatencyMS *int64   `json:"average_latency_ms"`
 	CircuitOpenUntil string   `json:"circuit_open_until,omitempty"`
 	LastError        string   `json:"last_error,omitempty"`
 }
@@ -126,9 +126,10 @@ func (a *AccountRuntime) reportFailure(message string, threshold int, cooldown t
 func (a *AccountRuntime) Snapshot() AccountSnapshot {
 	total := a.state.total.Load()
 	success := a.state.success.Load()
-	avg := int64(0)
+	var avg *int64
 	if success > 0 {
-		avg = a.state.latencyNanos.Load() / success / int64(time.Millisecond)
+		value := a.state.latencyNanos.Load() / success / int64(time.Millisecond)
+		avg = &value
 	}
 	var lastError string
 	if v := a.state.lastError.Load(); v != nil {

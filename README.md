@@ -44,7 +44,7 @@ docker compose up -d --build
 配置保存在 Docker 命名卷 `lite2api-data` 中；镜像首次启动时会写入安全的示例配置，管理页面后续可以原子更新它。默认只监听 `127.0.0.1:45679`：
 
 - 管理页：<http://127.0.0.1:45679/admin>
-- 健康检查：<http://127.0.0.1:45679/health>
+- 健康检查：<http://127.0.0.1:45679/health>（`liveness=ok` 与路由状态 `unknown/ready/degraded/unavailable` 分开返回；路由不可用时 HTTP 503）
 - API Base URL：`http://127.0.0.1:45679/v1`
 
 Compose 使用 Linux host network，以便直接访问同机 `127.0.0.1:45678` 上的 AtomCode2Api。对外服务时建议继续由 Nginx 终止 TLS，不要把管理端口直接暴露公网。
@@ -55,9 +55,9 @@ Compose 使用 Linux host network，以便直接访问同机 `127.0.0.1:45678` �
 - 管理页：`https://sub2api.foresights.top/lite-admin/`（仅连接服务器 V2Ray/VPN 后可访问）
 - 旧 Sub2API 已停止；域名根路径跳转到 Lite2API 的受鉴权模型列表。
 
-## 一键创建客户端 API Key
+## 创建客户端 API Key
 
-VPN 内进入“API 密钥”页面，点击“一键生成 API Key”即可创建默认允许全部模型、不限 RPM、不限并发、永不过期的个人密钥，并自动尝试复制。明文只显示一次；名称、模型白名单、限速、并发和过期时间放在“高级创建”中。管理 API 也允许省略名称，服务端会自动命名。
+VPN 内进入“客户端访问”页面，选择“个人开发”“临时测试”或“可信服务”安全预设后创建 Key。所有预设都有 RPM、并发和有效期边界；默认不再生成无限权限、永不过期的凭据。明文只显示一次，随后可直接复制客户端配置，并通过只读 `/v1/models` 验证认证与路由连接，不产生模型调用费用。模型白名单或其他自定义限制仍可在高级创建中设置。
 
 ## 调用
 
@@ -149,7 +149,7 @@ Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状
 
 它不提供用户余额、套餐计费、支付、团队权限和复杂协议转换。OAuth 仅作为本机适配器的快捷账号授权流程存在，不承担终端用户登录；其他能力如果以后确实需要，应作为独立 Provider 或模块增加，而不是重新引入整套 SaaS 架构。
 
-详细设计与运维说明见 [Architecture](docs/ARCHITECTURE.md) 和 [Operations](docs/OPERATIONS.md)；本轮真实接口、Token 和迁移质量结果见 [Interface Audit](docs/INTERFACE_AUDIT_2026-08-14.md)。
+详细设计与运维说明见 [Architecture](docs/ARCHITECTURE.md)、[Operations](docs/OPERATIONS.md) 和 [Development](docs/DEVELOPMENT.md)；本轮真实接口、Token 和迁移质量结果见 [Interface Audit](docs/INTERFACE_AUDIT_2026-08-14.md)。
 
 ## 适配器目录与可选渠道
 

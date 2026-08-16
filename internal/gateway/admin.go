@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lms2004/lite2api/internal/config"
 )
@@ -39,7 +40,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		setAdminSessionCookie(w, r, state.trustedProxies, "", -1)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "request_log": g.RequestLog(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+		stats, accounts := g.Stats(), state.scheduler.Snapshot()
+		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
 	case path == "/adapters" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"data": g.AdapterCatalog(r.Context(), state.cfg.Accounts)})
 	case path == "/prompt-test" && r.Method == http.MethodPost:
