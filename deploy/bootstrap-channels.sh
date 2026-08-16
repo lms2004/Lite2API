@@ -38,14 +38,19 @@ ensure_hex GEMINI_WEB2API_KEY 32
 ensure_hex GROK2API_ADMIN_PASSWORD 24
 ensure_hex GROK2API_JWT_SECRET 32
 ensure_base64 GROK2API_CREDENTIAL_KEY
+ensure_hex CLIPROXYAPI_KEY 32
+ensure_hex CLIPROXYAPI_MANAGEMENT_KEY 32
 
 gemini_key=$(read_env GEMINI_WEB2API_KEY)
 grok_admin=$(read_env GROK2API_ADMIN_PASSWORD)
 grok_jwt=$(read_env GROK2API_JWT_SECRET)
 grok_credential=$(read_env GROK2API_CREDENTIAL_KEY)
+cliproxy_key=$(read_env CLIPROXYAPI_KEY)
 
-mkdir -p "$runtime_dir/gemini-web2api" "$runtime_dir/grok2api"
-chmod 700 "$runtime_dir" "$runtime_dir/gemini-web2api" "$runtime_dir/grok2api"
+mkdir -p "$runtime_dir/gemini-web2api" "$runtime_dir/grok2api" \
+  "$runtime_dir/cliproxyapi/auths"
+chmod 700 "$runtime_dir" "$runtime_dir/gemini-web2api" "$runtime_dir/grok2api" \
+  "$runtime_dir/cliproxyapi" "$runtime_dir/cliproxyapi/auths"
 
 sed "s|__API_KEY__|$gemini_key|g" \
   "$root_dir/channels/gemini-web2api/config.template.json" \
@@ -58,8 +63,13 @@ sed \
   "$root_dir/channels/grok2api/config.template.yaml" \
   > "$runtime_dir/grok2api/config.yaml"
 
-chmod 600 "$env_file" "$runtime_dir/gemini-web2api/config.json" "$runtime_dir/grok2api/config.yaml"
+sed "s|REPLACE_WITH_RANDOM_KEY|$cliproxy_key|g" \
+  "$root_dir/channels/cliproxyapi/config.template.yaml" \
+  > "$runtime_dir/cliproxyapi/config.yaml"
+
+chmod 600 "$env_file" "$runtime_dir/gemini-web2api/config.json" \
+  "$runtime_dir/grok2api/config.yaml" "$runtime_dir/cliproxyapi/config.yaml"
 if [ "$(id -u)" -eq 0 ]; then
-  chown 10001:10001 "$runtime_dir/gemini-web2api/config.json"
+  chown -R 10001:10001 "$runtime_dir/gemini-web2api" "$runtime_dir/cliproxyapi"
 fi
 echo "channel runtime configuration is ready"

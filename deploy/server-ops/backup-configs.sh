@@ -16,6 +16,10 @@ tar -czf "$archive" \
     /etc/lite2api/config.json \
     /etc/lite2api/lite2api.env \
     /etc/systemd/system/lite2api.service \
+    /etc/cliproxyapi/config.yaml \
+    /etc/cliproxyapi/cliproxyapi.env \
+    /etc/systemd/system/cliproxyapi.service \
+    /var/lib/cliproxyapi/auths \
     /etc/letsencrypt/renewal/sub2api.foresights.top.conf \
     /etc/letsencrypt/renewal-hooks/deploy/reload-nginx \
     /root/v2ray-client.json \

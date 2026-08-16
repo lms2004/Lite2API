@@ -1,0 +1,795 @@
+diff --git a/internal/api/handlers/management/auth_files.go b/internal/api/handlers/management/auth_files.go
+index 285b3ae..329d1e3 100644
+--- a/internal/api/handlers/management/auth_files.go
++++ b/internal/api/handlers/management/auth_files.go
+@@ -245,6 +245,7 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
+ 		return
+ 	}
+ 	auths := h.authManager.List()
++	h.scheduleQuotaRefresh(auths)
+ 	files := make([]gin.H, 0, len(auths))
+ 	for _, auth := range auths {
+ 		if entry := h.buildAuthFileEntry(auth); entry != nil {
+@@ -391,6 +392,12 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
+ 	entry["success"] = auth.Success
+ 	entry["failed"] = auth.Failed
+ 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
++	if windows := quotaWindowsForAuth(auth); len(windows) > 0 {
++		entry["quota_windows"] = windows
++	}
++	if auth.Quota.Exceeded || !auth.Quota.NextRecoverAt.IsZero() {
++		entry["quota"] = auth.Quota
++	}
+ 	if email := authEmail(auth); email != "" {
+ 		entry["email"] = email
+ 	}
+diff --git a/internal/api/handlers/management/auth_files_recent_requests_test.go b/internal/api/handlers/management/auth_files_recent_requests_test.go
+index 979040f..195d6e4 100644
+--- a/internal/api/handlers/management/auth_files_recent_requests_test.go
++++ b/internal/api/handlers/management/auth_files_recent_requests_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"net/http"
+ 	"net/http/httptest"
+ 	"testing"
++	"time"
+ 
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+@@ -20,6 +21,10 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+ 	record := &coreauth.Auth{
+ 		ID:       "runtime-only-auth-1",
+ 		Provider: "codex",
++		QuotaWindows: []coreauth.QuotaWindow{{
++			Kind: "five_hour", UsedPercentage: quotaFloat64Pointer(72.5),
++			ObservedAt: time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC), Source: "provider_response",
++		}},
+ 		Attributes: map[string]string{
+ 			"runtime_only": "true",
+ 		},
+@@ -68,6 +73,14 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+ 	if _, ok := fileEntry["failed"].(float64); !ok {
+ 		t.Fatalf("expected failed number, got %#v", fileEntry["failed"])
+ 	}
++	quotaRaw, ok := fileEntry["quota_windows"].([]any)
++	if !ok || len(quotaRaw) != 1 {
++		t.Fatalf("expected one sanitized quota window, got %#v", fileEntry["quota_windows"])
++	}
++	quotaEntry, ok := quotaRaw[0].(map[string]any)
++	if !ok || quotaEntry["kind"] != "five_hour" || quotaEntry["used_percentage"] != 72.5 {
++		t.Fatalf("unexpected quota window: %#v", quotaRaw[0])
++	}
+ 
+ 	recentRaw, ok := fileEntry["recent_requests"].([]any)
+ 	if !ok {
+@@ -92,3 +105,5 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
+ 		}
+ 	}
+ }
++
++func quotaFloat64Pointer(value float64) *float64 { return &value }
+diff --git a/internal/api/handlers/management/handler.go b/internal/api/handlers/management/handler.go
+index 9abc8a5..6b83984 100644
+--- a/internal/api/handlers/management/handler.go
++++ b/internal/api/handlers/management/handler.go
+@@ -46,6 +46,8 @@ type Handler struct {
+ 	envSecret           string
+ 	logDir              string
+ 	postAuthHook        coreauth.PostAuthHook
++	quotaRefreshAt      map[string]time.Time
++	quotaRefreshRunning map[string]bool
+ }
+ 
+ // NewHandler creates a new management handler instance.
+@@ -61,6 +63,8 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
+ 		tokenStore:          sdkAuth.GetTokenStore(),
+ 		allowRemoteOverride: envSecret != "",
+ 		envSecret:           envSecret,
++		quotaRefreshAt:      make(map[string]time.Time),
++		quotaRefreshRunning: make(map[string]bool),
+ 	}
+ 	h.startAttemptCleanup()
+ 	return h
+diff --git a/sdk/cliproxy/auth/conductor.go b/sdk/cliproxy/auth/conductor.go
+index ab3eca4..5479d1d 100644
+--- a/sdk/cliproxy/auth/conductor.go
++++ b/sdk/cliproxy/auth/conductor.go
+@@ -852,6 +852,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
+ 			lastErr = errStream
+ 			continue
+ 		}
++		m.observeQuotaHeaders(auth.ID, provider, streamResult.Headers)
+ 
+ 		buffered, closed, bootstrapErr := readStreamBootstrap(ctx, streamResult.Chunks)
+ 		if bootstrapErr != nil {
+@@ -1132,6 +1133,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
+ 		auth.Failed = existing.Failed
+ 		auth.recentRequests = existing.recentRequests
+ 		if !existing.Disabled && existing.Status != StatusDisabled && !auth.Disabled && auth.Status != StatusDisabled {
++			if len(auth.QuotaWindows) == 0 && len(existing.QuotaWindows) > 0 {
++				auth.QuotaWindows = append([]QuotaWindow(nil), existing.QuotaWindows...)
++			}
+ 			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
+ 				auth.ModelStates = existing.ModelStates
+ 			}
+@@ -1334,6 +1338,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req
+ 			execReq := req
+ 			execReq.Model = upstreamModel
+ 			resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
++			m.observeQuotaHeaders(auth.ID, provider, resp.Headers)
+ 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+ 			if errExec != nil {
+ 				if errCtx := execCtx.Err(); errCtx != nil {
+@@ -1413,6 +1418,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
+ 			execReq := req
+ 			execReq.Model = upstreamModel
+ 			resp, errExec := executor.CountTokens(execCtx, auth, execReq, opts)
++			m.observeQuotaHeaders(auth.ID, provider, resp.Headers)
+ 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+ 			if errExec != nil {
+ 				if errCtx := execCtx.Err(); errCtx != nil {
+@@ -2042,6 +2048,34 @@ func waitForCooldown(ctx context.Context, wait time.Duration) error {
+ 	}
+ }
+ 
++func (m *Manager) observeQuotaHeaders(authID, provider string, headers http.Header) {
++	if m == nil || strings.TrimSpace(authID) == "" {
++		return
++	}
++	windows := ParseQuotaWindows(provider, headers, time.Now())
++	if len(windows) == 0 {
++		return
++	}
++	m.SetQuotaWindows(authID, windows)
++}
++
++// SetQuotaWindows replaces the sanitized, in-memory quota snapshot for one
++// credential. It intentionally does not invoke persistence or auth hooks.
++func (m *Manager) SetQuotaWindows(authID string, windows []QuotaWindow) {
++	if m == nil || strings.TrimSpace(authID) == "" {
++		return
++	}
++	if len(windows) > 16 {
++		windows = windows[:16]
++	}
++	copyWindows := append([]QuotaWindow(nil), windows...)
++	m.mu.Lock()
++	if managed := m.auths[authID]; managed != nil {
++		managed.QuotaWindows = copyWindows
++	}
++	m.mu.Unlock()
++}
++
+ // MarkResult records an execution result and notifies hooks.
+ func (m *Manager) MarkResult(ctx context.Context, result Result) {
+ 	if result.AuthID == "" {
+diff --git a/sdk/cliproxy/auth/types.go b/sdk/cliproxy/auth/types.go
+index 76f4c39..8c1a33d 100644
+--- a/sdk/cliproxy/auth/types.go
++++ b/sdk/cliproxy/auth/types.go
+@@ -74,6 +74,8 @@ type Auth struct {
+ 	Metadata map[string]any `json:"metadata,omitempty"`
+ 	// Quota captures recent quota information for load balancers.
+ 	Quota QuotaState `json:"quota"`
++	// QuotaWindows contains sanitized, provider-reported usage windows observed on real requests.
++	QuotaWindows []QuotaWindow `json:"-"`
+ 	// LastError stores the last failure encountered while executing or refreshing.
+ 	LastError *Error `json:"last_error,omitempty"`
+ 	// CreatedAt is the creation timestamp in UTC.
+@@ -238,6 +240,9 @@ func (a *Auth) Clone() *Auth {
+ 			copyAuth.ModelStates[key] = state.Clone()
+ 		}
+ 	}
++	if len(a.QuotaWindows) > 0 {
++		copyAuth.QuotaWindows = append([]QuotaWindow(nil), a.QuotaWindows...)
++	}
+ 	copyAuth.Runtime = a.Runtime
+ 	return &copyAuth
+ }
+diff --git a/internal/api/handlers/management/quota_refresh.go b/internal/api/handlers/management/quota_refresh.go
+new file mode 100644
+index 0000000..ab19168
+--- /dev/null
++++ b/internal/api/handlers/management/quota_refresh.go
+@@ -0,0 +1,334 @@
++package management
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"math"
++	"net/http"
++	"sort"
++	"strconv"
++	"strings"
++	"time"
++
++	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
++	log "github.com/sirupsen/logrus"
++	"github.com/tidwall/gjson"
++)
++
++const (
++	quotaRefreshTTL     = 10 * time.Minute
++	quotaRefreshTimeout = 6 * time.Second
++	maxQuotaWindows     = 16
++)
++
++func (h *Handler) scheduleQuotaRefresh(auths []*coreauth.Auth) {
++	if h == nil || h.authManager == nil {
++		return
++	}
++	now := time.Now()
++	for _, auth := range auths {
++		if auth == nil || auth.Disabled {
++			continue
++		}
++		provider := strings.ToLower(strings.TrimSpace(auth.Provider))
++		if provider != "codex" && provider != "gemini" && provider != "gemini-cli" && provider != "antigravity" {
++			continue
++		}
++		h.mu.Lock()
++		due := now.Sub(h.quotaRefreshAt[auth.ID]) >= quotaRefreshTTL && !h.quotaRefreshRunning[auth.ID]
++		if due {
++			h.quotaRefreshRunning[auth.ID] = true
++		}
++		h.mu.Unlock()
++		if !due {
++			continue
++		}
++		copyAuth := auth.Clone()
++		go h.refreshProviderQuota(copyAuth)
++	}
++}
++
++func (h *Handler) refreshProviderQuota(auth *coreauth.Auth) {
++	if auth == nil {
++		return
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), quotaRefreshTimeout)
++	defer cancel()
++	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
++	var (
++		windows []coreauth.QuotaWindow
++		err     error
++	)
++	if provider == "codex" {
++		windows, err = h.fetchCodexQuota(ctx, auth)
++	} else {
++		windows, err = h.fetchGoogleQuota(ctx, auth)
++	}
++	h.mu.Lock()
++	h.quotaRefreshRunning[auth.ID] = false
++	// Successful empty responses are cached too. Errors retry after one minute,
++	// avoiding a failing request on every 15-second UI refresh.
++	if err == nil {
++		h.quotaRefreshAt[auth.ID] = time.Now()
++	} else {
++		h.quotaRefreshAt[auth.ID] = time.Now().Add(-quotaRefreshTTL + time.Minute)
++	}
++	h.mu.Unlock()
++	if err != nil {
++		log.WithError(err).Debugf("quota snapshot refresh failed for %s (%s)", auth.ID, provider)
++		return
++	}
++	if len(windows) > 0 && h.authManager != nil {
++		h.authManager.SetQuotaWindows(auth.ID, windows)
++	}
++}
++
++func (h *Handler) fetchCodexQuota(ctx context.Context, auth *coreauth.Auth) ([]coreauth.QuotaWindow, error) {
++	token := metadataString(auth, "access_token")
++	if token == "" || strings.TrimSpace(authAttribute(auth, "api_key")) != "" {
++		return nil, fmt.Errorf("chatgpt OAuth credential required")
++	}
++	usageURL := "https://chatgpt.com/backend-api/wham/usage"
++	if configured := strings.TrimSpace(authAttribute(auth, "base_url")); configured != "" {
++		if idx := strings.Index(configured, "/backend-api/"); idx >= 0 {
++			usageURL = strings.TrimRight(configured[:idx], "/") + "/backend-api/wham/usage"
++		}
++	}
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL, nil)
++	if err != nil {
++		return nil, err
++	}
++	req.Header.Set("Authorization", "Bearer "+token)
++	req.Header.Set("Accept", "application/json")
++	req.Header.Set("User-Agent", "codex_cli_rs/0.118.0")
++	if accountID := metadataString(auth, "account_id"); accountID != "" {
++		req.Header.Set("ChatGPT-Account-ID", accountID)
++	}
++	body, err := h.doQuotaRequest(req, auth)
++	if err != nil {
++		return nil, err
++	}
++	return parseCodexQuota(body, time.Now()), nil
++}
++
++func (h *Handler) fetchGoogleQuota(ctx context.Context, auth *coreauth.Auth) ([]coreauth.QuotaWindow, error) {
++	token := metadataString(auth, "access_token")
++	project := metadataString(auth, "project_id")
++	if token == "" || project == "" {
++		return nil, fmt.Errorf("google OAuth token and project are required")
++	}
++	// Multi-project Gemini credentials use the first onboarded project only for
++	// quota discovery; quota is account-scoped, so querying every project wastes resources.
++	project = strings.TrimSpace(strings.Split(project, ",")[0])
++	payload, err := json.Marshal(map[string]string{"project": project})
++	if err != nil {
++		return nil, err
++	}
++	endpoint := "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
++	userAgent := "gemini-cli"
++	if strings.EqualFold(auth.Provider, "antigravity") {
++		endpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
++		userAgent = "antigravity/1.21.9 darwin/arm64"
++	}
++	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
++	if err != nil {
++		return nil, err
++	}
++	req.Header.Set("Authorization", "Bearer "+token)
++	req.Header.Set("Content-Type", "application/json")
++	req.Header.Set("Accept", "application/json")
++	req.Header.Set("User-Agent", userAgent)
++	body, err := h.doQuotaRequest(req, auth)
++	if err != nil {
++		return nil, err
++	}
++	return parseGoogleQuota(body, time.Now()), nil
++}
++
++func (h *Handler) doQuotaRequest(req *http.Request, auth *coreauth.Auth) ([]byte, error) {
++	client := &http.Client{Timeout: quotaRefreshTimeout, Transport: h.apiCallTransport(auth)}
++	resp, err := client.Do(req)
++	if err != nil {
++		return nil, err
++	}
++	defer resp.Body.Close()
++	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
++	if err != nil {
++		return nil, err
++	}
++	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
++		return nil, fmt.Errorf("quota endpoint returned HTTP %d", resp.StatusCode)
++	}
++	return body, nil
++}
++
++func parseCodexQuota(body []byte, observedAt time.Time) []coreauth.QuotaWindow {
++	windows := make([]coreauth.QuotaWindow, 0, 6)
++	appendWindow := func(prefix, label, path string) {
++		node := gjson.GetBytes(body, path)
++		if !node.Exists() {
++			return
++		}
++		used, ok := finitePercentage(node.Get("used_percent"))
++		if !ok {
++			return
++		}
++		durationSeconds := node.Get("limit_window_seconds").Int()
++		if durationSeconds == 0 {
++			durationSeconds = node.Get("window_minutes").Int() * 60
++		}
++		kind := prefix
++		if durationSeconds == 5*60*60 {
++			kind, label = "five_hour", "5 小时"
++		} else if durationSeconds == 7*24*60*60 {
++			kind, label = "seven_day", "7 天"
++		}
++		windows = append(windows, coreauth.QuotaWindow{Kind: kind, Label: label, UsedPercentage: floatPointer(used), ResetAt: quotaReset(node.Get("reset_at")), ObservedAt: observedAt.UTC(), Source: "provider_quota_api"})
++	}
++	appendWindow("codex_primary", "主额度", "rate_limit.primary_window")
++	appendWindow("codex_secondary", "次额度", "rate_limit.secondary_window")
++	appendWindow("code_review_primary", "代码审查", "code_review_rate_limit.primary_window")
++	appendWindow("code_review_secondary", "代码审查周额度", "code_review_rate_limit.secondary_window")
++	if len(windows) == 0 {
++		appendWindow("codex_primary", "主额度", "rate_limits.primary")
++		appendWindow("codex_secondary", "次额度", "rate_limits.secondary")
++	}
++	return windows
++}
++
++func parseGoogleQuota(body []byte, observedAt time.Time) []coreauth.QuotaWindow {
++	buckets := gjson.GetBytes(body, "buckets")
++	if !buckets.IsArray() {
++		return nil
++	}
++	windows := make([]coreauth.QuotaWindow, 0, len(buckets.Array()))
++	for _, bucket := range buckets.Array() {
++		model := strings.TrimSpace(bucket.Get("modelId").String())
++		if strings.HasPrefix(model, "chat_") || strings.HasPrefix(model, "tab_") {
++			continue
++		}
++		remainingFraction := bucket.Get("remainingFraction")
++		fraction, ok := finiteNumber(remainingFraction)
++		if !ok || fraction < 0 {
++			continue
++		}
++		if fraction > 1 {
++			fraction = 1
++		}
++		used := math.Round((1-fraction)*10000) / 100
++		window := coreauth.QuotaWindow{Kind: "model_quota", Model: model, Label: strings.TrimSpace(bucket.Get("tokenType").String()), UsedPercentage: floatPointer(used), ResetAt: quotaReset(bucket.Get("resetTime")), ObservedAt: observedAt.UTC(), Source: "provider_quota_api"}
++		if remaining, okRemaining := finiteNumber(bucket.Get("remainingAmount")); okRemaining {
++			window.Remaining = floatPointer(remaining)
++			window.Unit = "requests"
++		}
++		windows = append(windows, window)
++	}
++	sort.SliceStable(windows, func(i, j int) bool {
++		if *windows[i].UsedPercentage != *windows[j].UsedPercentage {
++			return *windows[i].UsedPercentage > *windows[j].UsedPercentage
++		}
++		return windows[i].Model < windows[j].Model
++	})
++	if len(windows) > maxQuotaWindows {
++		windows = windows[:maxQuotaWindows]
++	}
++	return windows
++}
++
++func quotaWindowsForAuth(auth *coreauth.Auth) []coreauth.QuotaWindow {
++	if auth == nil {
++		return nil
++	}
++	windows := make([]coreauth.QuotaWindow, 0, len(auth.QuotaWindows)+4)
++	now := time.Now().UTC()
++	// Put active cooldowns first so a long provider model list cannot hide the
++	// state that currently affects routing.
++	for model, state := range auth.ModelStates {
++		if state == nil || (!state.Quota.Exceeded && state.NextRetryAfter.IsZero() && state.Quota.NextRecoverAt.IsZero()) {
++			continue
++		}
++		resetAt := state.Quota.NextRecoverAt
++		if resetAt.IsZero() {
++			resetAt = state.NextRetryAfter
++		}
++		var reset *time.Time
++		if !resetAt.IsZero() {
++			value := resetAt.UTC()
++			reset = &value
++		}
++		observed := state.UpdatedAt.UTC()
++		if observed.IsZero() {
++			observed = now
++		}
++		windows = append(windows, coreauth.QuotaWindow{Kind: "model_cooldown", Model: model, Label: "模型冷却", Status: "cooldown", ResetAt: reset, ObservedAt: observed, Source: "provider_error"})
++	}
++	if strings.EqualFold(auth.Provider, "antigravity") {
++		if hint, ok := coreauth.GetAntigravityCreditsHint(auth.ID); ok && hint.Known {
++			status := "available"
++			if !hint.Available {
++				status = "exhausted"
++			}
++			windows = append(windows, coreauth.QuotaWindow{Kind: "credits", Label: "AI Credits", Remaining: floatPointer(hint.CreditAmount), Unit: "credits", Status: status, ObservedAt: hint.UpdatedAt.UTC(), Source: "provider_account_api"})
++		}
++	}
++	windows = append(windows, auth.QuotaWindows...)
++	if len(windows) > maxQuotaWindows {
++		windows = windows[:maxQuotaWindows]
++	}
++	return windows
++}
++
++func metadataString(auth *coreauth.Auth, key string) string {
++	if auth == nil || auth.Metadata == nil {
++		return ""
++	}
++	value, _ := auth.Metadata[key].(string)
++	return strings.TrimSpace(value)
++}
++
++func finitePercentage(value gjson.Result) (float64, bool) {
++	number, ok := finiteNumber(value)
++	if !ok || number < 0 {
++		return 0, false
++	}
++	if number > 100 {
++		number = 100
++	}
++	return math.Round(number*100) / 100, true
++}
++
++func finiteNumber(value gjson.Result) (float64, bool) {
++	if !value.Exists() {
++		return 0, false
++	}
++	raw := strings.TrimSpace(value.String())
++	if raw == "" {
++		return 0, false
++	}
++	number, err := strconv.ParseFloat(raw, 64)
++	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
++		return 0, false
++	}
++	return number, true
++}
++
++func quotaReset(value gjson.Result) *time.Time {
++	if !value.Exists() {
++		return nil
++	}
++	raw := strings.TrimSpace(value.String())
++	if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
++		parsed := time.Unix(unix, 0).UTC()
++		return &parsed
++	}
++	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
++		utc := parsed.UTC()
++		return &utc
++	}
++	return nil
++}
++
++func floatPointer(value float64) *float64 { return &value }
+diff --git a/internal/api/handlers/management/quota_refresh_test.go b/internal/api/handlers/management/quota_refresh_test.go
+new file mode 100644
+index 0000000..c7f4f2b
+--- /dev/null
++++ b/internal/api/handlers/management/quota_refresh_test.go
+@@ -0,0 +1,60 @@
++package management
++
++import (
++	"testing"
++	"time"
++
++	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
++)
++
++func TestParseCodexQuota(t *testing.T) {
++	now := time.Date(2026, 8, 16, 2, 0, 0, 0, time.UTC)
++	windows := parseCodexQuota([]byte(`{
++		"rate_limit": {
++			"primary_window": {"used_percent": 42, "limit_window_seconds": 18000, "reset_at": 1786849200},
++			"secondary_window": {"used_percent": 7.5, "limit_window_seconds": 604800, "reset_at": 1787454000}
++		}
++	}`), now)
++	if len(windows) != 2 {
++		t.Fatalf("windows = %+v", windows)
++	}
++	if windows[0].Kind != "five_hour" || windows[0].UsedPercentage == nil || *windows[0].UsedPercentage != 42 {
++		t.Fatalf("primary window = %+v", windows[0])
++	}
++	if windows[1].Kind != "seven_day" || windows[1].ResetAt == nil {
++		t.Fatalf("secondary window = %+v", windows[1])
++	}
++}
++
++func TestParseGoogleQuotaSortsMostUsedAndKeepsModel(t *testing.T) {
++	now := time.Date(2026, 8, 16, 2, 0, 0, 0, time.UTC)
++	windows := parseGoogleQuota([]byte(`{"buckets":[
++		{"modelId":"chat_20706","remainingFraction":0.1},
++		{"modelId":"gemini-flash","remainingFraction":0.8,"remainingAmount":"800","resetTime":"2026-08-17T07:00:00Z","tokenType":"daily"},
++		{"modelId":"gemini-pro","remainingFraction":0.25,"remainingAmount":"25","resetTime":"2026-08-17T07:00:00Z","tokenType":"daily"}
++	]}`), now)
++	if len(windows) != 2 || windows[0].Model != "gemini-pro" {
++		t.Fatalf("windows = %+v", windows)
++	}
++	if windows[0].UsedPercentage == nil || *windows[0].UsedPercentage != 75 || windows[0].Remaining == nil || *windows[0].Remaining != 25 {
++		t.Fatalf("pro window = %+v", windows[0])
++	}
++}
++
++func TestQuotaWindowsForAuthIncludesAntigravityCreditsAndCooldown(t *testing.T) {
++	now := time.Now().UTC()
++	auth := &coreauth.Auth{ID: "ag-test", Provider: "antigravity", ModelStates: map[string]*coreauth.ModelState{
++		"gemini-pro": {Quota: coreauth.QuotaState{Exceeded: true, NextRecoverAt: now.Add(time.Hour)}, UpdatedAt: now},
++	}}
++	coreauth.SetAntigravityCreditsHint(auth.ID, coreauth.AntigravityCreditsHint{Known: true, Available: true, CreditAmount: 12.5, UpdatedAt: now})
++	windows := quotaWindowsForAuth(auth)
++	if len(windows) != 2 {
++		t.Fatalf("windows = %+v", windows)
++	}
++	if windows[1].Kind != "credits" || windows[1].Remaining == nil || *windows[1].Remaining != 12.5 {
++		t.Fatalf("credits = %+v", windows[1])
++	}
++	if windows[0].Kind != "model_cooldown" || windows[0].ResetAt == nil {
++		t.Fatalf("cooldown = %+v", windows[0])
++	}
++}
+diff --git a/sdk/cliproxy/auth/quota_snapshot.go b/sdk/cliproxy/auth/quota_snapshot.go
+new file mode 100644
+index 0000000..04fcc0b
+--- /dev/null
++++ b/sdk/cliproxy/auth/quota_snapshot.go
+@@ -0,0 +1,105 @@
++package auth
++
++import (
++	"math"
++	"net/http"
++	"sort"
++	"strconv"
++	"strings"
++	"time"
++)
++
++// QuotaWindow is a sanitized usage observation reported by an upstream provider.
++// It intentionally excludes raw headers and credential material.
++type QuotaWindow struct {
++	Kind           string     `json:"kind"`
++	Label          string     `json:"label,omitempty"`
++	Model          string     `json:"model,omitempty"`
++	UsedPercentage *float64   `json:"used_percentage,omitempty"`
++	Remaining      *float64   `json:"remaining,omitempty"`
++	Limit          *float64   `json:"limit,omitempty"`
++	Unit           string     `json:"unit,omitempty"`
++	Status         string     `json:"status,omitempty"`
++	ResetAt        *time.Time `json:"reset_at,omitempty"`
++	ObservedAt     time.Time  `json:"observed_at"`
++	Source         string     `json:"source"`
++}
++
++type quotaHeaderPair struct {
++	kind        string
++	utilization string
++	reset       string
++}
++
++var anthropicQuotaHeaders = []quotaHeaderPair{
++	{kind: "five_hour", utilization: "Anthropic-Ratelimit-Unified-5h-Utilization", reset: "Anthropic-Ratelimit-Unified-5h-Reset"},
++	{kind: "seven_day", utilization: "Anthropic-Ratelimit-Unified-7d-Utilization", reset: "Anthropic-Ratelimit-Unified-7d-Reset"},
++	{kind: "seven_day_sonnet", utilization: "Anthropic-Ratelimit-Unified-7d-Sonnet-Utilization", reset: "Anthropic-Ratelimit-Unified-7d-Sonnet-Reset"},
++	{kind: "seven_day_opus", utilization: "Anthropic-Ratelimit-Unified-7d-Opus-Utilization", reset: "Anthropic-Ratelimit-Unified-7d-Opus-Reset"},
++}
++
++// ParseQuotaWindows extracts only documented UI-relevant quota values from
++// provider responses. Unknown headers are ignored instead of being persisted.
++func ParseQuotaWindows(provider string, headers http.Header, observedAt time.Time) []QuotaWindow {
++	if !strings.EqualFold(strings.TrimSpace(provider), "claude") || len(headers) == 0 {
++		return nil
++	}
++	if observedAt.IsZero() {
++		observedAt = time.Now()
++	}
++	windows := make([]QuotaWindow, 0, len(anthropicQuotaHeaders))
++	for _, pair := range anthropicQuotaHeaders {
++		used, ok := parseQuotaUtilization(headers.Get(pair.utilization))
++		if !ok {
++			continue
++		}
++		windows = append(windows, QuotaWindow{
++			Kind:           pair.kind,
++			UsedPercentage: float64Pointer(used),
++			ResetAt:        parseQuotaReset(headers.Get(pair.reset)),
++			ObservedAt:     observedAt.UTC(),
++			Source:         "provider_response",
++		})
++	}
++	if len(windows) == 0 {
++		return nil
++	}
++	sort.SliceStable(windows, func(i, j int) bool { return windows[i].Kind < windows[j].Kind })
++	return windows
++}
++
++func float64Pointer(value float64) *float64 {
++	return &value
++}
++
++func parseQuotaUtilization(raw string) (float64, bool) {
++	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
++	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
++		return 0, false
++	}
++	// Anthropic reports utilization as a ratio. Accept an already-normalized
++	// percentage as a defensive compatibility fallback.
++	if value <= 1 {
++		value *= 100
++	}
++	if value > 100 {
++		value = 100
++	}
++	return math.Round(value*100) / 100, true
++}
++
++func parseQuotaReset(raw string) *time.Time {
++	value := strings.TrimSpace(raw)
++	if value == "" {
++		return nil
++	}
++	if unix, err := strconv.ParseInt(value, 10, 64); err == nil && unix > 0 {
++		parsed := time.Unix(unix, 0).UTC()
++		return &parsed
++	}
++	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
++		utc := parsed.UTC()
++		return &utc
++	}
++	return nil
++}
+diff --git a/sdk/cliproxy/auth/quota_snapshot_test.go b/sdk/cliproxy/auth/quota_snapshot_test.go
+new file mode 100644
+index 0000000..4370080
+--- /dev/null
++++ b/sdk/cliproxy/auth/quota_snapshot_test.go
+@@ -0,0 +1,85 @@
++package auth
++
++import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestParseQuotaWindowsClaude(t *testing.T) {
++	now := time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC)
++	headers := http.Header{
++		"Anthropic-Ratelimit-Unified-5h-Utilization":      []string{"0.7246"},
++		"Anthropic-Ratelimit-Unified-5h-Reset":            []string{"1786845600"},
++		"Anthropic-Ratelimit-Unified-7d-Utilization":      []string{"18.5"},
++		"Anthropic-Ratelimit-Unified-7d-Reset":            []string{"2026-08-20T08:00:00Z"},
++		"Anthropic-Ratelimit-Unified-7d-Opus-Utilization": []string{"not-a-number"},
++		"Authorization": []string{"Bearer secret"},
++	}
++	windows := ParseQuotaWindows("claude", headers, now)
++	if len(windows) != 2 {
++		t.Fatalf("windows=%+v", windows)
++	}
++	byKind := make(map[string]QuotaWindow, len(windows))
++	for _, window := range windows {
++		byKind[window.Kind] = window
++	}
++	if got := byKind["five_hour"].UsedPercentage; got == nil || *got != 72.46 {
++		t.Fatalf("five_hour used=%v", got)
++	}
++	if got := byKind["seven_day"].UsedPercentage; got == nil || *got != 18.5 {
++		t.Fatalf("seven_day used=%v", got)
++	}
++	if byKind["five_hour"].ObservedAt != now || byKind["five_hour"].Source != "provider_response" {
++		t.Fatalf("unexpected metadata: %+v", byKind["five_hour"])
++	}
++}
++
++func TestManagerObservesAndPreservesQuotaWindows(t *testing.T) {
++	manager := NewManager(nil, nil, nil)
++	if _, err := manager.Register(context.Background(), &Auth{ID: "claude-account", Provider: "claude", Status: StatusActive}); err != nil {
++		t.Fatal(err)
++	}
++	manager.observeQuotaHeaders("claude-account", "claude", http.Header{
++		"Anthropic-Ratelimit-Unified-5h-Utilization": []string{"0.91"},
++	})
++	observed, ok := manager.GetByID("claude-account")
++	if !ok || len(observed.QuotaWindows) != 1 || observed.QuotaWindows[0].UsedPercentage == nil || *observed.QuotaWindows[0].UsedPercentage != 91 {
++		t.Fatalf("unexpected observed quota: %+v", observed)
++	}
++	if _, err := manager.Update(context.Background(), &Auth{ID: "claude-account", Provider: "claude", Status: StatusActive}); err != nil {
++		t.Fatal(err)
++	}
++	updated, _ := manager.GetByID("claude-account")
++	if len(updated.QuotaWindows) != 1 || updated.QuotaWindows[0].UsedPercentage == nil || *updated.QuotaWindows[0].UsedPercentage != 91 {
++		t.Fatalf("quota lost after active credential update: %+v", updated.QuotaWindows)
++	}
++}
++
++func TestQuotaWindowsAreNeverPersistedWithAuth(t *testing.T) {
++	payload, err := json.Marshal(&Auth{
++		ID: "claude-account",
++		QuotaWindows: []QuotaWindow{{
++			Kind: "five_hour", UsedPercentage: float64Pointer(12.5), ObservedAt: time.Now(), Source: "provider_response",
++		}},
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if strings.Contains(string(payload), "quota_windows") || strings.Contains(string(payload), "five_hour") {
++		t.Fatalf("runtime quota snapshot leaked into persisted auth JSON: %s", payload)
++	}
++}
++
++func TestParseQuotaWindowsIgnoresUnknownProviderAndInvalidValues(t *testing.T) {
++	headers := http.Header{"Anthropic-Ratelimit-Unified-5h-Utilization": []string{"-1"}}
++	if got := ParseQuotaWindows("gemini", headers, time.Now()); got != nil {
++		t.Fatalf("unexpected gemini windows: %+v", got)
++	}
++	if got := ParseQuotaWindows("claude", headers, time.Now()); got != nil {
++		t.Fatalf("unexpected invalid windows: %+v", got)
++	}
++}

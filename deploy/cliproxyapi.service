@@ -1,0 +1,28 @@
+[Unit]
+Description=CLIProxyAPI OAuth adapter for Lite2API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cliproxyapi
+Group=cliproxyapi
+EnvironmentFile=/etc/cliproxyapi/cliproxyapi.env
+WorkingDirectory=/var/lib/cliproxyapi
+ExecStart=/usr/local/bin/cliproxyapi -config /etc/cliproxyapi/config.yaml
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cliproxyapi
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+MemoryMax=256M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
