@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"math"
 	"sort"
@@ -41,8 +42,11 @@ type AccountSnapshot struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Type             string   `json:"type"`
+	AdapterID        string   `json:"adapter_id,omitempty"`
+	InstanceID       string   `json:"instance_id,omitempty"`
 	BaseURL          string   `json:"base_url"`
 	Models           []string `json:"models"`
+	Operations       []string `json:"operations"`
 	Priority         int      `json:"priority"`
 	Weight           int      `json:"weight"`
 	Concurrency      int      `json:"concurrency"`
@@ -135,8 +139,9 @@ func (a *AccountRuntime) Snapshot() AccountSnapshot {
 		circuit = time.Unix(0, until).UTC().Format(time.RFC3339)
 	}
 	return AccountSnapshot{
-		ID: a.Config.ID, Name: a.Config.Name, Type: a.Config.Type, BaseURL: a.Config.BaseURL,
-		Models: append([]string(nil), a.Config.Models...), Priority: a.Config.Priority, Weight: a.Config.Weight,
+		ID: a.Config.ID, Name: a.Config.Name, Type: a.Config.Type,
+		AdapterID: a.Config.AdapterID, InstanceID: a.Config.InstanceID, BaseURL: a.Config.BaseURL,
+		Models: append([]string(nil), a.Config.Models...), Operations: append([]string(nil), a.Config.Operations...), Priority: a.Config.Priority, Weight: a.Config.Weight,
 		Concurrency: a.Config.Concurrency, Active: a.state.active.Load(), Enabled: a.Config.Enabled,
 		Failures: a.state.failures.Load(), Total: total, Success: success, AverageLatencyMS: avg,
 		CircuitOpenUntil: circuit, LastError: lastError,
@@ -152,9 +157,12 @@ type Scheduler struct {
 }
 
 type Selection struct {
-	Account *AccountRuntime
-	Model   string
-	release func()
+	Account         *AccountRuntime
+	Model           string
+	ReasoningEffort string
+	Key             string
+	Targeted        bool
+	release         func()
 }
 
 func (s *Selection) Release() {
@@ -207,6 +215,11 @@ func (s *Scheduler) Models() []string {
 		if !account.Config.Enabled {
 			continue
 		}
+		// Capability-backed account model IDs select a concrete upstream channel
+		// and must stay hidden behind stable route aliases.
+		if len(account.Config.Capabilities) > 0 {
+			continue
+		}
 		for _, model := range account.Config.Models {
 			if model != "*" {
 				set[model] = struct{}{}
@@ -222,6 +235,14 @@ func (s *Scheduler) Models() []string {
 }
 
 func (s *Scheduler) routeEnabled(route config.Route) bool {
+	if len(route.Targets) > 0 {
+		for _, target := range route.Targets {
+			if account := s.accounts[target.Account]; account != nil && account.Config.Enabled {
+				return true
+			}
+		}
+		return false
+	}
 	if len(route.Accounts) == 0 {
 		for _, account := range s.accounts {
 			if account.Config.Enabled {
@@ -238,11 +259,27 @@ func (s *Scheduler) routeEnabled(route config.Route) bool {
 	return false
 }
 
-func (s *Scheduler) Select(ctx context.Context, model, session string, excluded map[string]struct{}, wait time.Duration) (*Selection, error) {
+// AttemptLimit returns the full length of an explicit target chain. A target
+// chain is an operator-authored failover contract, so it is not silently
+// truncated by the legacy account failover limit.
+func (s *Scheduler) AttemptLimit(model string, legacyLimit int) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if route, ok := s.routes[model]; ok && len(route.Targets) > 0 {
+		return len(route.Targets)
+	}
+	return legacyLimit
+}
+
+func (s *Scheduler) Select(ctx context.Context, model, operation, session string, excluded map[string]struct{}, wait time.Duration) (*Selection, error) {
 	deadline := time.Now().Add(wait)
 	for {
-		if selection := s.trySelect(model, session, excluded); selection != nil {
+		selection, eligible := s.trySelect(model, operation, session, excluded)
+		if selection != nil {
 			return selection, nil
+		}
+		if !eligible {
+			return nil, ErrNoEligibleAccount
 		}
 		remaining := time.Until(deadline)
 		if wait <= 0 || remaining <= 0 {
@@ -261,9 +298,54 @@ func (s *Scheduler) Select(ctx context.Context, model, session string, excluded 
 	}
 }
 
-func (s *Scheduler) trySelect(model, session string, excluded map[string]struct{}) *Selection {
+func (s *Scheduler) trySelect(model, operation, session string, excluded map[string]struct{}) (*Selection, bool) {
 	s.mu.RLock()
 	route, routed := s.routes[model]
+	if routed && len(route.Targets) > 0 {
+		eligible := false
+		now := time.Now()
+		skipped := make([]string, 0, len(route.Targets))
+		for index, target := range route.Targets {
+			key := routeTargetKey(index, target)
+			if _, skip := excluded[key]; skip {
+				continue
+			}
+			account := s.accounts[target.Account]
+			if account == nil || !account.Config.Enabled || !config.AccountSupportsOperation(account.Config, operation) {
+				skipped = append(skipped, key)
+				continue
+			}
+			upstreamModel, reasoningEffort, compatible := config.ResolveRouteTarget(account.Config, route, target)
+			if !compatible {
+				skipped = append(skipped, key)
+				continue
+			}
+			eligible = true
+			if !account.available(now) || !account.tryAcquire() {
+				skipped = append(skipped, key)
+				continue
+			}
+			for _, skippedKey := range skipped {
+				if excluded != nil {
+					excluded[skippedKey] = struct{}{}
+				}
+			}
+			s.mu.RUnlock()
+			selected := account
+			return &Selection{
+				Account: selected, Model: upstreamModel, ReasoningEffort: reasoningEffort,
+				Key: key, Targeted: true, release: func() {
+					selected.release()
+					select {
+					case s.notify <- struct{}{}:
+					default:
+					}
+				},
+			}, eligible
+		}
+		s.mu.RUnlock()
+		return nil, eligible
+	}
 	strategy := route.Strategy
 	if strategy == "" {
 		strategy = "least_loaded"
@@ -273,9 +355,13 @@ func (s *Scheduler) trySelect(model, session string, excluded map[string]struct{
 		allowed[id] = struct{}{}
 	}
 	candidates := make([]*AccountRuntime, 0, len(s.accounts))
+	eligible := false
 	now := time.Now()
 	for id, account := range s.accounts {
-		if _, skip := excluded[id]; skip || !account.available(now) {
+		if _, skip := excluded[id]; skip || !account.Config.Enabled {
+			continue
+		}
+		if !config.AccountSupportsOperation(account.Config, operation) {
 			continue
 		}
 		if routed && len(allowed) > 0 {
@@ -286,11 +372,15 @@ func (s *Scheduler) trySelect(model, session string, excluded map[string]struct{
 		if !routed && !account.supports(model) {
 			continue
 		}
+		eligible = true
+		if !account.available(now) {
+			continue
+		}
 		candidates = append(candidates, account)
 	}
 	if len(candidates) == 0 {
 		s.mu.RUnlock()
-		return nil
+		return nil, eligible
 	}
 	orderCandidates(candidates, strategy, model, session, s.counter(model))
 	var selected *AccountRuntime
@@ -302,15 +392,19 @@ func (s *Scheduler) trySelect(model, session string, excluded map[string]struct{
 	}
 	s.mu.RUnlock()
 	if selected == nil {
-		return nil
+		return nil, eligible
 	}
-	return &Selection{Account: selected, Model: selected.upstreamModel(model, route.UpstreamModel), release: func() {
+	return &Selection{Account: selected, Model: selected.upstreamModel(model, route.UpstreamModel), Key: selected.Config.ID, release: func() {
 		selected.release()
 		select {
 		case s.notify <- struct{}{}:
 		default:
 		}
-	}}
+	}}, eligible
+}
+
+func routeTargetKey(index int, target config.RouteTarget) string {
+	return fmt.Sprintf("target:%d:%s:%s:%s", index, target.Account, target.Model, target.ReasoningEffort)
 }
 
 func (s *Scheduler) counter(model string) uint64 {

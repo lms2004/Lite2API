@@ -55,29 +55,55 @@ type ServerConfig struct {
 }
 
 type Account struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name,omitempty"`
-	Type        string            `json:"type"`
-	BaseURL     string            `json:"base_url"`
-	APIKey      string            `json:"api_key,omitempty"`
-	APIKeyEnv   string            `json:"api_key_env,omitempty"`
-	AuthHeader  string            `json:"auth_header,omitempty"`
-	AuthScheme  string            `json:"auth_scheme,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	HeadersEnv  map[string]string `json:"headers_env,omitempty"`
-	Models      []string          `json:"models,omitempty"`
-	ModelMap    map[string]string `json:"model_map,omitempty"`
-	Priority    int               `json:"priority"`
-	Weight      int               `json:"weight"`
-	Concurrency int               `json:"concurrency"`
-	Enabled     bool              `json:"enabled"`
-	ProxyURL    string            `json:"proxy_url,omitempty"`
+	ID           string              `json:"id"`
+	Name         string              `json:"name,omitempty"`
+	Type         string              `json:"type"`
+	AdapterID    string              `json:"adapter_id,omitempty"`
+	InstanceID   string              `json:"instance_id,omitempty"`
+	BaseURL      string              `json:"base_url"`
+	APIKey       string              `json:"api_key,omitempty"`
+	APIKeyEnv    string              `json:"api_key_env,omitempty"`
+	AuthHeader   string              `json:"auth_header,omitempty"`
+	AuthScheme   string              `json:"auth_scheme,omitempty"`
+	Headers      map[string]string   `json:"headers,omitempty"`
+	HeadersEnv   map[string]string   `json:"headers_env,omitempty"`
+	Models       []string            `json:"models,omitempty"`
+	ModelMap     map[string]string   `json:"model_map,omitempty"`
+	Capabilities []ChannelCapability `json:"capabilities,omitempty"`
+	Operations   []string            `json:"operations,omitempty"`
+	Priority     int                 `json:"priority"`
+	Weight       int                 `json:"weight"`
+	Concurrency  int                 `json:"concurrency"`
+	Enabled      bool                `json:"enabled"`
+	ProxyURL     string              `json:"proxy_url,omitempty"`
 }
 
 type Route struct {
-	Accounts      []string `json:"accounts,omitempty"`
-	UpstreamModel string   `json:"upstream_model,omitempty"`
-	Strategy      string   `json:"strategy,omitempty"`
+	Accounts        []string      `json:"accounts,omitempty"`
+	UpstreamModel   string        `json:"upstream_model,omitempty"`
+	Strategy        string        `json:"strategy,omitempty"`
+	Targets         []RouteTarget `json:"targets,omitempty"`
+	Model           string        `json:"model,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+}
+
+// ChannelCapability maps one operator-facing logical model and reasoning
+// profile to the concrete model ID that selects this real upstream channel.
+// Multiple entries may share Model when a channel uses separate upstream IDs
+// for low/high variants.
+type ChannelCapability struct {
+	Model            string   `json:"model"`
+	UpstreamModel    string   `json:"upstream_model"`
+	ReasoningEfforts []string `json:"reasoning_efforts"`
+}
+
+// RouteTarget is one explicit hop in a route's ordered fallback chain. Targets
+// are attempted in array order; unlike the legacy Accounts field, every hop can
+// select its own upstream model and reasoning profile.
+type RouteTarget struct {
+	Account         string `json:"account"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type Duration struct{ time.Duration }
@@ -149,7 +175,7 @@ func Load(path string) (Config, error) {
 }
 
 func Normalize(cfg Config) Config {
-	cfg.Accounts = append([]Account(nil), cfg.Accounts...)
+	cfg.Accounts = append([]Account{}, cfg.Accounts...)
 	applyDefaults(&cfg)
 	return cfg
 }
@@ -251,6 +277,25 @@ func applyDefaults(cfg *Config) {
 		if a.Weight <= 0 {
 			a.Weight = 1
 		}
+		if len(a.Operations) == 0 {
+			a.Operations = DefaultOperations(a.Type)
+		} else {
+			a.Operations = normalizeStringList(a.Operations)
+		}
+		for capabilityIndex := range a.Capabilities {
+			capability := &a.Capabilities[capabilityIndex]
+			capability.Model = strings.TrimSpace(capability.Model)
+			capability.UpstreamModel = strings.TrimSpace(capability.UpstreamModel)
+			for effortIndex := range capability.ReasoningEfforts {
+				capability.ReasoningEfforts[effortIndex] = strings.ToLower(strings.TrimSpace(capability.ReasoningEfforts[effortIndex]))
+			}
+			capability.ReasoningEfforts = normalizeStringList(capability.ReasoningEfforts)
+		}
+	}
+	for alias, route := range cfg.Routes {
+		route.Model = strings.TrimSpace(route.Model)
+		route.ReasoningEffort = strings.ToLower(strings.TrimSpace(route.ReasoningEffort))
+		cfg.Routes[alias] = route
 	}
 }
 
@@ -313,6 +358,11 @@ func (c Config) Validate() error {
 		if a.Type != "openai" && a.Type != "anthropic" {
 			return fmt.Errorf("account %q: unsupported type %q", a.ID, a.Type)
 		}
+		for _, operation := range a.Operations {
+			if !ValidOperation(operation) {
+				return fmt.Errorf("account %q has unsupported operation %q", a.ID, operation)
+			}
+		}
 		if a.AuthHeader != "" && !validHeaderName(a.AuthHeader) && a.AuthHeader != "none" {
 			return fmt.Errorf("account %q has invalid auth_header", a.ID)
 		}
@@ -335,6 +385,22 @@ func (c Config) Validate() error {
 				return fmt.Errorf("account %q has invalid proxy_url", a.ID)
 			}
 		}
+		for index, capability := range a.Capabilities {
+			if strings.TrimSpace(capability.Model) == "" || strings.TrimSpace(capability.UpstreamModel) == "" {
+				return fmt.Errorf("account %q capability %d requires model and upstream_model", a.ID, index+1)
+			}
+			if !AccountSupportsTargetModel(a, capability.UpstreamModel) {
+				return fmt.Errorf("account %q capability %d references unadvertised upstream model %q", a.ID, index+1, capability.UpstreamModel)
+			}
+			if len(capability.ReasoningEfforts) == 0 {
+				return fmt.Errorf("account %q capability %d requires at least one reasoning effort", a.ID, index+1)
+			}
+			for _, effort := range capability.ReasoningEfforts {
+				if !ValidReasoningEffort(effort) {
+					return fmt.Errorf("account %q capability %d has unsupported reasoning effort %q", a.ID, index+1, effort)
+				}
+			}
+		}
 	}
 	for model, route := range c.Routes {
 		if strings.TrimSpace(model) == "" {
@@ -348,8 +414,100 @@ func (c Config) Validate() error {
 				return fmt.Errorf("route %q references unknown account %q", model, id)
 			}
 		}
+		if len(route.Targets) > 64 {
+			return fmt.Errorf("route %q has too many targets (maximum 64)", model)
+		}
+		if route.Model != "" && !ValidReasoningEffort(route.ReasoningEffort) {
+			return fmt.Errorf("route %q has unsupported reasoning_effort %q", model, route.ReasoningEffort)
+		}
+		for index, target := range route.Targets {
+			accountID := strings.TrimSpace(target.Account)
+			if accountID == "" {
+				return fmt.Errorf("route %q target %d requires an account", model, index+1)
+			}
+			account, ok := accountByID(c.Accounts, accountID)
+			if !ok {
+				return fmt.Errorf("route %q target %d references unknown account %q", model, index+1, accountID)
+			}
+			if route.Model != "" {
+				if _, _, ok := ResolveRouteTarget(account, route, target); !ok {
+					return fmt.Errorf("route %q target %d: channel %q does not support %q at reasoning %q", model, index+1, accountID, route.Model, route.ReasoningEffort)
+				}
+				continue
+			}
+			upstreamModel := strings.TrimSpace(target.Model)
+			if upstreamModel == "" {
+				return fmt.Errorf("route %q target %d requires a model", model, index+1)
+			}
+			if !AccountSupportsTargetModel(account, upstreamModel) {
+				return fmt.Errorf("route %q target %d: account %q does not advertise model %q", model, index+1, accountID, upstreamModel)
+			}
+			if !ValidReasoningEffort(target.ReasoningEffort) {
+				return fmt.Errorf("route %q target %d has unsupported reasoning_effort %q", model, index+1, target.ReasoningEffort)
+			}
+		}
 	}
 	return nil
+}
+
+func accountByID(accounts []Account, id string) (Account, bool) {
+	for _, account := range accounts {
+		if account.ID == id {
+			return account, true
+		}
+	}
+	return Account{}, false
+}
+
+// AccountSupportsTargetModel accepts both directly advertised model IDs and
+// concrete model IDs reached through an account model_map. An empty model list
+// remains a wildcard for compatibility with existing account configuration.
+func AccountSupportsTargetModel(account Account, model string) bool {
+	if len(account.Models) == 0 {
+		return true
+	}
+	for _, candidate := range account.Models {
+		if candidate == "*" || candidate == model {
+			return true
+		}
+	}
+	for _, mapped := range account.ModelMap {
+		if mapped == model {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidReasoningEffort(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "", "auto", "none", "minimal", "low", "medium", "high", "max", "xhigh":
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolveRouteTarget converts a logical route choice into the concrete model
+// ID for one real channel. Routes without a logical Model keep the legacy
+// per-target behavior for backward compatibility.
+func ResolveRouteTarget(account Account, route Route, target RouteTarget) (model, reasoningEffort string, ok bool) {
+	if strings.TrimSpace(route.Model) == "" {
+		model = strings.TrimSpace(target.Model)
+		return model, target.ReasoningEffort, model != ""
+	}
+	effort := strings.ToLower(strings.TrimSpace(route.ReasoningEffort))
+	if effort == "" {
+		effort = "auto"
+	}
+	logicalModel := strings.TrimSpace(route.Model)
+	for _, capability := range account.Capabilities {
+		if capability.Model != logicalModel || !slices.Contains(capability.ReasoningEfforts, effort) {
+			continue
+		}
+		return capability.UpstreamModel, effort, true
+	}
+	return "", effort, false
 }
 
 func validHeaderName(name string) bool {

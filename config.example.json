@@ -27,9 +27,15 @@
       "id": "atom-main",
       "name": "AtomCode Lite",
       "type": "openai",
+      "adapter_id": "atomcode2api",
+      "instance_id": "local",
+      "operations": ["openai.chat"],
       "base_url": "http://127.0.0.1:45678/v1",
       "api_key_env": "ATOMCODE2API_KEY",
       "models": ["deepseek-v4-flash", "Qwen/Qwen3-VL-8B-Instruct"],
+      "capabilities": [
+        {"model": "deepseek-v4", "upstream_model": "deepseek-v4-flash", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+      ],
       "model_map": {
         "deepseek-fast": "deepseek-v4-flash",
         "deepseek": "deepseek-v4-flash"
@@ -43,9 +49,15 @@
       "id": "deepseek-main",
       "name": "DeepSeek API",
       "type": "openai",
+      "adapter_id": "generic-openai",
+      "instance_id": "deepseek",
+      "operations": ["openai.chat"],
       "base_url": "https://api.deepseek.com/v1",
       "api_key_env": "DEEPSEEK_API_KEY",
       "models": ["deepseek-chat", "deepseek-reasoner"],
+      "capabilities": [
+        {"model": "deepseek-v4", "upstream_model": "deepseek-reasoner", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+      ],
       "model_map": {
         "deepseek": "deepseek-chat"
       },
@@ -58,9 +70,15 @@
       "id": "gemini-local",
       "name": "Gemini Web",
       "type": "openai",
+      "adapter_id": "gemini-web2api",
+      "instance_id": "local",
+      "operations": ["openai.chat"],
       "base_url": "http://127.0.0.1:45681/v1",
       "api_key_env": "GEMINI_WEB2API_KEY",
       "models": ["gemini-3.6-flash", "gemini-3.5-flash-thinking", "gemini-3.1-pro", "gemini-auto", "gemini-flash-lite"],
+      "capabilities": [
+        {"model": "gemini-3.6-flash", "upstream_model": "gemini-3.6-flash", "reasoning_efforts": ["auto", "minimal", "low", "medium", "high"]}
+      ],
       "model_map": {
         "gemini": "gemini-3.6-flash"
       },
@@ -73,6 +91,9 @@
       "id": "grok-local",
       "name": "Grok2API",
       "type": "openai",
+      "adapter_id": "grok2api",
+      "instance_id": "local",
+      "operations": ["openai.chat"],
       "base_url": "http://127.0.0.1:45680/v1",
       "api_key_env": "GROK2API_KEY",
       "models": ["grok-4.5", "grok-4.3", "grok-chat-fast", "grok-chat-auto", "grok-chat-expert"],
@@ -84,17 +105,26 @@
   ],
   "routes": {
     "deepseek-fast": {
-      "accounts": ["atom-main"],
-      "strategy": "sticky"
+      "model": "deepseek-v4",
+      "reasoning_effort": "low",
+      "targets": [
+        {"account": "atom-main"}
+      ]
     },
     "deepseek": {
-      "accounts": ["deepseek-main", "atom-main"],
-      "strategy": "least_loaded"
+      "model": "deepseek-v4",
+      "reasoning_effort": "high",
+      "targets": [
+        {"account": "deepseek-main"},
+        {"account": "atom-main"}
+      ]
     },
     "gemini": {
-      "accounts": ["gemini-local"],
-      "upstream_model": "gemini-3.6-flash",
-      "strategy": "sticky"
+      "model": "gemini-3.6-flash",
+      "reasoning_effort": "high",
+      "targets": [
+        {"account": "gemini-local"}
+      ]
     }
   }
 }

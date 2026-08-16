@@ -7,17 +7,18 @@ import (
 )
 
 type RequestRecord struct {
-	Time          string `json:"time"`
-	RequestID     string `json:"request_id"`
-	Model         string `json:"model"`
-	UpstreamModel string `json:"upstream_model"`
-	AccountID     string `json:"account_id"`
-	ClientKeyID   string `json:"client_key_id"`
-	ClientKeyName string `json:"client_key_name,omitempty"`
-	Path          string `json:"path"`
-	Status        int    `json:"status"`
-	LatencyMS     int64  `json:"latency_ms"`
-	Error         string `json:"error,omitempty"`
+	Time            string `json:"time"`
+	RequestID       string `json:"request_id"`
+	Model           string `json:"model"`
+	UpstreamModel   string `json:"upstream_model"`
+	AccountID       string `json:"account_id"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ClientKeyID     string `json:"client_key_id"`
+	ClientKeyName   string `json:"client_key_name,omitempty"`
+	Path            string `json:"path"`
+	Status          int    `json:"status"`
+	LatencyMS       int64  `json:"latency_ms"`
+	Error           string `json:"error,omitempty"`
 }
 
 type StatsSnapshot struct {

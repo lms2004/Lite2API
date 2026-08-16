@@ -43,10 +43,14 @@ type Gateway struct {
 	globalActive atomic.Int64
 	clientKeys   *ClientKeyStore
 	adminAuth    *AdminAuthenticator
+	adapterProbe *adapterProbeCache
 }
 
 func New(configPath string) (*Gateway, error) {
-	g := &Gateway{configPath: configPath, store: config.NewStore(configPath), stats: NewStats(200)}
+	g := &Gateway{
+		configPath: configPath, store: config.NewStore(configPath), stats: NewStats(200),
+		adapterProbe: newAdapterProbeCache(time.Minute),
+	}
 	if err := g.Reload(); err != nil {
 		return nil, err
 	}
@@ -186,7 +190,8 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error")
 		return
 	}
-	if !allowedGatewayPath(r.URL.Path) {
+	operation, supported := operationForGatewayPath(r.URL.Path)
+	if !supported {
 		writeAPIError(w, http.StatusNotFound, "unsupported endpoint", "invalid_request_error")
 		return
 	}
@@ -236,11 +241,12 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	excluded := make(map[string]struct{})
 	var last *bufferedResponse
 	maxAttempts := min(state.cfg.Server.MaxFailoverAttempts, len(state.cfg.Accounts))
+	maxAttempts = state.scheduler.AttemptLimit(model, maxAttempts)
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		selection, err := state.scheduler.Select(r.Context(), model, session, excluded, state.cfg.Server.QueueTimeout.Duration)
+		selection, err := state.scheduler.Select(r.Context(), model, operation, session, excluded, state.cfg.Server.QueueTimeout.Duration)
 		if err != nil {
 			record.Error = err.Error()
 			if last != nil {
@@ -252,10 +258,11 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.Status = http.StatusServiceUnavailable
 			return
 		}
-		excluded[selection.Account.Config.ID] = struct{}{}
+		excluded[selection.Key] = struct{}{}
 		record.AccountID = selection.Account.Config.ID
 		record.UpstreamModel = selection.Model
-		attemptBody, err := rewriteModel(envelope, selection.Model)
+		record.ReasoningEffort = selection.ReasoningEffort
+		attemptBody, err := rewriteRequest(envelope, selection.Model, selection.ReasoningEffort)
 		if err != nil {
 			selection.Release()
 			writeAPIError(w, http.StatusInternalServerError, "failed to rewrite request", "gateway_error")
@@ -282,13 +289,15 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.Status = http.StatusBadGateway
 			return
 		}
-		if retryableStatus(resp.StatusCode) {
+		if retryableStatus(resp.StatusCode) || (selection.Targeted && resp.StatusCode == http.StatusNotFound) {
 			buffered := bufferResponse(resp, 1<<20)
 			selection.Release()
 			last = buffered
 			cooldown := cooldownFor(resp, state.cfg.Server.CircuitCooldown.Duration)
 			forceCircuit := resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429
-			selection.Account.reportFailure("HTTP "+strconv.Itoa(resp.StatusCode), state.cfg.Server.FailureThreshold, cooldown, forceCircuit)
+			if !(selection.Targeted && resp.StatusCode == http.StatusNotFound) {
+				selection.Account.reportFailure("HTTP "+strconv.Itoa(resp.StatusCode), state.cfg.Server.FailureThreshold, cooldown, forceCircuit)
+			}
 			if attempt+1 < maxAttempts {
 				g.stats.Failover()
 				continue
@@ -373,12 +382,22 @@ func (g *Gateway) serveModels(w http.ResponseWriter, state *runtimeState, lease 
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
-func allowedGatewayPath(path string) bool {
+func operationForGatewayPath(path string) (string, bool) {
 	switch strings.TrimSuffix(path, "/") {
-	case "/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/embeddings", "/v1/images/generations", "/v1/rerank":
-		return true
+	case "/v1/chat/completions":
+		return config.OperationOpenAIChat, true
+	case "/v1/responses":
+		return config.OperationOpenAIResponses, true
+	case "/v1/messages":
+		return config.OperationAnthropic, true
+	case "/v1/embeddings":
+		return config.OperationEmbeddings, true
+	case "/v1/images/generations":
+		return config.OperationImages, true
+	case "/v1/rerank":
+		return config.OperationRerank, true
 	default:
-		return false
+		return "", false
 	}
 }
 
@@ -392,13 +411,22 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, erro
 	return body, nil
 }
 
-func rewriteModel(envelope map[string]json.RawMessage, model string) ([]byte, error) {
+func rewriteRequest(envelope map[string]json.RawMessage, model, reasoningEffort string) ([]byte, error) {
 	copyEnvelope := make(map[string]json.RawMessage, len(envelope))
 	for key, value := range envelope {
 		copyEnvelope[key] = value
 	}
 	encoded, _ := json.Marshal(model)
 	copyEnvelope["model"] = encoded
+	switch reasoningEffort {
+	case "", "auto":
+		// Preserve a client-supplied value when the target delegates reasoning.
+	case "none":
+		delete(copyEnvelope, "reasoning_effort")
+	default:
+		encodedEffort, _ := json.Marshal(reasoningEffort)
+		copyEnvelope["reasoning_effort"] = encodedEffort
+	}
 	return json.Marshal(copyEnvelope)
 }
 

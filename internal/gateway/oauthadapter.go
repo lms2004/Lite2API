@@ -47,7 +47,8 @@ type oauthCallbackInput struct {
 }
 
 type oauthStatusInput struct {
-	State string `json:"state"`
+	State    string `json:"state"`
+	Provider string `json:"provider,omitempty"`
 }
 
 type oauthAdapterResponse struct {
@@ -55,6 +56,60 @@ type oauthAdapterResponse struct {
 	URL    string `json:"url"`
 	State  string `json:"state"`
 	Error  string `json:"error"`
+}
+
+type oauthCredential struct {
+	ID             string             `json:"id"`
+	Provider       string             `json:"provider"`
+	Identity       string             `json:"identity"`
+	Plan           string             `json:"plan,omitempty"`
+	Status         string             `json:"status"`
+	Ready          bool               `json:"ready"`
+	Success        int64              `json:"success"`
+	Failed         int64              `json:"failed"`
+	UpdatedAt      string             `json:"updated_at,omitempty"`
+	LastRefresh    string             `json:"last_refresh,omitempty"`
+	NextRetryAfter string             `json:"next_retry_after,omitempty"`
+	QuotaExceeded  bool               `json:"quota_exceeded,omitempty"`
+	QuotaWindows   []oauthQuotaWindow `json:"quota_windows"`
+}
+
+type oauthQuotaWindow struct {
+	Kind           string   `json:"kind"`
+	Label          string   `json:"label,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	UsedPercentage *float64 `json:"used_percentage,omitempty"`
+	Remaining      *float64 `json:"remaining,omitempty"`
+	Limit          *float64 `json:"limit,omitempty"`
+	Unit           string   `json:"unit,omitempty"`
+	Status         string   `json:"status,omitempty"`
+	ResetAt        string   `json:"reset_at,omitempty"`
+	ObservedAt     string   `json:"observed_at"`
+	Source         string   `json:"source"`
+}
+
+type oauthAuthFilesResponse struct {
+	Files []struct {
+		ID             string `json:"id"`
+		AuthIndex      string `json:"auth_index"`
+		Provider       string `json:"provider"`
+		Label          string `json:"label"`
+		Email          string `json:"email"`
+		Account        string `json:"account"`
+		AccountType    string `json:"account_type"`
+		Status         string `json:"status"`
+		Disabled       bool   `json:"disabled"`
+		Unavailable    bool   `json:"unavailable"`
+		Success        int64  `json:"success"`
+		Failed         int64  `json:"failed"`
+		UpdatedAt      string `json:"updated_at"`
+		LastRefresh    string `json:"last_refresh"`
+		NextRetryAfter string `json:"next_retry_after"`
+		Quota          struct {
+			Exceeded bool `json:"exceeded"`
+		} `json:"quota"`
+		QuotaWindows []oauthQuotaWindow `json:"quota_windows"`
+	} `json:"files"`
 }
 
 func (g *Gateway) serveOAuthStart(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +174,7 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.State = strings.TrimSpace(input.State)
+	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
 	if !validOAuthState(input.State) {
 		writeAPIErrorCode(w, http.StatusBadRequest, "invalid OAuth state", "invalid_request_error", "invalid_oauth_state")
 		return
@@ -138,8 +194,105 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			response["warning"] = err.Error()
 		}
+		if credentials, listErr := listOAuthCredentials(r.Context()); listErr == nil {
+			count := 0
+			for _, credential := range credentials {
+				if input.Provider == "" || credential.Provider == input.Provider {
+					count++
+				}
+			}
+			response["credential_count"] = count
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (g *Gateway) serveOAuthAccounts(w http.ResponseWriter, r *http.Request) {
+	credentials, err := listOAuthCredentials(r.Context())
+	if err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": credentials})
+}
+
+func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
+	var payload oauthAuthFilesResponse
+	if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &payload); err != nil {
+		return nil, err
+	}
+	credentials := make([]oauthCredential, 0, len(payload.Files))
+	for _, item := range payload.Files {
+		provider := normalizeOAuthProvider(item.Provider)
+		if provider == "" {
+			continue
+		}
+		id := strings.TrimSpace(item.AuthIndex)
+		if id == "" {
+			id = shortCredentialID(item.ID)
+		}
+		status := strings.ToLower(strings.TrimSpace(item.Status))
+		if item.Disabled {
+			status = "disabled"
+		} else if item.Unavailable {
+			status = "unavailable"
+		} else if status == "" {
+			status = "active"
+		}
+		identity := firstNonEmpty(item.Label, item.Email, item.Account, item.ID)
+		quotaWindows := make([]oauthQuotaWindow, len(item.QuotaWindows))
+		copy(quotaWindows, item.QuotaWindows)
+		credentials = append(credentials, oauthCredential{
+			ID: id, Provider: provider, Identity: maskCredentialIdentity(identity),
+			Plan: strings.TrimSpace(item.AccountType), Status: status,
+			Ready:   status == "active" && !item.Disabled && !item.Unavailable,
+			Success: item.Success, Failed: item.Failed, UpdatedAt: item.UpdatedAt, LastRefresh: item.LastRefresh,
+			NextRetryAfter: item.NextRetryAfter, QuotaExceeded: item.Quota.Exceeded,
+			QuotaWindows: quotaWindows,
+		})
+	}
+	return credentials, nil
+}
+
+func normalizeOAuthProvider(value string) string {
+	switch value = strings.ToLower(strings.TrimSpace(value)); value {
+	case "claude":
+		return "anthropic"
+	case "gemini-cli":
+		return "gemini"
+	case "openai":
+		return "codex"
+	default:
+		return value
+	}
+}
+
+func maskCredentialIdentity(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "已保存凭据"
+	}
+	if at := strings.LastIndex(value, "@"); at > 0 && at < len(value)-1 {
+		local, domain := []rune(value[:at]), value[at+1:]
+		prefix := string(local[:1])
+		if len(local) > 2 {
+			prefix += string(local[1:2])
+		}
+		return prefix + "***@" + domain
+	}
+	runes := []rune(value)
+	if len(runes) <= 4 {
+		return "***"
+	}
+	return string(runes[:2]) + "***" + string(runes[len(runes)-2:])
+}
+
+func shortCredentialID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 16 {
+		return value
+	}
+	return value[:16]
 }
 
 func callOAuthAdapter(ctx context.Context, method, endpoint string, query url.Values, body any, target any) error {
@@ -264,9 +417,11 @@ func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context) (bool, error) {
 	}
 	account := config.Account{
 		ID: "cliproxy-oauth", Name: "CLIProxy OAuth Pool", Type: "openai",
+		AdapterID: "cli-proxy-api", InstanceID: "local",
 		BaseURL: defaultOAuthAdapterURL + "/v1", APIKeyEnv: "CLIPROXYAPI_KEY",
 		AuthHeader: "authorization", AuthScheme: "Bearer", Models: models,
-		Priority: 50, Weight: 1, Concurrency: 4, Enabled: true,
+		Operations: []string{config.OperationOpenAIChat, config.OperationOpenAIResponses, config.OperationAnthropic},
+		Priority:   50, Weight: 1, Concurrency: 4, Enabled: true,
 	}
 	if err := g.UpsertAccount(account); err != nil {
 		return false, fmt.Errorf("OAuth credential was saved, but Lite account creation failed: %w", err)

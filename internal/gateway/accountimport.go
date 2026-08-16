@@ -43,6 +43,8 @@ type AccountImportItem struct {
 	Name        string            `json:"name,omitempty"`
 	Platform    string            `json:"platform,omitempty"`
 	Type        string            `json:"type,omitempty"`
+	AdapterID   string            `json:"adapter_id,omitempty"`
+	InstanceID  string            `json:"instance_id,omitempty"`
 	BaseURL     string            `json:"base_url,omitempty"`
 	APIKey      string            `json:"api_key,omitempty"`
 	APIKeyEnv   string            `json:"api_key_env,omitempty"`
@@ -52,6 +54,7 @@ type AccountImportItem struct {
 	HeadersEnv  map[string]string `json:"headers_env,omitempty"`
 	Models      []string          `json:"models,omitempty"`
 	ModelMap    map[string]string `json:"model_map,omitempty"`
+	Operations  []string          `json:"operations,omitempty"`
 	Priority    int               `json:"priority,omitempty"`
 	Weight      int               `json:"weight,omitempty"`
 	Concurrency int               `json:"concurrency,omitempty"`
@@ -255,10 +258,12 @@ func (item AccountImportItem) toAccount(index int, proxyURLs map[string]string) 
 		}
 	}
 	account := config.Account{
-		ID: id, Name: name, Type: kind, BaseURL: baseURL,
+		ID: id, Name: name, Type: kind, AdapterID: strings.TrimSpace(item.AdapterID),
+		InstanceID: strings.TrimSpace(item.InstanceID), BaseURL: baseURL,
 		APIKey: apiKey, APIKeyEnv: apiKeyEnv, AuthHeader: authHeader, AuthScheme: authScheme,
 		Headers: cloneStringMap(item.Headers), HeadersEnv: cloneStringMap(item.HeadersEnv),
-		Models: models, ModelMap: modelMap, Priority: item.Priority, Weight: item.Weight,
+		Models: models, ModelMap: modelMap, Operations: append([]string(nil), item.Operations...),
+		Priority: item.Priority, Weight: item.Weight,
 		Concurrency: item.Concurrency, Enabled: enabled, ProxyURL: proxyURL,
 	}
 	if account.BaseURL == "" {

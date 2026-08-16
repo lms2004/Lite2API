@@ -36,6 +36,12 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 				status = "ok"
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": status})
+		case "/v0/management/auth-files":
+			writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{{
+				"id": "codex-user@example.com.json", "auth_index": "safe-index", "provider": "codex",
+				"label": "user@example.com", "account_type": "plus", "status": "active", "success": 3, "failed": 1,
+				"quota_windows": []map[string]any{{"kind": "five_hour", "used_percentage": 42.5, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_response"}},
+			}}})
 		case "/v1/models":
 			if r.Header.Get("Authorization") != "Bearer "+serviceKey {
 				t.Errorf("missing service authorization")
@@ -67,10 +73,10 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 		t.Fatalf("callback status=%d body=%s", callbackW.Code, callbackW.Body.String())
 	}
 
-	status := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/status", `{"state":"state-123"}`, cookie, csrf)
+	status := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/status", `{"provider":"codex","state":"state-123"}`, cookie, csrf)
 	statusW := httptest.NewRecorder()
 	g.ServeAdminAPI(statusW, status)
-	if statusW.Code != http.StatusOK || !strings.Contains(statusW.Body.String(), `"pool_ready":true`) {
+	if statusW.Code != http.StatusOK || !strings.Contains(statusW.Body.String(), `"pool_ready":true`) || !strings.Contains(statusW.Body.String(), `"credential_count":1`) {
 		t.Fatalf("status=%d body=%s", statusW.Code, statusW.Body.String())
 	}
 	var found bool
@@ -81,6 +87,36 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("OAuth pool account was not created and loaded")
+	}
+
+	accounts := adminOAuthRequest(http.MethodGet, "/admin/api/oauth/accounts", "", cookie, csrf)
+	accountsW := httptest.NewRecorder()
+	g.ServeAdminAPI(accountsW, accounts)
+	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
+		t.Fatalf("accounts status=%d body=%s", accountsW.Code, accountsW.Body.String())
+	}
+}
+
+func TestMaskCredentialIdentity(t *testing.T) {
+	for input, expected := range map[string]string{
+		"a@example.com":     "a***@example.com",
+		"alice@example.com": "al***@example.com",
+		"very-secret-token": "ve***en",
+		"":                  "已保存凭据",
+	} {
+		if actual := maskCredentialIdentity(input); actual != expected {
+			t.Errorf("maskCredentialIdentity(%q)=%q want %q", input, actual, expected)
+		}
+	}
+}
+
+func TestNormalizeOAuthProvider(t *testing.T) {
+	for input, expected := range map[string]string{
+		"claude": "anthropic", "gemini-cli": "gemini", "openai": "codex", "antigravity": "antigravity",
+	} {
+		if actual := normalizeOAuthProvider(input); actual != expected {
+			t.Errorf("normalizeOAuthProvider(%q)=%q want %q", input, actual, expected)
+		}
 	}
 }
 

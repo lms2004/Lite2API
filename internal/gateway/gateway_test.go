@@ -136,6 +136,69 @@ func TestGatewayFailsOver(t *testing.T) {
 	}
 }
 
+func TestRewriteRequestAppliesTargetReasoning(t *testing.T) {
+	envelope := map[string]json.RawMessage{
+		"model":            json.RawMessage(`"alias"`),
+		"reasoning_effort": json.RawMessage(`"low"`),
+		"messages":         json.RawMessage(`[]`),
+	}
+	body, err := rewriteRequest(envelope, "real-model", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "real-model" || got["reasoning_effort"] != "high" {
+		t.Fatalf("rewritten body = %s", body)
+	}
+	body, err = rewriteRequest(envelope, "real-model", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "reasoning_effort") {
+		t.Fatalf("none should remove reasoning_effort: %s", body)
+	}
+}
+
+func TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel(t *testing.T) {
+	var firstBody, secondBody map[string]any
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&firstBody)
+		http.Error(w, "model missing", http.StatusNotFound)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&secondBody)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer second.Close()
+	accounts := []config.Account{
+		{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"same-model"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"same-model"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	routes := map[string]config.Route{"alias": {Targets: []config.RouteTarget{
+		{Account: "first", Model: "same-model", ReasoningEffort: "low"},
+		{Account: "second", Model: "same-model", ReasoningEffort: "high"},
+	}}}
+	g := newTestGateway(t, accounts, routes)
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"alias","messages":[]}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if firstBody["model"] != "same-model" || firstBody["reasoning_effort"] != "low" {
+		t.Fatalf("first target body = %#v", firstBody)
+	}
+	if secondBody["model"] != "same-model" || secondBody["reasoning_effort"] != "high" {
+		t.Fatalf("fallback target body = %#v", secondBody)
+	}
+	if g.Stats().Failovers != 1 {
+		t.Fatalf("failovers=%d", g.Stats().Failovers)
+	}
+}
+
 func TestAuthenticationFailureTripsCircuit(t *testing.T) {
 	var firstCalls atomic.Int64
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -207,7 +270,7 @@ func TestStreamingHoldsConcurrencySlot(t *testing.T) {
 	if secondW.Code != http.StatusTooManyRequests {
 		t.Fatalf("global limit status=%d, want 429", secondW.Code)
 	}
-	selection, err := g.state.Load().scheduler.Select(context.Background(), "m", "", nil, 0)
+	selection, err := g.state.Load().scheduler.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
 	if err != ErrNoCapacity || selection != nil {
 		t.Fatalf("second selection=%v err=%v", selection, err)
 	}
@@ -293,6 +356,117 @@ func TestAdminAuthenticationAndRouteUpdate(t *testing.T) {
 	g.ServeAdminAPI(stateW, stateReq)
 	if strings.Contains(stateW.Body.String(), "upstream-secret") || strings.Contains(stateW.Body.String(), "header-secret") {
 		t.Fatalf("admin response leaked a secret: %s", stateW.Body.String())
+	}
+}
+
+func TestAdminPromptTestTargetsSelectedAccount(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path=%q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer upstream-secret" {
+			t.Errorf("auth=%q", got)
+		}
+		if got := r.Header.Get("X-CSRF-Token"); got != "" {
+			t.Errorf("admin CSRF header leaked upstream: %q", got)
+		}
+		var body struct {
+			Model    string              `json:"model"`
+			Messages []promptTestMessage `json:"messages"`
+			Stream   bool                `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if body.Model != "real-model" || body.Stream || len(body.Messages) != 2 || body.Messages[1].Content != "second round" {
+			t.Errorf("request=%+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chat-1","choices":[{"message":{"role":"assistant","content":"observed"},"finish_reason":"stop"}],"usage":{"prompt_tokens":23,"completion_tokens":2,"total_tokens":25}}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "selected", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "upstream-secret",
+		Models: []string{"alias"}, ModelMap: map[string]string{"alias": "real-model"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	body := `{"account_id":"selected","model":"alias","messages":[{"role":"user","content":"first round"},{"role":"user","content":"second round"}],"temperature":0,"max_tokens":128}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/prompt-test", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	req.Header.Set("X-CSRF-Token", "admin-csrf-secret")
+	w := httptest.NewRecorder()
+	g.ServeAdminAPI(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var result struct {
+		AccountID     string `json:"account_id"`
+		UpstreamModel string `json:"upstream_model"`
+		LatencyMS     int64  `json:"latency_ms"`
+		Response      struct {
+			Usage struct {
+				PromptTokens int `json:"prompt_tokens"`
+			} `json:"usage"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.AccountID != "selected" || result.UpstreamModel != "real-model" || result.Response.Usage.PromptTokens != 23 {
+		t.Fatalf("result=%+v", result)
+	}
+	if snapshot := g.Accounts()[0]; snapshot.Total != 0 || snapshot.Failures != 0 {
+		t.Fatalf("diagnostic request contaminated route health: %+v", snapshot)
+	}
+}
+
+func TestAdminPromptTestRejectsUnsupportedAccount(t *testing.T) {
+	g := newTestGateway(t, []config.Account{{
+		ID: "embeddings-only", Type: "openai", BaseURL: "https://api.example.com", APIKey: "secret",
+		Operations: []string{config.OperationEmbeddings}, Models: []string{"embed"}, Weight: 1, Enabled: true,
+	}}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/prompt-test", strings.NewReader(`{"account_id":"embeddings-only","model":"embed","messages":[{"role":"user","content":"test"}]}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	w := httptest.NewRecorder()
+	g.ServeAdminAPI(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not support a chat operation") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminPromptTestSupportsAnthropicMessages(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("path=%q", r.URL.Path)
+		}
+		if got := r.Header.Get("X-Api-Key"); got != "anthropic-secret" {
+			t.Errorf("x-api-key=%q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if body["model"] != "claude-real" || body["max_tokens"] != float64(1024) {
+			t.Errorf("request=%+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg-1","content":[{"type":"text","text":"anthropic observed"}],"stop_reason":"end_turn","usage":{"input_tokens":31,"output_tokens":4}}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "anthropic", Type: "anthropic", BaseURL: upstream.URL + "/v1", APIKey: "anthropic-secret",
+		Models: []string{"claude"}, ModelMap: map[string]string{"claude": "claude-real"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/prompt-test", strings.NewReader(`{"account_id":"anthropic","model":"claude","messages":[{"role":"user","content":"test"}]}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	w := httptest.NewRecorder()
+	g.ServeAdminAPI(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "anthropic observed") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

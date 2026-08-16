@@ -41,7 +41,9 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/state" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"stats": g.Stats(), "accounts": g.Accounts(), "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
 	case path == "/adapters" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"data": AdapterCatalog(state.cfg.Accounts)})
+		writeJSON(w, http.StatusOK, map[string]any{"data": g.AdapterCatalog(r.Context(), state.cfg.Accounts)})
+	case path == "/prompt-test" && r.Method == http.MethodPost:
+		g.servePromptTest(w, r, state)
 	case path == "/client-keys" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"data": g.clientKeys.List()})
 	case path == "/client-keys" && r.Method == http.MethodPost:
@@ -90,6 +92,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveOAuthCallback(w, r)
 	case path == "/oauth/status" && r.Method == http.MethodPost:
 		g.serveOAuthStatus(w, r)
+	case path == "/oauth/accounts" && r.Method == http.MethodGet:
+		g.serveOAuthAccounts(w, r)
 	case path == "/accounts/export" && r.Method == http.MethodPost:
 		var input AccountExportRequest
 		if err := decodeAdminJSON(w, r, &input); err != nil {
@@ -202,6 +206,9 @@ func (g *Gateway) UpsertAccount(account config.Account) error {
 		if account.APIKey == "" && account.APIKeyEnv == "" {
 			account.APIKey, account.APIKeyEnv = cfg.Accounts[i].APIKey, cfg.Accounts[i].APIKeyEnv
 		}
+		if len(account.Capabilities) == 0 && len(cfg.Accounts[i].Capabilities) > 0 {
+			account.Capabilities = cfg.Accounts[i].Capabilities
+		}
 		for name, value := range account.Headers {
 			if value == "********" {
 				account.Headers[name] = cfg.Accounts[i].Headers[name]
@@ -240,6 +247,13 @@ func (g *Gateway) DeleteAccount(id string) error {
 			}
 		}
 		route.Accounts = filtered
+		filteredTargets := route.Targets[:0]
+		for _, target := range route.Targets {
+			if target.Account != id {
+				filteredTargets = append(filteredTargets, target)
+			}
+		}
+		route.Targets = filteredTargets
 		cfg.Routes[model] = route
 	}
 	return g.saveAndReload(cfg)

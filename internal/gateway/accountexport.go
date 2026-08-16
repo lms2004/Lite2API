@@ -63,12 +63,14 @@ func ExportAccounts(cfg config.Config, request AccountExportRequest) (AccountImp
 	proxyKeys := make(map[string]string)
 	for _, account := range accounts {
 		item := AccountImportItem{
-			ID: account.ID, Name: account.Name, Type: account.Type, BaseURL: account.BaseURL,
+			ID: account.ID, Name: account.Name, Type: account.Type,
+			AdapterID: account.AdapterID, InstanceID: account.InstanceID, BaseURL: account.BaseURL,
 			APIKey: account.APIKey, APIKeyEnv: account.APIKeyEnv,
 			AuthHeader: account.AuthHeader, AuthScheme: account.AuthScheme,
 			Headers: cloneStringMap(account.Headers), HeadersEnv: cloneStringMap(account.HeadersEnv),
 			Models: append([]string(nil), account.Models...), ModelMap: cloneStringMap(account.ModelMap),
-			Priority: account.Priority, Weight: account.Weight, Concurrency: account.Concurrency,
+			Operations: append([]string(nil), account.Operations...),
+			Priority:   account.Priority, Weight: account.Weight, Concurrency: account.Concurrency,
 		}
 		enabled := account.Enabled
 		item.Enabled = &enabled
