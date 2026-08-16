@@ -72,6 +72,20 @@ type oauthCredential struct {
 	NextRetryAfter string             `json:"next_retry_after,omitempty"`
 	QuotaExceeded  bool               `json:"quota_exceeded,omitempty"`
 	QuotaWindows   []oauthQuotaWindow `json:"quota_windows"`
+	PromptUsage    *oauthPromptUsage  `json:"prompt_usage,omitempty"`
+}
+
+type oauthPromptUsage struct {
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	InputTokens     int64  `json:"input_tokens"`
+	OutputTokens    int64  `json:"output_tokens"`
+	ReasoningTokens int64  `json:"reasoning_tokens"`
+	CachedTokens    int64  `json:"cached_tokens"`
+	TotalTokens     int64  `json:"total_tokens"`
+	ObservedAt      string `json:"observed_at"`
+	Source          string `json:"source"`
+	LatencyMS       int64  `json:"latency_ms,omitempty"`
 }
 
 type oauthQuotaWindow struct {
@@ -109,6 +123,7 @@ type oauthAuthFilesResponse struct {
 			Exceeded bool `json:"exceeded"`
 		} `json:"quota"`
 		QuotaWindows []oauthQuotaWindow `json:"quota_windows"`
+		PromptUsage  *oauthPromptUsage  `json:"prompt_usage"`
 	} `json:"files"`
 }
 
@@ -241,6 +256,11 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 		}
 		identity := firstNonEmpty(item.Label, item.Email, item.Account, item.ID)
 		quotaWindows := make([]oauthQuotaWindow, len(item.QuotaWindows))
+		var promptUsage *oauthPromptUsage
+		if item.PromptUsage != nil {
+			copyPromptUsage := *item.PromptUsage
+			promptUsage = &copyPromptUsage
+		}
 		copy(quotaWindows, item.QuotaWindows)
 		credentials = append(credentials, oauthCredential{
 			ID: id, Provider: provider, Identity: maskCredentialIdentity(identity),
@@ -248,7 +268,7 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 			Ready:   status == "active" && !item.Disabled && !item.Unavailable,
 			Success: item.Success, Failed: item.Failed, UpdatedAt: item.UpdatedAt, LastRefresh: item.LastRefresh,
 			NextRetryAfter: item.NextRetryAfter, QuotaExceeded: item.Quota.Exceeded,
-			QuotaWindows: quotaWindows,
+			QuotaWindows: quotaWindows, PromptUsage: promptUsage,
 		})
 	}
 	return credentials, nil
