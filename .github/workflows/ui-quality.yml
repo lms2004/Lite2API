@@ -1,0 +1,69 @@
+name: UI quality
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+    paths:
+      - "internal/web/**"
+      - "internal/gateway/server.go"
+      - "go.mod"
+      - ".github/workflows/ui-quality.yml"
+  pull_request:
+    paths:
+      - "internal/web/**"
+      - "internal/gateway/server.go"
+      - "go.mod"
+      - ".github/workflows/ui-quality.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go tests and embedded UI contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          files=$(gofmt -l internal/web internal/gateway)
+          if [ -n "$files" ]; then
+            echo "The following Go files require gofmt:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Verify Quiet Control source assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s internal/web/quiet-control-core.css
+          test -s internal/web/quiet-control-pages.css
+          test -s internal/web/quiet-control-enhancements.css
+          test -s internal/web/quiet-control.js
+          grep -Fq -- '--action: #4c8dff' internal/web/quiet-control-core.css
+          grep -Fq -- '--healthy: #42c77a' internal/web/quiet-control-core.css
+          grep -Fq -- '.nav{grid-template-columns:repeat(4,1fr)}' internal/web/quiet-control-enhancements.css
+          grep -Fq -- 'content: attr(data-label)' internal/web/quiet-control-enhancements.css
+          grep -Fq -- 'window.Lite2APIQuietControl' internal/web/quiet-control.js
+
+      - name: Check JavaScript syntax
+        run: node --check internal/web/quiet-control.js
