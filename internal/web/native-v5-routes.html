@@ -1,0 +1,22 @@
+<section id="view-routes" class="view native-view native-routes">
+  <div class="page-head native-page-head">
+    <div><h1>路由</h1><p>选择一个客户端模型，只编辑它当前的真实上游路径。</p></div>
+    <div class="actions route-actions">
+      <span id="routeStatus" class="route-status"><span class="route-status-dot"></span>已同步</span>
+      <details class="more-menu route-header-menu"><summary aria-label="更多路由操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></summary><div class="more-popover"><button onclick="openRouteJSON();this.closest('details').removeAttribute('open')">编辑 JSON</button></div></details>
+      <button id="routeSaveBtn" class="primary" onclick="saveRoutes()" disabled>保存</button>
+    </div>
+  </div>
+  <div id="routeChangeSummary" class="route-change-summary" hidden aria-live="polite"></div>
+
+  <section class="route-workspace" aria-label="模型路由编辑器">
+    <aside class="route-master">
+      <div class="route-master-head"><span>模型</span><button class="icon-btn" type="button" aria-label="添加模型路由" title="添加模型路由" onclick="addRoute()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></button></div>
+      <nav id="v5RouteList" class="route-master-list" aria-label="选择模型路由"></nav>
+      <div id="routeCount" class="route-master-foot">0 条路由</div>
+    </aside>
+    <div class="route-detail">
+      <div id="routeRows" class="route-chain-list"></div>
+    </div>
+  </section>
+</section>

@@ -1,0 +1,30 @@
+<section id="view-keys" class="view native-view native-keys">
+  <div class="page-head native-page-head">
+    <div><h1>客户端</h1><p>管理访问密钥；只有创建时才展开配置。</p></div>
+    <button id="v5OpenKeyDialog" class="primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>新建 Key</button>
+  </div>
+
+  <div id="createdKeyCard" class="created-key-card" hidden>
+    <div class="created-key-copy"><span class="badge good">仅显示一次</span><strong id="createdKeyName">API Key 已创建</strong><p>现在复制并保存，关闭后不会再次显示明文。</p></div>
+    <div class="created-key-row"><input id="createdKey" readonly spellcheck="false" aria-label="新创建的 API Key"><button id="copyCreatedKeyBtn" class="primary" onclick="copyCreatedKey()"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>复制</button><button id="verifyCreatedKeyBtn" onclick="verifyCreatedKey()">验证连接</button></div>
+    <p id="verifyResult" class="connection-result" role="status" aria-live="polite"></p>
+  </div>
+
+  <section id="clientSetup" class="client-setup" hidden>
+    <div class="client-setup-head"><div class="client-setup-title"><span><svg class="icon" aria-hidden="true"><use href="#i-gateway"></use></svg></span><div><h2>客户端配置</h2><p>选择工具并复制可直接使用的配置。</p></div></div><span id="setupSecretState" class="setup-secret-state"><i></i>本次密钥</span></div>
+    <div class="client-setup-body"><nav class="client-picker" aria-label="选择客户端"><button class="client-option active" data-setup-client="claude" onclick="selectSetupClient('claude')"><span class="client-option-mark"><svg class="provider-logo" aria-hidden="true"><use href="#b-anthropic"></use></svg></span><span><strong>Claude Code</strong><small>Gateway / Settings</small></span></button><button class="client-option" data-setup-client="codex" onclick="selectSetupClient('codex')"><span class="client-option-mark"><svg class="provider-logo" aria-hidden="true"><use href="#b-openai"></use></svg></span><span><strong>Codex CLI</strong><small>Responses / Profile</small></span></button><button class="client-option" data-setup-client="openai" onclick="selectSetupClient('openai')"><span class="client-option-mark"><svg class="provider-logo" aria-hidden="true"><use href="#b-openai"></use></svg></span><span><strong>OpenAI SDK</strong><small>Python / Node.js</small></span></button><button class="client-option" data-setup-client="curl" onclick="selectSetupClient('curl')"><span class="client-option-mark">&gt;_</span><span><strong>通用</strong><small>cURL / Base URL</small></span></button></nav><div class="setup-workspace"><div class="setup-controls"><label class="setup-field">API Base URL<input id="setupBaseURL" readonly spellcheck="false"></label><label class="setup-field">默认模型<select id="setupModel" onchange="renderClientSetup()"></select></label></div><div id="setupTabs" class="setup-tabs" role="tablist" aria-label="配置格式"></div><div class="setup-code-wrap"><div class="setup-code-top"><button id="copySetupBtn" class="copy-config-btn" onclick="copyClientSetup()"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>复制全部</button></div><pre id="setupCode" class="setup-code" tabindex="0"></pre></div><div class="setup-footnote"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg><span id="setupHint">请勿把密钥提交到 Git 或聊天记录。</span></div></div></div>
+  </section>
+
+  <section class="native-section key-list-panel">
+    <div class="native-section-head"><h2>API Keys</h2><span id="keyCount" class="muted"></span></div>
+    <div class="table-wrap"><table class="data-table key-table"><thead><tr><th>名称</th><th>Key</th><th>模型</th><th>RPM</th><th>并发</th><th>状态</th><th>过期</th><th aria-label="操作"></th></tr></thead><tbody id="keys"><tr><td colspan="8" class="empty">正在读取密钥</td></tr></tbody></table></div>
+  </section>
+
+  <dialog id="v5KeyDialog" class="v5-key-dialog">
+    <div class="dialog-head"><div><h2>新建 API Key</h2><span class="muted">选择用途；只有需要时再设置高级限制。</span></div><button id="v5CloseKeyDialog" class="close-btn" type="button" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button></div>
+    <div class="dialog-body">
+      <section class="key-preset-panel" aria-labelledby="keyPresetTitle"><div><strong id="keyPresetTitle">用途</strong><p id="keyPresetDescription">个人开发：120 RPM、并发 2、30 天后过期。</p></div><div class="key-presets" role="radiogroup" aria-label="Key 安全预设"><button class="key-preset active" role="radio" aria-checked="true" data-key-preset="personal" onclick="selectKeyPreset('personal')">个人开发<small>30 天 · 并发 2</small></button><button class="key-preset" role="radio" aria-checked="false" data-key-preset="temporary" onclick="selectKeyPreset('temporary')">临时测试<small>24 小时 · 并发 1</small></button><button class="key-preset" role="radio" aria-checked="false" data-key-preset="service" onclick="selectKeyPreset('service')">可信服务<small>90 天 · 并发 16</small></button></div><button id="quickCreateKeyBtn" class="primary" onclick="createQuickKey()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>创建</button></section>
+      <details id="keyAdvanced" class="advanced-panel key-advanced"><summary>高级选项</summary><form id="keyForm" class="form"><label>名称<input name="name" placeholder="留空自动命名"></label><label class="wide">允许模型<input name="models" placeholder="逗号分隔；留空为全部"></label><label>RPM<input name="rpm" type="number" min="0" value="0" placeholder="0 不限"></label><label>并发上限<input name="concurrency" type="number" min="0" value="0" placeholder="0 不限"></label><label>过期时间<input name="expires_at" type="datetime-local"></label><div class="form-actions"><button class="primary" type="submit">按高级设置创建</button></div></form></details>
+    </div>
+  </dialog>
+</section>

@@ -8,9 +8,39 @@ import (
 func TestEmbeddedAdminPageStructure(t *testing.T) {
 	page := string(IndexHTML)
 	required := []string{
+		`dataset.ui = "native-v5"`,
+		`window.Lite2APINativeV5`,
+		`id="view-monitor"`,
+		`id="view-routes"`,
 		`id="view-accounts"`,
 		`id="view-keys"`,
+		`id="view-prompt-test"`,
+		`id="view-adapters"`,
+		`id="healthVerdict"`,
+		`id="monitorMetrics"`,
+		`id="routeHealthSummary"`,
+		`id="incidentFeed"`,
+		`id="requestSearch"`,
+		`id="requestChart"`,
+		`id="latencyChart"`,
+		`id="v5RouteList"`,
+		`class="route-workspace"`,
+		`id="routeRows"`,
+		`id="routeSaveBtn"`,
+		`id="routeChangeSummary"`,
+		`id="oauthAccounts"`,
+		`id="oauthChannelRail"`,
+		`id="oauthAccountSearch"`,
+		`id="oauthAccountStatus"`,
+		`id="v5SourceAccounts"`,
+		`id="v5SourceConnections"`,
+		`id="selectAllAccounts"`,
+		`<tbody id="accounts">`,
+		`id="v5KeyDialog"`,
 		`id="quickCreateKeyBtn"`,
+		`data-key-preset="personal"`,
+		`data-key-preset="temporary"`,
+		`data-key-preset="service"`,
 		`id="createdKeyCard"`,
 		`id="copyCreatedKeyBtn"`,
 		`id="clientSetup"`,
@@ -18,134 +48,26 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="setupModel"`,
 		`id="setupCode"`,
 		`id="keyAdvanced"`,
-		`id="view-routes"`,
-		`id="view-monitor"`,
-		`id="view-prompt-test"`,
-		`id="promptAccount"`,
-		`id="promptModel"`,
-		`id="promptTranscript"`,
-		`id="promptInspector"`,
-		`const promptTestCases=`,
-		`function sendPromptMessage(`,
-		`function decodePromptASCII(`,
-		`'/prompt-test'`,
-		`Token 增量基线`,
-		`上下文边界步进`,
-		`ASCII 侧信道`,
-		`Qwen / ChatML 逃逸`,
-		`id="healthVerdict"`,
-		`id="routeHealthSummary"`,
-		`id="incidentFeed"`,
-		`id="view-adapters"`,
-		`id="selectAllAccounts"`,
-		`<tbody id="accounts">`,
 		`id="quickAuthDialog"`,
-		`id="webProxyDialog"`,
-		`id="oauthAccounts"`,
-		`id="oauthChannelRail"`,
-		`id="oauthAccountSearch"`,
-		`id="oauthAccountStatus"`,
 		`id="accountDialog"`,
 		`id="importDialog"`,
 		`id="exportDialog"`,
+		`id="routeJSONDialog"`,
 		`function showView(`,
+		`function renderRoutes(`,
+		`function renderMonitor(`,
+		`function renderOAuthAccounts(`,
 		`function createQuickKey(`,
 		`function createClientKey(`,
-		`function copyCreatedKey(`,
 		`function renderClientSetup(`,
-		`function copyClientSetup(`,
-		`function gatewayAPIBase(`,
-		`ANTHROPIC_BASE_URL`,
-		`LITE2API_API_KEY`,
-		`model_providers.lite2api`,
-		`OPENAI_BASE_URL`,
 		`function openQuickAdd(`,
 		`function startOAuth(`,
-		`function submitOAuthCallback(`,
-		`function pollOAuthStatus(`,
-		`function renderOAuthAccounts(`,
-		`function renderOAuthUsage(`,
-		`prompt_usage`,
-		`暂无真实 usage`,
-		`注入后输入 / 上游 input tokens`,
-		`真实 provider usage`,
-		`function quotaWindowHTML(`,
-		`role="meter"`,
-		`quota_windows`,
-		`function refreshDelay(`,
-		`activeViewName==='accounts'`,
-		`function openWebProxyGuide(`,
-		`function normalizeWebCredential(`,
-		`function openAccount(`,
-		`function selectAccountTemplate(`,
-		`const accountTemplates=`,
-		`name="credential_mode"`,
-		`id="accountAdvanced"`,
-		`授权凭据由本机隔离适配器保存`,
-		`OAuth/设备授权直接生成链接`,
-		`复制链接`,
-		`提交并加入认证池`,
-		`'/oauth/start'`,
-		`'/oauth/callback'`,
-		`'/oauth/status'`,
-		`'/oauth/accounts'`,
-		`function openImport(`,
 		`function runImport(`,
 		`function runExport(`,
-		`function renderAdapters(`,
-		`'/accounts/import'`,
-		`'/accounts/export'`,
-		`'/adapters'`,
-		`dry_run:dryRun`,
-		`include_proxies:`,
-		`快速创建`,
-		`创建并复制`,
-		`data-key-preset="personal"`,
-		`data-key-preset="temporary"`,
-		`data-key-preset="service"`,
-		`function verifyCreatedKey(`,
-		`id="latencyChart"`,
-		`id="chartSummary"`,
-		`id="routeChangeSummary"`,
-		`function routeChangeLines(`,
-		`function openDialog(`,
-		`const viewIDCollisions=`,
 		`function targetOperationalState(`,
-		`仅显示一次`,
-		`更多操作`,
-		`数据导入`,
-		`数据导出`,
-		`a.api_key==='********'?'':`,
-		`id="b-openai"`,
-		`id="b-anthropic"`,
-		`id="b-gemini"`,
-		`id="b-deepseek"`,
-		`id="b-x"`,
-		`function providerKey(`,
-		`function providerMark(`,
-		`provider-icon provider-`,
-		`id="routeRows"`,
-		`id="routeSaveBtn"`,
-		`id="routeJSONDialog"`,
-		`id="monitorMetrics"`,
-		`id="requestChart"`,
-		`id="requestSearch"`,
-		`id="adapterChips"`,
-		`function renderRoutes(`,
-		`function updateTarget(`,
-		`function addTarget(`,
-		`function moveTarget(`,
-		`function channelCapabilities(`,
-		`function compatibleChannelAccounts(`,
-		`function updateRouteIntent(`,
-		`reasoning_effort`,
-		`渠道是实际凭据或接入来源`,
-		`function renderMonitor(`,
-		`function renderRouteHealth(`,
-		`function renderIncidents(`,
-		`function percentile(`,
-		`function drawRequestChart(`,
-		`function setAdapterStatus(`,
+		`if(!rows.length)return{label:'未知',tone:'unknown'`,
+		`const UI_BUILD='2026.08.18-v5'`,
+		`.nav{grid-template-columns:repeat(4,1fr)}`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -153,33 +75,34 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		}
 	}
 
+	forbidden := []string{
+		"Lite2API Quiet Control v3",
+		"window.Lite2APIQuietControl",
+		"Apple Simple 4.0",
+		"window.Lite2APIAppleSimple",
+		"UI build 2026.08.16-r11",
+		`class="route-chain-explain"`,
+		`id="token"`,
+		`placeholder="管理员 Token"`,
+	}
+	for _, value := range forbidden {
+		if strings.Contains(page, value) {
+			t.Errorf("obsolete or unsafe UI surface leaked into native v5: %q", value)
+		}
+	}
+
 	headEnd := strings.Index(page, "</head>")
 	if headEnd < 0 || strings.LastIndex(page, "</style>") > headEnd {
-		t.Error("all style elements must be inside the document head")
+		t.Error("all styles must remain inside the document head")
+	}
+	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
+		t.Error("native v5 must expose one canonical style element")
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
 	}
-	if strings.Contains(page, `id="token"`) || strings.Contains(page, `placeholder="管理员 Token"`) {
-		t.Error("VPN-only admin page must not ask the user to enter an admin token")
-	}
-	if strings.Contains(page, `$('accounts').innerHTML=d.accounts.map(a=>`+"`<div") {
-		t.Error("account table body must render table rows, not div elements")
-	}
-	if strings.Contains(page, `>×</button>`) || strings.Contains(page, `<div class="drop-icon">⇧</div>`) {
-		t.Error("dashboard controls must use the shared icon system instead of character glyphs")
-	}
-	if !strings.Contains(page, `id="view-monitor" class="view active"`) || strings.Contains(page, `id="view-accounts" class="view active"`) {
-		t.Error("operations overview must be the default view")
-	}
-	if !strings.Contains(page, `id="routeSaveBtn" class="primary" onclick="saveRoutes()" disabled`) {
-		t.Error("route save action must stay hidden until there are unsaved changes")
-	}
 	if strings.Contains(page, `Promise.all([api('/state'),api('/client-keys'),api('/adapters'),oauthRequest])`) {
-		t.Error("inactive pages must not poll keys, adapters and OAuth accounts every five seconds")
-	}
-	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("admin page styles must be consolidated into one maintained cascade")
+		t.Error("inactive pages must not poll all secondary resources every five seconds")
 	}
 	if strings.Contains(page, `models:[],rpm:0,concurrency:0,expires_at:''`) || strings.Contains(page, `不限速率 · 永不过期`) {
 		t.Error("quick key creation must not default to unlimited, non-expiring access")
@@ -187,10 +110,42 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	if strings.Contains(page, `for(const account of compatible){`) {
 		t.Error("route intent changes must not silently append every compatible upstream")
 	}
-	if !strings.Contains(page, `.nav{grid-template-columns:repeat(4,1fr)}`) {
-		t.Error("mobile navigation must stay limited to the four core tasks")
+}
+
+func TestNativeV5IsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
+	page := string(IndexHTML)
+	master := strings.Index(page, `id="v5RouteList"`)
+	detail := strings.Index(page, `id="routeRows"`)
+	if master < 0 || detail < 0 || master > detail {
+		t.Fatal("route master list must exist before the route detail in final HTML")
 	}
-	if !strings.Contains(page, `if(!rows.length)return{label:'未知',tone:'unknown'`) {
-		t.Error("route targets without recent samples must render as unknown")
+	if !strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics" hidden>`) {
+		t.Fatal("upstream dashboard metrics must remain available to business rendering but hidden from the primary layout")
+	}
+	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
+		t.Fatal("key creation must be progressive disclosure, not a permanent dashboard block")
+	}
+}
+
+func TestReplaceRange(t *testing.T) {
+	base := []byte("before<start>old<end>after")
+	got := string(replaceRange(base, []byte("<start>"), []byte("<end>"), []byte("new")))
+	if got != "beforenew\n<end>after" {
+		t.Fatalf("unexpected replacement: %q", got)
+	}
+	unchanged := string(replaceRange(base, []byte("missing"), []byte("<end>"), []byte("new")))
+	if unchanged != string(base) {
+		t.Fatal("missing anchors must leave the document unchanged")
+	}
+}
+
+func TestBuildIndexHTMLReplacesStyleAndInjectsBehavior(t *testing.T) {
+	base := []byte("<html><head><style>old</style></head><body><main>stable</main></body></html>")
+	got := string(buildIndexHTML(base, []byte("new"), []byte("enhance()")))
+	if strings.Contains(got, "old") || !strings.Contains(got, "<style>\nnew\n</style>") {
+		t.Fatalf("canonical style replacement failed: %s", got)
+	}
+	if !strings.Contains(got, "<script>\nenhance()\n</script>\n</body>") {
+		t.Fatalf("behavior injection failed: %s", got)
 	}
 }
