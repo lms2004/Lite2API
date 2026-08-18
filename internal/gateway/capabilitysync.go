@@ -22,10 +22,6 @@ type discoveredCapabilityUpdate struct {
 	Catalog   []config.DiscoveredModel
 }
 
-// runCapabilityDiscovery keeps adapter-backed model catalogs fresh without
-// making the request path depend on discovery. A failed /models endpoint never
-// disables an otherwise working account; the last known capabilities remain in
-// place until a later successful observation.
 func (g *Gateway) runCapabilityDiscovery(ctx context.Context) {
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -59,8 +55,6 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		}
 		catalog, err := discoverModelsForAccount(ctx, client, account)
 		if err != nil {
-			// Many OpenAI-compatible services do not expose /models. Discovery is
-			// opportunistic and must not turn that into an operational incident.
 			slog.Debug("upstream model discovery skipped", "account", account.ID, "error", err)
 			failures = append(failures, account.ID)
 			continue
@@ -82,13 +76,9 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		discoveredIDs := discoveredModelIDs(update.Catalog)
 		inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
 		if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
-			// CLIProxy is an auto-managed live capability source. Replacing its
-			// discovered catalog prevents retired models and tiers from lingering.
 			updated.Models = discoveredIDs
 			updated.Capabilities = inferred
 		} else {
-			// Generic OpenAI-compatible accounts may include manually declared
-			// aliases/capabilities, so discovery enriches rather than erases them.
 			updated.Models = appendUniqueModels(current.Models, discoveredIDs)
 			updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
 		}
@@ -110,6 +100,27 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 }
 
 func discoverModelsForAccount(ctx context.Context, client *http.Client, account config.Account) ([]config.DiscoveredModel, error) {
+	if config.UseRichCodexCatalog(account) {
+		return fetchDiscoveredCatalog(ctx, client, account, true)
+	}
+	catalog, err := fetchDiscoveredCatalog(ctx, client, account, false)
+	if err != nil {
+		return nil, err
+	}
+	if config.UseRichCodexSupplement(account) {
+		// Lite2API's default cliproxy-oauth connection aggregates Claude, Gemini,
+		// Antigravity and Codex. Keep its complete /models list, then enrich only
+		// the Codex entries with the richer client catalog.
+		if rich, richErr := fetchDiscoveredCatalog(ctx, client, account, true); richErr == nil {
+			catalog = mergeDiscoveredCatalog(catalog, rich)
+		} else {
+			slog.Debug("Codex rich catalog supplement unavailable", "account", account.ID, "error", richErr)
+		}
+	}
+	return catalog, nil
+}
+
+func fetchDiscoveredCatalog(ctx context.Context, client *http.Client, account config.Account, rich bool) ([]config.DiscoveredModel, error) {
 	base, err := url.Parse(strings.TrimSpace(account.BaseURL))
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, errors.New("invalid account base URL")
@@ -118,9 +129,7 @@ func discoverModelsForAccount(ctx context.Context, client *http.Client, account 
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/models"
 	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
-	if config.UseRichCodexCatalog(account) {
-		// CLIProxyAPI returns its rich Codex client catalog whenever the query
-		// contains client_version. It includes reasoning and service-tier metadata.
+	if rich {
 		query := endpoint.Query()
 		query.Set("client_version", "lite2api")
 		endpoint.RawQuery = query.Encode()
@@ -164,6 +173,27 @@ func discoverModelsForAccount(ctx context.Context, client *http.Client, account 
 		return nil, errors.New("models endpoint returned no model IDs")
 	}
 	return models, nil
+}
+
+func mergeDiscoveredCatalog(base, rich []config.DiscoveredModel) []config.DiscoveredModel {
+	result := make([]config.DiscoveredModel, len(base))
+	copy(result, base)
+	byID := make(map[string]int, len(base)+len(rich))
+	for index, model := range result {
+		byID[model.ID] = index
+	}
+	for _, model := range rich {
+		if index, exists := byID[model.ID]; exists {
+			current := result[index]
+			current.ReasoningEfforts = mergeOrderedStrings(current.ReasoningEfforts, model.ReasoningEfforts)
+			current.ServiceTiers = mergeOrderedStrings(current.ServiceTiers, model.ServiceTiers)
+			result[index] = current
+			continue
+		}
+		byID[model.ID] = len(result)
+		result = append(result, model)
+	}
+	return result
 }
 
 func decodeDiscoveredModels(data []byte) []config.DiscoveredModel {
