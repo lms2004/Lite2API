@@ -10,7 +10,7 @@ func TestAppleSimpleV4IsEmbedded(t *testing.T) {
 	required := []string{
 		"Lite2API Apple Simple v4",
 		"window.Lite2APIAppleSimple",
-		`data-ui = "apple-simple-v4"`,
+		`dataset.ui = "apple-simple-v4"`,
 		`--canvas: #f5f5f7`,
 		`--action: #0071e3`,
 		`.apple-overview-summary`,
