@@ -32,13 +32,13 @@ func TestDecodeDiscoveredModelIDsAcceptsCommonShapes(t *testing.T) {
 func TestDiscoverModelsForAccountUsesAccountAuthentication(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
-			t.Fatalf("path=%q", r.URL.Path)
+			t.Errorf("path=%q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
-			t.Fatalf("authorization=%q", got)
+			t.Errorf("authorization=%q", got)
 		}
 		if got := r.Header.Get("X-Test"); got != "present" {
-			t.Fatalf("custom header=%q", got)
+			t.Errorf("custom header=%q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"}]}`))
