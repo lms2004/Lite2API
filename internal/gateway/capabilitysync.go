@@ -118,7 +118,7 @@ func discoverModelsForAccount(ctx context.Context, client *http.Client, account 
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/models"
 	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
-	if strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
+	if config.UseRichCodexCatalog(account) {
 		// CLIProxyAPI returns its rich Codex client catalog whenever the query
 		// contains client_version. It includes reasoning and service-tier metadata.
 		query := endpoint.Query()
