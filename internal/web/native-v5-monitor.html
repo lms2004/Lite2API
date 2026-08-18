@@ -1,9 +1,9 @@
 <section id="view-monitor" class="view active native-view native-overview">
   <div class="page-head native-page-head">
-    <div><h1>总览</h1><p>现在是否可用，以及哪里需要处理。</p></div>
+    <div><h1>总览</h1><p>先看现在能不能用，再看哪里值得处理。</p></div>
   </div>
 
-  <section class="overview-hero" aria-label="当前运行状态">
+  <section class="overview-hero grouped-surface" aria-label="当前运行状态">
     <div id="healthVerdict" class="health-verdict">
       <span class="health-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
       <div class="health-copy"><strong>正在检查</strong><span>等待最近请求与上游状态</span></div>
@@ -12,17 +12,17 @@
   </section>
 
   <div class="overview-split">
-    <section class="native-section route-summary-section">
+    <section class="native-section grouped-section route-summary-section">
       <div class="native-section-head"><h2>路由</h2><button class="text-action" onclick="showView('routes')">查看全部</button></div>
       <div id="routeHealthSummary" class="route-health-list"></div>
     </section>
-    <section class="native-section incident-section">
+    <section class="native-section grouped-section incident-section">
       <div class="native-section-head"><h2>最近异常</h2></div>
       <div id="incidentFeed" class="incident-list"></div>
     </section>
   </div>
 
-  <section class="native-section requests-section">
+  <section class="native-section grouped-section requests-section">
     <div class="native-section-head request-head">
       <h2>最近请求</h2>
       <div class="monitor-toolbar">
@@ -36,7 +36,7 @@
     <div id="requestCount" class="pagination-note">0 条请求</div>
   </section>
 
-  <details class="native-trends">
+  <details class="native-trends grouped-section">
     <summary><span>运行趋势</span><span id="chartRetention" class="muted">滚动保留 7 天</span></summary>
     <div class="chart-toolbar">
       <span id="chartWindowLabel" class="muted">最近 24 小时 · 缺失时留空</span>
