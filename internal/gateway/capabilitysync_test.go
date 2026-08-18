@@ -19,6 +19,7 @@ func TestDecodeDiscoveredModelIDsAcceptsCommonShapes(t *testing.T) {
 		{"openai", `{"data":[{"id":"gpt-5.6-sol"},{"id":"fast"}]}`, []string{"gpt-5.6-sol", "fast"}},
 		{"models", `{"models":["a",{"id":"b"},"a"]}`, []string{"a", "b"}},
 		{"direct", `["x",{"id":"y"}]`, []string{"x", "y"}},
+		{"codex-rich", `{"models":[{"slug":"gpt-5.6-sol"}]}`, []string{"gpt-5.6-sol"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -26,6 +27,30 @@ func TestDecodeDiscoveredModelIDsAcceptsCommonShapes(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDecodeDiscoveredModelsReadsCodexCapabilityMetadata(t *testing.T) {
+	models := decodeDiscoveredModels([]byte(`{
+		"models":[{
+			"slug":"gpt-5.6-sol",
+			"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"xhigh"},{"effort":"max"}],
+			"service_tiers":[{"id":"priority","name":"Fast"}],
+			"additional_speed_tiers":["fast"]
+		}]
+	}`))
+	if len(models) != 1 {
+		t.Fatalf("models=%+v", models)
+	}
+	got := models[0]
+	if got.ID != "gpt-5.6-sol" {
+		t.Fatalf("id=%q", got.ID)
+	}
+	if !reflect.DeepEqual(got.ReasoningEfforts, []string{"low", "medium", "xhigh", "max"}) {
+		t.Fatalf("reasoning=%v", got.ReasoningEfforts)
+	}
+	if !reflect.DeepEqual(got.ServiceTiers, []string{"priority", "fast"}) {
+		t.Fatalf("tiers=%v", got.ServiceTiers)
 	}
 }
 
@@ -54,8 +79,26 @@ func TestDiscoverModelsForAccountUsesAccountAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(models, []string{"gpt-5.6-sol", "gpt-5.6-terra"}) {
+	if !reflect.DeepEqual(discoveredModelIDs(models), []string{"gpt-5.6-sol", "gpt-5.6-terra"}) {
 		t.Fatalf("models=%v", models)
+	}
+}
+
+func TestDiscoverCLIProxyRequestsRichCatalog(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("client_version") == "" {
+			t.Errorf("expected client_version query for rich CLIProxy catalog")
+		}
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{"effort":"low"}],"service_tiers":[{"id":"priority"}]}]}`))
+	}))
+	defer server.Close()
+	account := config.Account{ID: "cliproxy-codex", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: server.URL + "/v1", Enabled: true, AuthHeader: "none"}
+	models, err := discoverModelsForAccount(context.Background(), server.Client(), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "gpt-5.6-sol" || !reflect.DeepEqual(models[0].ServiceTiers, []string{"priority"}) {
+		t.Fatalf("models=%+v", models)
 	}
 }
 
