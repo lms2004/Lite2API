@@ -17,24 +17,33 @@ var quietControlPagesCSS []byte
 //go:embed quiet-control-enhancements.css
 var quietControlEnhancementsCSS []byte
 
+//go:embed apple-layout-v4.css
+var appleLayoutV4CSS []byte
+
 //go:embed quiet-control.js
 var quietControlJS []byte
 
+//go:embed apple-layout-v4.js
+var appleLayoutV4JS []byte
+
 // IndexHTML is the complete self-contained admin page served by Lite2API.
 //
-// The legacy document still owns the stable DOM, API calls, and runtime
-// behavior. At build time we replace its historical style cascade with the
-// canonical Quiet Control layers and inject the non-invasive interaction
-// enhancement script. The server therefore keeps returning one HTML asset and
-// the existing CSP can remain unchanged.
+// index.html continues to own stable business markup and API behavior. The
+// embedded style and behavior layers reshape that DOM into the current
+// Apple-simple operator interface at build time, so the server still returns
+// one self-contained HTML asset and the existing CSP remains valid.
 var IndexHTML = buildIndexHTML(
 	legacyIndexHTML,
 	bytes.Join([][]byte{
 		quietControlCoreCSS,
 		quietControlPagesCSS,
 		quietControlEnhancementsCSS,
+		appleLayoutV4CSS,
 	}, []byte("\n")),
-	quietControlJS,
+	bytes.Join([][]byte{
+		quietControlJS,
+		appleLayoutV4JS,
+	}, []byte("\n")),
 )
 
 func buildIndexHTML(base, css, js []byte) []byte {
