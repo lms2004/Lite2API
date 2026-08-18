@@ -26,13 +26,19 @@ func (g *Gateway) routeExecutionProfileHandler(next http.Handler) http.Handler {
 			return
 		}
 		state := g.state.Load()
-		if state == nil || r.Body == nil {
+		if state == nil || r.Body == nil || !g.clientKeys.validCredential(apiBearerToken(r), state.legacyKeyHashes) {
+			// Keep authentication behavior centralized in ServeGateway. In
+			// particular, never consume an unauthenticated body in middleware.
 			next.ServeHTTP(w, r)
 			return
 		}
 		limit := state.cfg.Server.MaxBodyBytes
 		if limit <= 0 {
 			limit = config.DefaultMaxBodyBytes
+		}
+		if r.ContentLength > limit {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
+			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 		_ = r.Body.Close()
