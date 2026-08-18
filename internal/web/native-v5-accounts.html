@@ -1,0 +1,33 @@
+<section id="view-accounts" class="view native-view native-accounts">
+  <div class="page-head native-page-head">
+    <div><h1>上游</h1><p>账号、额度和真正参与路由的连接。</p></div>
+    <div class="actions account-actions">
+      <details class="more-menu"><summary aria-label="更多上游操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></summary><div class="more-popover"><button onclick="openImport();this.closest('details').removeAttribute('open')">导入</button><button id="openExportBtn" onclick="openExport();this.closest('details').removeAttribute('open')">导出</button></div></details>
+      <button class="primary" onclick="openQuickAdd()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>添加</button>
+    </div>
+  </div>
+
+  <div id="metrics" class="metric-grid upstream-metrics" hidden></div>
+  <div class="source-segment" role="tablist" aria-label="上游视图">
+    <button type="button" class="active" data-source-tab="accounts" role="tab" aria-selected="true">账号</button>
+    <button type="button" data-source-tab="connections" role="tab" aria-selected="false">连接</button>
+  </div>
+
+  <section id="v5SourceAccounts" class="source-pane" role="tabpanel">
+    <div class="source-tools">
+      <div id="oauthChannelRail" class="channel-rail" role="tablist" aria-label="按渠道筛选账号"></div>
+      <div class="toolbar"><div class="search"><input id="oauthAccountSearch" aria-label="搜索渠道账号" placeholder="搜索账号"></div><select id="oauthAccountStatus" aria-label="账号状态筛选"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
+    </div>
+    <div id="oauthAccounts" class="channel-groups"><div class="empty">正在读取账号</div></div>
+    <div class="pagination-note"><span id="oauthAccountCount"></span></div>
+  </section>
+
+  <section id="v5SourceConnections" class="source-pane" role="tabpanel" hidden>
+    <div class="source-tools">
+      <div><strong>API 与适配器连接</strong><span id="accountHealthNote" class="muted">路由实际使用的接入来源</span></div>
+      <div class="toolbar"><div class="search"><input id="accountSearch" aria-label="搜索路由连接" placeholder="搜索连接"></div><select id="accountType" aria-label="协议筛选"><option value="">全部协议</option><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select><select id="accountStatus" aria-label="状态筛选"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select></div>
+    </div>
+    <div class="table-wrap"><table class="data-table account-table"><thead><tr><th class="check-col"><input id="selectAllAccounts" type="checkbox" aria-label="选择全部当前路由连接" onchange="toggleAllAccounts(this.checked)"></th><th>连接</th><th>提供方 / 地址</th><th>状态</th><th>模型</th><th>并发</th><th>请求 / 失败</th><th>延迟</th><th aria-label="操作"></th></tr></thead><tbody id="accounts"><tr><td colspan="9" class="empty">正在读取连接</td></tr></tbody></table></div>
+    <div id="accountCount" class="pagination-note">0 个连接</div>
+  </section>
+</section>
