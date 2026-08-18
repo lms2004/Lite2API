@@ -1,10 +1,10 @@
 /* Lite2API Native v7 — capability-aware route selection.
-   Native selects remain the business source of truth; operators use a
-   searchable grouped model picker and explicit reasoning controls. */
+   Native selects remain the business source of truth; operators choose model,
+   reasoning, and execution mode as three independent concepts. */
 (() => {
   "use strict";
 
-  const BUILD = "Native 7.1 · 2026.08.18";
+  const BUILD = "Native 7.2 · 2026.08.18";
   const picker = { activeSelect: null, query: "", group: "all", scheduled: false };
   const $ = id => document.getElementById(id);
   const all = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -27,21 +27,24 @@
     return { base: fast ? raw.slice(0, -5) : raw, fast };
   }
 
-  function modelDisplayName(model) {
-    const profile = modelProfile(model);
-    const friendly = ({
+  function friendlyModelName(model) {
+    const base = modelProfile(model).base;
+    return ({
       sol: "GPT-5.6 Sol",
       terra: "GPT-5.6 Terra",
       luna: "GPT-5.6 Luna",
-      fast: "Fast",
       "sol-max": "Sol Max"
-    })[profile.base.toLowerCase()] || profile.base;
-    return profile.fast ? `${friendly} · Fast` : friendly;
+    })[base.toLowerCase()] || base;
+  }
+
+  function routeDisplayName(model) {
+    const profile = modelProfile(model);
+    return profile.fast ? `${friendlyModelName(profile.base)} · Fast` : friendlyModelName(profile.base);
   }
 
   function modelGroup(model) {
     const text = modelProfile(model).base.toLowerCase();
-    if (/^(sol|terra|luna|fast|sol-max)$|gpt|codex|openai/.test(text)) return "openai";
+    if (/^(sol|terra|luna|sol-max)$|gpt|codex|openai/.test(text)) return "openai";
     if (/claude|anthropic/.test(text)) return "claude";
     if (/gemini|google/.test(text)) return "gemini";
     if (/grok|xai|x\.ai/.test(text)) return "grok";
@@ -60,12 +63,16 @@
     return all("#routeRows .route-intent").map(intent => all("select", intent)[0]).filter(Boolean);
   }
 
+  // Catalog entries are base models. Execution profiles such as @fast are
+  // folded into model metadata so they do not double the picker length.
   function catalog() {
     const byModel = new Map();
     for (const account of accounts()) {
       for (const capability of Array.isArray(account.capabilities) ? account.capabilities : []) {
-        const model = String(capability.model || "").trim();
-        if (!model) continue;
+        const rawModel = String(capability.model || "").trim();
+        if (!rawModel) continue;
+        const profile = modelProfile(rawModel);
+        const model = profile.base;
         let entry = byModel.get(model);
         if (!entry) {
           entry = {
@@ -74,43 +81,53 @@
             sources: new Set(),
             upstreams: new Set(),
             efforts: new Set(),
-            tags: new Set()
+            tags: new Set(),
+            fastAvailable: false
           };
           byModel.set(model, entry);
         }
         entry.sources.add(account.name || account.id || "上游");
         if (capability.upstream_model) entry.upstreams.add(capability.upstream_model);
         for (const effort of capability.reasoning_efforts || []) entry.efforts.add(effort);
+        if (profile.fast) entry.fastAvailable = true;
         const observed = `${model} ${capability.upstream_model || ""}`.toLowerCase();
-        if (modelProfile(model).fast || /fast|priority/.test(observed)) entry.tags.add("Fast");
         if (/thinking|reasoner/.test(observed)) entry.tags.add("Thinking");
         if (/image|vision/.test(observed)) entry.tags.add("Vision");
       }
     }
 
-    // Preserve only actual route model values while discovery is temporarily
-    // stale. Do not read the neighboring reasoning select as a model.
+    // Preserve current routes while discovery is temporarily stale.
     for (const select of modelSelects()) {
-      const model = String(select.value || "").trim();
-      if (!model || byModel.has(model)) continue;
-      byModel.set(model, {
-        model,
-        group: modelGroup(model),
-        sources: new Set(),
-        upstreams: new Set(),
-        efforts: new Set(),
-        tags: new Set(modelProfile(model).fast ? ["Fast", "当前"] : ["当前"])
-      });
+      const profile = modelProfile(select.value);
+      const model = profile.base;
+      if (!model) continue;
+      let entry = byModel.get(model);
+      if (!entry) {
+        entry = {
+          model,
+          group: modelGroup(model),
+          sources: new Set(),
+          upstreams: new Set(),
+          efforts: new Set(),
+          tags: new Set(["当前"]),
+          fastAvailable: profile.fast
+        };
+        byModel.set(model, entry);
+      } else if (profile.fast) {
+        entry.fastAvailable = true;
+      }
     }
 
     const order = ["openai", "claude", "gemini", "grok", "deepseek", "other"];
     return Array.from(byModel.values()).sort((a, b) => {
       const groupDelta = order.indexOf(a.group) - order.indexOf(b.group);
-      if (groupDelta) return groupDelta;
-      const baseDelta = modelProfile(a.model).base.localeCompare(modelProfile(b.model).base, "zh-CN", { numeric: true });
-      if (baseDelta) return baseDelta;
-      return Number(modelProfile(a.model).fast) - Number(modelProfile(b.model).fast);
+      return groupDelta || friendlyModelName(a.model).localeCompare(friendlyModelName(b.model), "zh-CN", { numeric: true });
     });
+  }
+
+  function catalogEntry(model) {
+    const base = modelProfile(model).base;
+    return catalog().find(entry => entry.model === base);
   }
 
   function ensureDialog() {
@@ -128,7 +145,7 @@
       <div class="v7-model-search-wrap"><input id="v7ModelSearch" type="search" autocomplete="off" placeholder="搜索模型、上游或真实模型 ID" aria-label="搜索模型"></div>
       <div id="v7ModelGroups" class="v7-model-groups" role="tablist" aria-label="模型分组"></div>
       <div id="v7ModelResults" class="v7-model-results"></div>
-      <div class="v7-model-dialog-foot">模型目录由上游自动同步；Fast 是执行模式，底层仍使用同一真实模型。保存路由前不会影响当前流量。</div>`;
+      <div class="v7-model-dialog-foot">模型目录由上游自动同步；推理强度和 Fast 模式在模型之外单独选择。</div>`;
     document.body.append(dialog);
     dialog.querySelector("[data-v7-close]").addEventListener("click", () => dialog.close());
     dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
@@ -172,7 +189,7 @@
     const filtered = entries.filter(entry => {
       if (picker.group !== "all" && entry.group !== picker.group) return false;
       if (!query) return true;
-      return [entry.model, modelDisplayName(entry.model), ...entry.sources, ...entry.upstreams, ...entry.tags]
+      return [entry.model, friendlyModelName(entry.model), ...entry.sources, ...entry.upstreams, ...entry.tags, entry.fastAvailable ? "fast" : ""]
         .join(" ").toLocaleLowerCase("zh-CN").includes(query);
     });
     if (!filtered.length) {
@@ -180,6 +197,7 @@
       return;
     }
 
+    const currentBase = modelProfile(picker.activeSelect?.value).base;
     const fragment = document.createDocumentFragment();
     let lastGroup = "";
     for (const entry of filtered) {
@@ -193,17 +211,23 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "v7-model-result";
-      button.setAttribute("aria-current", String(picker.activeSelect?.value === entry.model));
+      button.setAttribute("aria-current", String(currentBase === entry.model));
       button.innerHTML = `<span class="v7-model-result-main"><strong></strong><small></small></span><span class="v7-model-result-meta"></span>`;
-      button.querySelector("strong").textContent = modelDisplayName(entry.model);
+      button.querySelector("strong").textContent = friendlyModelName(entry.model);
       const sources = Array.from(entry.sources);
       button.querySelector("small").textContent = sources.length
         ? `${sources.length} 个上游 · ${sources.slice(0, 2).join("、")}${sources.length > 2 ? "…" : ""}`
         : "当前配置";
       const meta = button.querySelector(".v7-model-result-meta");
-      for (const tag of Array.from(entry.tags).slice(0, 2)) {
+      if (entry.fastAvailable) {
+        const fast = document.createElement("span");
+        fast.className = "v7-model-tag fast";
+        fast.textContent = "Fast";
+        meta.append(fast);
+      }
+      for (const tag of Array.from(entry.tags).slice(0, entry.fastAvailable ? 1 : 2)) {
         const chip = document.createElement("span");
-        chip.className = tag === "Fast" ? "v7-model-tag fast" : "v7-model-tag";
+        chip.className = "v7-model-tag";
         chip.textContent = tag;
         meta.append(chip);
       }
@@ -214,18 +238,24 @@
         chip.textContent = `${efforts.length} 档推理`;
         meta.append(chip);
       }
-      button.addEventListener("click", () => chooseModel(entry.model));
+      button.addEventListener("click", () => chooseBaseModel(entry));
       fragment.append(button);
     }
     resultNode.replaceChildren(fragment);
   }
 
-  function chooseModel(model) {
-    const select = picker.activeSelect;
-    if (!select) return;
+  function setBusinessModel(select, model) {
     if (!Array.from(select.options).some(option => option.value === model)) select.add(new Option(model, model));
     select.value = model;
     select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function chooseBaseModel(entry) {
+    const select = picker.activeSelect;
+    if (!select) return;
+    const wasFast = modelProfile(select.value).fast;
+    const target = wasFast && entry.fastAvailable ? `${entry.model}@fast` : entry.model;
+    setBusinessModel(select, target);
     $("v7ModelDialog")?.close();
     schedule();
   }
@@ -247,11 +277,11 @@
   function syncModelTrigger(select) {
     const trigger = select.parentElement?.querySelector(".v7-model-trigger");
     if (!trigger) return;
-    const entry = catalog().find(item => item.model === select.value);
+    const entry = catalogEntry(select.value);
     const effortCount = entry ? Array.from(entry.efforts).filter(value => value && value !== "auto").length : 0;
     trigger.innerHTML = `<span class="v7-model-trigger-copy"><strong></strong><small></small></span><span class="v7-model-trigger-arrow">⌄</span>`;
-    trigger.querySelector("strong").textContent = modelDisplayName(select.value || "选择模型");
-    trigger.querySelector("small").textContent = `${entry?.sources.size || 0} 个兼容上游${effortCount ? ` · ${effortCount} 档推理` : ""}`;
+    trigger.querySelector("strong").textContent = friendlyModelName(select.value || "选择模型");
+    trigger.querySelector("small").textContent = `${entry?.sources.size || 0} 个兼容上游${effortCount ? ` · ${effortCount} 档推理` : ""}${entry?.fastAvailable ? " · 支持 Fast" : ""}`;
   }
 
   function enhanceEffortSelect(select) {
@@ -286,6 +316,38 @@
     }));
   }
 
+  function enhanceModeControl(modelSelect, intent) {
+    let field = intent.querySelector(".v7-mode-field");
+    if (!field) {
+      field = document.createElement("div");
+      field.className = "v7-mode-field";
+      field.innerHTML = `<span class="v7-field-label">运行模式</span><div class="v7-mode-control" role="radiogroup" aria-label="运行模式"></div>`;
+      const note = intent.querySelector(".route-intent-note");
+      intent.insertBefore(field, note || null);
+    }
+    const control = field.querySelector(".v7-mode-control");
+    const profile = modelProfile(modelSelect.value);
+    const entry = catalogEntry(modelSelect.value);
+    const modes = [{ id: "standard", label: "标准", disabled: false }];
+    if (entry?.fastAvailable || profile.fast) modes.push({ id: "fast", label: "Fast", disabled: !entry?.fastAvailable && !profile.fast });
+    control.replaceChildren(...modes.map(mode => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "v7-mode-option";
+      button.setAttribute("role", "radio");
+      const active = mode.id === (profile.fast ? "fast" : "standard");
+      button.setAttribute("aria-checked", String(active));
+      button.disabled = mode.disabled;
+      button.textContent = mode.label;
+      button.addEventListener("click", () => {
+        const base = modelProfile(modelSelect.value).base;
+        setBusinessModel(modelSelect, mode.id === "fast" ? `${base}@fast` : base);
+        schedule();
+      });
+      return button;
+    }));
+  }
+
   function syncRouteMasterLabels() {
     const cards = all("#routeRows > .route-card");
     const byAlias = new Map(cards.map(card => [card.querySelector(".route-alias")?.value?.trim(), card]));
@@ -293,14 +355,17 @@
       const card = byAlias.get(button.dataset.route);
       const modelSelect = card?.querySelector(".route-intent select");
       const subtitle = button.querySelector("small");
-      if (modelSelect && subtitle) subtitle.textContent = modelDisplayName(modelSelect.value);
+      if (modelSelect && subtitle) subtitle.textContent = routeDisplayName(modelSelect.value);
     });
   }
 
   function enhanceRoutes() {
     all("#routeRows .route-intent").forEach(intent => {
       const selects = all("select", intent);
-      if (selects[0]) enhanceModelSelect(selects[0]);
+      if (selects[0]) {
+        enhanceModelSelect(selects[0]);
+        enhanceModeControl(selects[0], intent);
+      }
       if (selects[1]) enhanceEffortSelect(selects[1]);
     });
     syncRouteMasterLabels();
