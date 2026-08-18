@@ -204,7 +204,7 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		response["error"] = result.Error
 	}
 	if result.Status == "ok" {
-		ready, err := g.ensureOAuthPoolAccount(r.Context())
+		ready, err := g.ensureOAuthPoolAccount(r.Context(), input.Provider)
 		response["pool_ready"] = ready
 		if err != nil {
 			response["warning"] = err.Error()
@@ -422,11 +422,28 @@ func writeOAuthAdapterError(w http.ResponseWriter, err error) {
 	writeAPIErrorCode(w, status, err.Error(), "upstream_error", code)
 }
 
-func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context) (bool, error) {
+func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context, provider string) (bool, error) {
+	provider = normalizeOAuthProvider(provider)
 	for _, account := range g.Config().Accounts {
-		if strings.TrimRight(account.BaseURL, "/") == defaultOAuthAdapterURL+"/v1" {
+		if strings.TrimRight(account.BaseURL, "/") != defaultOAuthAdapterURL+"/v1" {
+			continue
+		}
+		if !account.Enabled || provider != "codex" {
 			return account.Enabled, nil
 		}
+		models, err := discoverOAuthModels(ctx)
+		if err != nil {
+			return true, fmt.Errorf("OAuth credential was saved, but Codex model discovery failed: %w", err)
+		}
+		updated := account
+		updated.Models = appendUniqueModels(account.Models, models)
+		updated.Capabilities = mergeChannelCapabilities(account.Capabilities, config.InferCodexCapabilities(updated.Models))
+		if !sameModels(account.Models, updated.Models) || !sameChannelCapabilities(account.Capabilities, updated.Capabilities) {
+			if err := g.UpsertAccount(updated); err != nil {
+				return false, fmt.Errorf("OAuth credential was saved, but Lite account capability update failed: %w", err)
+			}
+		}
+		return true, nil
 	}
 	if strings.TrimSpace(os.Getenv("CLIPROXYAPI_KEY")) == "" {
 		return false, errors.New("OAuth credential was saved, but CLIPROXYAPI_KEY is not configured")
@@ -440,8 +457,9 @@ func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context) (bool, error) {
 		AdapterID: "cli-proxy-api", InstanceID: "local",
 		BaseURL: defaultOAuthAdapterURL + "/v1", APIKeyEnv: "CLIPROXYAPI_KEY",
 		AuthHeader: "authorization", AuthScheme: "Bearer", Models: models,
-		Operations: []string{config.OperationOpenAIChat, config.OperationOpenAIResponses, config.OperationAnthropic},
-		Priority:   50, Weight: 1, Concurrency: 4, Enabled: true,
+		Capabilities: config.InferCodexCapabilities(models),
+		Operations:   []string{config.OperationOpenAIChat, config.OperationOpenAIResponses, config.OperationAnthropic},
+		Priority:     50, Weight: 1, Concurrency: 4, Enabled: true,
 	}
 	if err := g.UpsertAccount(account); err != nil {
 		return false, fmt.Errorf("OAuth credential was saved, but Lite account creation failed: %w", err)
@@ -494,4 +512,68 @@ func discoverOAuthModels(ctx context.Context) ([]string, error) {
 		return nil, errors.New("no models returned")
 	}
 	return models, nil
+}
+
+func appendUniqueModels(existing, discovered []string) []string {
+	models := append([]string(nil), existing...)
+	seen := make(map[string]struct{}, len(models)+len(discovered))
+	for _, model := range models {
+		seen[model] = struct{}{}
+	}
+	for _, model := range discovered {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	return models
+}
+
+func mergeChannelCapabilities(existing, inferred []config.ChannelCapability) []config.ChannelCapability {
+	capabilities := append([]config.ChannelCapability(nil), existing...)
+	seen := make(map[string]struct{}, len(capabilities)+len(inferred))
+	for _, capability := range capabilities {
+		seen[capability.Model] = struct{}{}
+	}
+	for _, capability := range inferred {
+		if capability.Model == "" || capability.UpstreamModel == "" {
+			continue
+		}
+		if _, ok := seen[capability.Model]; ok {
+			continue
+		}
+		capability.ReasoningEfforts = append([]string(nil), capability.ReasoningEfforts...)
+		capabilities = append(capabilities, capability)
+		seen[capability.Model] = struct{}{}
+	}
+	return capabilities
+}
+
+func sameModels(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameChannelCapabilities(left, right []config.ChannelCapability) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].Model != right[index].Model || left[index].UpstreamModel != right[index].UpstreamModel || !sameModels(left[index].ReasoningEfforts, right[index].ReasoningEfforts) {
+			return false
+		}
+	}
+	return true
 }

@@ -68,7 +68,7 @@ func ExportAccounts(cfg config.Config, request AccountExportRequest) (AccountImp
 			APIKey: account.APIKey, APIKeyEnv: account.APIKeyEnv,
 			AuthHeader: account.AuthHeader, AuthScheme: account.AuthScheme,
 			Headers: cloneStringMap(account.Headers), HeadersEnv: cloneStringMap(account.HeadersEnv),
-			Models: append([]string(nil), account.Models...), ModelMap: cloneStringMap(account.ModelMap),
+			Models: append([]string(nil), account.Models...), ModelMap: cloneStringMap(account.ModelMap), Capabilities: append([]config.ChannelCapability(nil), account.Capabilities...),
 			Operations: append([]string(nil), account.Operations...),
 			Priority:   account.Priority, Weight: account.Weight, Concurrency: account.Concurrency,
 		}

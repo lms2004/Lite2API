@@ -87,30 +87,6 @@
   }
   .route-chain-explain.qc-help-enhanced { position: relative; padding-right: 38px; }
 
-  .qc-chart-disclosure {
-    margin-bottom: 10px;
-    border: 1px solid var(--separator);
-    border-radius: var(--radius-panel);
-    background: var(--surface-1);
-  }
-  .qc-chart-disclosure > summary {
-    min-height: 40px;
-    padding: 8px 11px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    list-style: none;
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 680;
-  }
-  .qc-chart-disclosure > summary::-webkit-details-marker { display: none; }
-  .qc-chart-disclosure > summary::after { content: "展开"; color: var(--text-tertiary); font-size: 9px; font-weight: 500; }
-  .qc-chart-disclosure[open] > summary { border-bottom: 1px solid var(--separator); }
-  .qc-chart-disclosure[open] > summary::after { content: "收起"; }
-  .qc-chart-disclosure .chart-grid { padding: 10px; }
-
   .qc-route-draft {
     position: fixed;
     left: calc(var(--sidebar-width) + 20px);
@@ -285,6 +261,9 @@
     .monitor-metrics .metric-card strong { font-size: 23px; }
     .route-health-row { grid-template-columns: minmax(68px, .8fr) minmax(115px, 1.5fr) 60px 16px; }
     .route-health-row .route-latency { display: none; }
+    .chart-toolbar { align-items: stretch; flex-direction: column; gap: 7px; }
+    .chart-range { justify-content: space-between; }
+    .chart-range select { flex: 1; }
     .chart-wrap { height: 150px; }
     .chart-title span { display: none; }
     .monitor-toolbar { grid-template-columns: 1fr 1fr; }

@@ -45,7 +45,7 @@ func TestExportAccountsSelectedAndProxyRoundTrip(t *testing.T) {
 	cfg := config.Normalize(config.Config{
 		Server: config.Defaults().Server,
 		Accounts: []config.Account{
-			{ID: "one", Name: "One", Type: "openai", AdapterID: "generic-openai", InstanceID: "primary", BaseURL: "https://api.example.com/v1", APIKey: "secret", Headers: map[string]string{"X-Secret": "header"}, Models: []string{"m"}, ModelMap: map[string]string{"alias": "m"}, Operations: []string{config.OperationOpenAIChat}, Enabled: enabled, ProxyURL: "socks5://user:pass@127.0.0.1:1080"},
+			{ID: "one", Name: "One", Type: "openai", AdapterID: "generic-openai", InstanceID: "primary", BaseURL: "https://api.example.com/v1", APIKey: "secret", Headers: map[string]string{"X-Secret": "header"}, Models: []string{"m"}, ModelMap: map[string]string{"alias": "m"}, Capabilities: []config.ChannelCapability{{Model: "alias", UpstreamModel: "m", ReasoningEfforts: []string{"auto", "high"}}}, Operations: []string{config.OperationOpenAIChat}, Enabled: enabled, ProxyURL: "socks5://user:pass@127.0.0.1:1080"},
 			{ID: "two", Name: "Two", Type: "openai", BaseURL: "https://other.example.com/v1", APIKeyEnv: "OTHER_KEY", Enabled: enabled},
 		},
 		Routes: map[string]config.Route{},
@@ -63,6 +63,9 @@ func TestExportAccountsSelectedAndProxyRoundTrip(t *testing.T) {
 	if data.Accounts[0].AdapterID != "generic-openai" || data.Accounts[0].InstanceID != "primary" || len(data.Accounts[0].Operations) != 1 {
 		t.Fatalf("adapter metadata was not exported: %+v", data.Accounts[0])
 	}
+	if len(data.Accounts[0].Capabilities) != 1 || data.Accounts[0].Capabilities[0].Model != "alias" {
+		t.Fatalf("capability metadata was not exported: %+v", data.Accounts[0])
+	}
 
 	g := newTestGateway(t, nil, nil)
 	result, err := g.ImportAccounts(AccountImportRequest{Data: data})
@@ -74,6 +77,9 @@ func TestExportAccountsSelectedAndProxyRoundTrip(t *testing.T) {
 	}
 	if account := g.Config().Accounts[0]; account.AdapterID != "generic-openai" || account.InstanceID != "primary" || len(account.Operations) != 1 || account.Operations[0] != config.OperationOpenAIChat {
 		t.Fatalf("adapter metadata was not imported: %+v", account)
+	}
+	if len(g.Config().Accounts[0].Capabilities) != 1 || g.Config().Accounts[0].Capabilities[0].UpstreamModel != "m" {
+		t.Fatalf("capability metadata was not imported: %+v", g.Config().Accounts[0])
 	}
 }
 

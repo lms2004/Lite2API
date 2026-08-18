@@ -92,6 +92,11 @@ func (a *AccountRuntime) supports(model string) bool {
 			return true
 		}
 	}
+	for _, capability := range a.Config.Capabilities {
+		if capability.Model == model {
+			return true
+		}
+	}
 	return false
 }
 
@@ -101,6 +106,11 @@ func (a *AccountRuntime) upstreamModel(requested, routeModel string) string {
 	}
 	if mapped := a.Config.ModelMap[requested]; mapped != "" {
 		return mapped
+	}
+	for _, capability := range a.Config.Capabilities {
+		if capability.Model == requested {
+			return capability.UpstreamModel
+		}
 	}
 	return requested
 }
@@ -207,18 +217,40 @@ func (s *Scheduler) Models() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	set := make(map[string]struct{})
+	routedLogicalModels := make(map[string]struct{})
 	for model, route := range s.routes {
 		if s.routeEnabled(route) {
 			set[model] = struct{}{}
+			if route.Model != "" {
+				routedLogicalModels[route.Model] = struct{}{}
+			}
 		}
 	}
 	for _, account := range s.accounts {
 		if !account.Config.Enabled {
 			continue
 		}
-		// Capability-backed account model IDs select a concrete upstream channel
-		// and must stay hidden behind stable route aliases.
+		// Capability-backed accounts expose their logical models until an enabled
+		// route claims them. Once routed, the stable route alias is advertised
+		// instead of the concrete channel model.
 		if len(account.Config.Capabilities) > 0 {
+			coveredUpstreamModels := make(map[string]struct{}, len(account.Config.Capabilities))
+			for _, capability := range account.Config.Capabilities {
+				coveredUpstreamModels[capability.UpstreamModel] = struct{}{}
+				if capability.Model == "" {
+					continue
+				}
+				if _, routed := routedLogicalModels[capability.Model]; !routed {
+					set[capability.Model] = struct{}{}
+				}
+			}
+			for _, model := range account.Config.Models {
+				if model != "*" {
+					if _, covered := coveredUpstreamModels[model]; !covered {
+						set[model] = struct{}{}
+					}
+				}
+			}
 			continue
 		}
 		for _, model := range account.Config.Models {

@@ -222,6 +222,56 @@ func TestSchedulerResolvesLogicalModelPerRealChannel(t *testing.T) {
 	}
 }
 
+func TestSchedulerAdvertisesAndResolvesUnroutedLogicalCapability(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{
+		ID: "codex", Type: "openai", BaseURL: "http://127.0.0.1:1/v1",
+		Models: []string{"gpt-5.6-sol"}, Enabled: true, Weight: 1,
+		Capabilities: []config.ChannelCapability{{
+			Model: "sol", UpstreamModel: "gpt-5.6-sol", ReasoningEfforts: []string{"auto", "max"},
+		}},
+	}}
+	s := NewScheduler(cfg)
+	if models := s.Models(); len(models) != 1 || models[0] != "sol" {
+		t.Fatalf("models=%v, want direct logical capability", models)
+	}
+	selection, err := s.Select(context.Background(), "sol", config.OperationOpenAIResponses, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Model != "gpt-5.6-sol" {
+		t.Fatalf("direct capability selected model=%q", selection.Model)
+	}
+	selection.Release()
+
+	cfg.Routes["sol-max"] = config.Route{
+		Model: "sol", ReasoningEffort: "max",
+		Targets: []config.RouteTarget{{Account: "codex"}},
+	}
+	s = NewScheduler(cfg)
+	models := s.Models()
+	if !containsModel(models, "sol-max") || containsModel(models, "sol") {
+		t.Fatalf("routed capability models=%v, want route alias only", models)
+	}
+	selection, err = s.Select(context.Background(), "sol-max", config.OperationOpenAIResponses, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer selection.Release()
+	if selection.Model != "gpt-5.6-sol" || selection.ReasoningEffort != "max" {
+		t.Fatalf("routed capability selection=%+v", selection)
+	}
+}
+
+func containsModel(models []string, wanted string) bool {
+	for _, model := range models {
+		if model == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestModelsHideDisabledAccounts(t *testing.T) {
 	cfg := schedulerConfig()
 	cfg.Accounts = append(cfg.Accounts, config.Account{

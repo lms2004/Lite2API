@@ -39,30 +39,31 @@ type AccountImportProxy struct {
 // of a Sub2API account export. OAuth/cookie credentials deliberately stay in
 // external adapters and are never guessed into an upstream API key.
 type AccountImportItem struct {
-	ID          string            `json:"id,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Platform    string            `json:"platform,omitempty"`
-	Type        string            `json:"type,omitempty"`
-	AdapterID   string            `json:"adapter_id,omitempty"`
-	InstanceID  string            `json:"instance_id,omitempty"`
-	BaseURL     string            `json:"base_url,omitempty"`
-	APIKey      string            `json:"api_key,omitempty"`
-	APIKeyEnv   string            `json:"api_key_env,omitempty"`
-	AuthHeader  string            `json:"auth_header,omitempty"`
-	AuthScheme  string            `json:"auth_scheme,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	HeadersEnv  map[string]string `json:"headers_env,omitempty"`
-	Models      []string          `json:"models,omitempty"`
-	ModelMap    map[string]string `json:"model_map,omitempty"`
-	Operations  []string          `json:"operations,omitempty"`
-	Priority    int               `json:"priority,omitempty"`
-	Weight      int               `json:"weight,omitempty"`
-	Concurrency int               `json:"concurrency,omitempty"`
-	Enabled     *bool             `json:"enabled,omitempty"`
-	ProxyURL    string            `json:"proxy_url,omitempty"`
-	ProxyKey    *string           `json:"proxy_key,omitempty"`
-	Credentials map[string]any    `json:"credentials,omitempty"`
-	Extra       map[string]any    `json:"extra,omitempty"`
+	ID           string                     `json:"id,omitempty"`
+	Name         string                     `json:"name,omitempty"`
+	Platform     string                     `json:"platform,omitempty"`
+	Type         string                     `json:"type,omitempty"`
+	AdapterID    string                     `json:"adapter_id,omitempty"`
+	InstanceID   string                     `json:"instance_id,omitempty"`
+	BaseURL      string                     `json:"base_url,omitempty"`
+	APIKey       string                     `json:"api_key,omitempty"`
+	APIKeyEnv    string                     `json:"api_key_env,omitempty"`
+	AuthHeader   string                     `json:"auth_header,omitempty"`
+	AuthScheme   string                     `json:"auth_scheme,omitempty"`
+	Headers      map[string]string          `json:"headers,omitempty"`
+	HeadersEnv   map[string]string          `json:"headers_env,omitempty"`
+	Models       []string                   `json:"models,omitempty"`
+	ModelMap     map[string]string          `json:"model_map,omitempty"`
+	Capabilities []config.ChannelCapability `json:"capabilities,omitempty"`
+	Operations   []string                   `json:"operations,omitempty"`
+	Priority     int                        `json:"priority,omitempty"`
+	Weight       int                        `json:"weight,omitempty"`
+	Concurrency  int                        `json:"concurrency,omitempty"`
+	Enabled      *bool                      `json:"enabled,omitempty"`
+	ProxyURL     string                     `json:"proxy_url,omitempty"`
+	ProxyKey     *string                    `json:"proxy_key,omitempty"`
+	Credentials  map[string]any             `json:"credentials,omitempty"`
+	Extra        map[string]any             `json:"extra,omitempty"`
 }
 
 type AccountImportRequest struct {
@@ -262,7 +263,7 @@ func (item AccountImportItem) toAccount(index int, proxyURLs map[string]string) 
 		InstanceID: strings.TrimSpace(item.InstanceID), BaseURL: baseURL,
 		APIKey: apiKey, APIKeyEnv: apiKeyEnv, AuthHeader: authHeader, AuthScheme: authScheme,
 		Headers: cloneStringMap(item.Headers), HeadersEnv: cloneStringMap(item.HeadersEnv),
-		Models: models, ModelMap: modelMap, Operations: append([]string(nil), item.Operations...),
+		Models: models, ModelMap: modelMap, Capabilities: append([]config.ChannelCapability(nil), item.Capabilities...), Operations: append([]string(nil), item.Operations...),
 		Priority: item.Priority, Weight: item.Weight,
 		Concurrency: item.Concurrency, Enabled: enabled, ProxyURL: proxyURL,
 	}

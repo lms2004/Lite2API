@@ -47,7 +47,9 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer "+serviceKey {
 				t.Errorf("missing service authorization")
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{{"id": "gpt-test"}, {"id": "claude-test"}}})
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{
+				{"id": "gpt-test"}, {"id": "claude-test"}, {"id": "gpt-5.6-sol"}, {"id": "gpt-5.6-luna"}, {"id": "fast"},
+			}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -83,7 +85,14 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	var found bool
 	for _, account := range g.Config().Accounts {
 		if account.ID == "cliproxy-oauth" {
-			found = account.Enabled && len(account.Models) == 2 && account.APIKeyEnv == "CLIPROXYAPI_KEY"
+			hasSolCapability := false
+			for _, capability := range account.Capabilities {
+				if capability.Model == "sol" && capability.UpstreamModel == "gpt-5.6-sol" && containsModel(capability.ReasoningEfforts, "max") {
+					hasSolCapability = true
+					break
+				}
+			}
+			found = account.Enabled && len(account.Models) == 5 && account.APIKeyEnv == "CLIPROXYAPI_KEY" && hasSolCapability
 		}
 	}
 	if !found {

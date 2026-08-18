@@ -27,6 +27,15 @@ func TestQuietControlAssetsAreCanonical(t *testing.T) {
 		}
 	}
 
+	if !strings.Contains(page, `class="chart-grid"`) ||
+		!strings.Contains(page, `id="requestChart"`) ||
+		!strings.Contains(page, `id="latencyChart"`) {
+		t.Fatal("overview must keep both request and P95 chart canvases visible")
+	}
+	if strings.Contains(page, "qc-chart-disclosure") || strings.Contains(page, "overviewCharts") {
+		t.Fatal("overview charts must not be hidden behind a persisted disclosure")
+	}
+
 	forbidden := []string{
 		"Operations-first refinement",
 		"Console 2.1: one semantic layer",

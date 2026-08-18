@@ -42,6 +42,13 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/state" && r.Method == http.MethodGet:
 		stats, accounts := g.Stats(), state.scheduler.Snapshot()
 		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+	case path == "/trends" && r.Method == http.MethodGet:
+		duration, err := parseTrendRange(r.URL.Query().Get("range"))
+		if err != nil {
+			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_trend_range")
+			return
+		}
+		writeJSON(w, http.StatusOK, g.stats.Trend(time.Now(), duration))
 	case path == "/adapters" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"data": g.AdapterCatalog(r.Context(), state.cfg.Accounts)})
 	case path == "/prompt-test" && r.Method == http.MethodPost:
@@ -151,6 +158,23 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	default:
 		writeAPIError(w, 404, "admin endpoint not found", "not_found")
+	}
+}
+
+func parseTrendRange(value string) (time.Duration, error) {
+	switch strings.TrimSpace(value) {
+	case "", "24h":
+		return 24 * time.Hour, nil
+	case "1h":
+		return time.Hour, nil
+	case "6h":
+		return 6 * time.Hour, nil
+	case "3d":
+		return 3 * 24 * time.Hour, nil
+	case "7d":
+		return trendRetention, nil
+	default:
+		return 0, errors.New("range must be one of 1h, 6h, 24h, 3d or 7d")
 	}
 }
 

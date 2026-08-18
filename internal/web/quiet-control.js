@@ -7,7 +7,6 @@
   const STORAGE = {
     density: "lite2api.ui.density",
     routeHelp: "lite2api.routeHelpDismissed",
-    charts: "lite2api.overviewCharts",
     sourcePane: "lite2api.sourcesPane"
   };
   const interactiveSelector = "button,a,input,select,textarea,summary,[role='button']";
@@ -522,23 +521,6 @@
     if (persist) localStorage.setItem(STORAGE.routeHelp, show ? "0" : "1");
   }
 
-  function installChartDisclosure() {
-    const view = byId("view-monitor");
-    const grid = view?.querySelector(".chart-grid");
-    if (!view || !grid || grid.closest(".qc-chart-disclosure")) return;
-
-    const details = createElement("details", "qc-chart-disclosure");
-    const stored = localStorage.getItem(STORAGE.charts);
-    details.open = stored !== "closed";
-    const summary = createElement("summary", "", { text: "运行趋势 · 请求质量与 P95 延迟" });
-    grid.before(details);
-    details.append(summary, grid);
-    details.addEventListener("toggle", () => {
-      localStorage.setItem(STORAGE.charts, details.open ? "open" : "closed");
-      if (details.open) later(() => window.dispatchEvent(new Event("resize")));
-    });
-  }
-
   function syncClientSetupVisibility() {
     const setup = byId("clientSetup");
     const card = byId("createdKeyCard");
@@ -747,7 +729,6 @@
       syncFreshness();
       installSourceTabs();
       installRouteHelp();
-      installChartDisclosure();
       installRouteDraftBar();
     });
   }
@@ -833,7 +814,6 @@
     installSheet();
     installSourceTabs();
     installRouteHelp();
-    installChartDisclosure();
     installClientSetupGuard();
     installRouteDraftBar();
     installDialogFocusManagement();

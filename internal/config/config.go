@@ -301,6 +301,9 @@ func applyDefaults(cfg *Config) {
 		} else {
 			a.Operations = normalizeStringList(a.Operations)
 		}
+		if len(a.Capabilities) == 0 && strings.EqualFold(strings.TrimSpace(a.AdapterID), "cli-proxy-api") {
+			a.Capabilities = InferCodexCapabilities(a.Models)
+		}
 		for capabilityIndex := range a.Capabilities {
 			capability := &a.Capabilities[capabilityIndex]
 			capability.Model = strings.TrimSpace(capability.Model)

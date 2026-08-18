@@ -109,3 +109,61 @@ func TestValidateLogicalRouteAgainstRealChannelCapabilities(t *testing.T) {
 		t.Fatalf("low route through claude-code: %v", err)
 	}
 }
+
+func TestInferCodexCapabilitiesSeparatesModelAndReasoningEffort(t *testing.T) {
+	capabilities := InferCodexCapabilities([]string{
+		"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6", "fast", "claude-test", "gpt-test", "*",
+	})
+	if len(capabilities) != 4 {
+		t.Fatalf("capabilities=%+v, want four routable Codex models", capabilities)
+	}
+
+	byModel := make(map[string]ChannelCapability, len(capabilities))
+	for _, capability := range capabilities {
+		byModel[capability.Model] = capability
+	}
+	for _, model := range []string{"luna", "sol", "fast", "gpt-test"} {
+		if _, ok := byModel[model]; !ok {
+			t.Fatalf("missing logical model %q in %+v", model, capabilities)
+		}
+	}
+	if got := byModel["sol"].UpstreamModel; got != "gpt-5.6-sol" {
+		t.Fatalf("sol upstream model=%q", got)
+	}
+	if !containsString(byModel["sol"].ReasoningEfforts, "max") || !containsString(byModel["luna"].ReasoningEfforts, "max") {
+		t.Fatalf("GPT-5.6 capabilities must support max: %+v", byModel)
+	}
+	if len(byModel["fast"].ReasoningEfforts) != 1 || byModel["fast"].ReasoningEfforts[0] != "auto" {
+		t.Fatalf("unknown fast preset must delegate conservatively: %+v", byModel["fast"])
+	}
+	if _, ok := byModel["claude-test"]; ok {
+		t.Fatal("non-Codex model was inferred as a Codex capability")
+	}
+}
+
+func TestNormalizeBackfillsCLIProxyCapabilities(t *testing.T) {
+	cfg := Normalize(Config{
+		Server: Defaults().Server,
+		Accounts: []Account{{
+			ID: "cliproxy-oauth", Type: "openai", AdapterID: "cli-proxy-api",
+			BaseURL: "http://127.0.0.1:45682/v1", Models: []string{"gpt-5.6-sol"}, Enabled: true,
+		}},
+		Routes: map[string]Route{},
+	})
+	if len(cfg.Accounts) != 1 || len(cfg.Accounts[0].Capabilities) != 1 {
+		t.Fatalf("normalized account capabilities=%+v", cfg.Accounts)
+	}
+	capability := cfg.Accounts[0].Capabilities[0]
+	if capability.Model != "sol" || capability.UpstreamModel != "gpt-5.6-sol" || !containsString(capability.ReasoningEfforts, "max") {
+		t.Fatalf("unexpected normalized capability=%+v", capability)
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}

@@ -74,6 +74,23 @@
   .warn-text { color: var(--warning); }
   .bad-text { color: var(--danger); }
 
+  .chart-toolbar {
+    min-height: 42px;
+    margin-bottom: 10px;
+    padding: 7px 11px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-panel);
+    background: var(--surface-1);
+  }
+  .chart-toolbar-title { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+  .chart-toolbar-title strong { color: var(--text-secondary); font-size: 11px; }
+  .chart-toolbar-title span { color: var(--text-tertiary); font-size: 10px; }
+  .chart-range { display: inline-flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+  .chart-range select { min-height: 30px; padding: 5px 8px; font-size: 10px; }
   .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .chart-panel { margin: 0; }
   .chart-head { min-height: 42px; padding: 8px 12px; }
