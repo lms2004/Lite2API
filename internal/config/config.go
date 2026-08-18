@@ -92,19 +92,12 @@ type Route struct {
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
-// ChannelCapability maps one operator-facing logical model and reasoning
-// profile to the concrete model ID that selects this real upstream channel.
-// Multiple entries may share Model when a channel uses separate upstream IDs
-// for low/high variants.
 type ChannelCapability struct {
 	Model            string   `json:"model"`
 	UpstreamModel    string   `json:"upstream_model"`
 	ReasoningEfforts []string `json:"reasoning_efforts"`
 }
 
-// RouteTarget is one explicit hop in a route's ordered fallback chain. Targets
-// are attempted in array order; unlike the legacy Accounts field, every hop can
-// select its own upstream model and reasoning profile.
 type RouteTarget struct {
 	Account         string `json:"account"`
 	Model           string `json:"model"`
@@ -113,9 +106,7 @@ type RouteTarget struct {
 
 type Duration struct{ time.Duration }
 
-func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.String())
-}
+func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(d.String()) }
 
 func (d *Duration) UnmarshalJSON(data []byte) error {
 	var text string
@@ -233,7 +224,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.RequestReadTimeout.Duration <= 0 {
 		cfg.Server.RequestReadTimeout = d.RequestReadTimeout
 	}
-	// QueueTimeout intentionally keeps an explicit zero value (fail fast).
 	if cfg.Server.ResponseHeaderTimeout.Duration == 0 {
 		cfg.Server.ResponseHeaderTimeout = d.ResponseHeaderTimeout
 	}
@@ -493,9 +483,6 @@ func accountByID(accounts []Account, id string) (Account, bool) {
 	return Account{}, false
 }
 
-// AccountSupportsTargetModel accepts both directly advertised model IDs and
-// concrete model IDs reached through an account model_map. An empty model list
-// remains a wildcard for compatibility with existing account configuration.
 func AccountSupportsTargetModel(account Account, model string) bool {
 	if len(account.Models) == 0 {
 		return true
@@ -522,9 +509,6 @@ func ValidReasoningEffort(effort string) bool {
 	}
 }
 
-// ResolveRouteTarget converts a logical route choice into the concrete model
-// ID for one real channel. Routes without a logical Model keep the legacy
-// per-target behavior for backward compatibility.
 func ResolveRouteTarget(account Account, route Route, target RouteTarget) (model, reasoningEffort string, ok bool) {
 	if strings.TrimSpace(route.Model) == "" {
 		model = strings.TrimSpace(target.Model)
@@ -587,6 +571,7 @@ func (c Config) GatewayKeys() []string {
 			if key = strings.TrimSpace(key); key != "" {
 				keys = append(keys, key)
 			}
+		}
 	}
 	return slices.Compact(keys)
 }
