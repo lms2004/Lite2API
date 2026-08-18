@@ -1,7 +1,12 @@
-/* Native v7 — capability picker. */
+/* Native v7 — capability-aware route controls. */
 html[data-ui="native-v7"] .route-intent{
-  grid-template-columns:minmax(260px,1.1fr) minmax(320px,1fr) minmax(180px,.75fr);
+  grid-template-columns:minmax(250px,1.15fr) minmax(300px,1fr) 150px;
   align-items:end;
+}
+html[data-ui="native-v7"] .route-intent-note{
+  grid-column:1/-1;
+  min-height:24px;
+  align-items:center;
 }
 .v7-native-select,.v7-effort-select{
   position:absolute!important;
@@ -35,7 +40,7 @@ html[data-ui="native-v7"] .route-intent{
 .v7-model-trigger-copy small{display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:9px;font-weight:450}
 .v7-model-trigger-arrow{flex:0 0 auto;color:var(--muted);font-size:13px}
 
-.v7-effort-control{
+.v7-effort-control,.v7-mode-control{
   min-height:48px;
   padding:4px;
   display:flex;
@@ -46,8 +51,8 @@ html[data-ui="native-v7"] .route-intent{
   background:var(--surface-2);
   scrollbar-width:none;
 }
-.v7-effort-control::-webkit-scrollbar{display:none}
-.v7-effort-option{
+.v7-effort-control::-webkit-scrollbar,.v7-mode-control::-webkit-scrollbar{display:none}
+.v7-effort-option,.v7-mode-option{
   min-width:42px;
   min-height:38px;
   padding:5px 9px;
@@ -60,12 +65,15 @@ html[data-ui="native-v7"] .route-intent{
   font-weight:550;
   white-space:nowrap;
 }
-.v7-effort-option:hover{background:rgba(120,120,128,.08);color:var(--text)}
-.v7-effort-option[aria-checked="true"]{
+.v7-effort-option:hover,.v7-mode-option:hover{background:rgba(120,120,128,.08);color:var(--text)}
+.v7-effort-option[aria-checked="true"],.v7-mode-option[aria-checked="true"]{
   background:var(--surface);
   color:var(--text);
   box-shadow:0 1px 3px rgba(0,0,0,.10);
 }
+.v7-mode-option[aria-checked="true"]:last-child{color:var(--blue)}
+.v7-mode-field{display:grid;gap:6px;min-width:0}
+.v7-field-label{color:var(--muted);font-size:10px}
 
 .v7-model-dialog{
   width:min(680px,calc(100vw - 28px));
@@ -165,9 +173,16 @@ html[data-ui="native-v7"] .route-intent{
 .v7-model-empty{padding:48px 16px;color:var(--muted);text-align:center}
 .v7-model-dialog-foot{padding:9px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:9px}
 
+@media(max-width:1080px){
+  html[data-ui="native-v7"] .route-intent{grid-template-columns:1fr 1fr}
+  .v7-mode-field{grid-column:1/-1;max-width:220px}
+  html[data-ui="native-v7"] .route-intent-note{grid-column:1/-1}
+}
 @media(max-width:900px){
   html[data-ui="native-v7"] .route-intent{grid-template-columns:1fr}
-  .v7-effort-control{width:100%}
+  .v7-effort-control,.v7-mode-control{width:100%}
+  .v7-mode-field{grid-column:auto;max-width:none}
+  html[data-ui="native-v7"] .route-intent-note{grid-column:auto}
 }
 @media(max-width:620px){
   .v7-model-dialog{width:100vw;max-width:none;height:100dvh;max-height:none;border:0;border-radius:0}

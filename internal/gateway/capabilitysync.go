@@ -19,13 +19,9 @@ const capabilityDiscoveryInterval = 10 * time.Minute
 
 type discoveredCapabilityUpdate struct {
 	AccountID string
-	Models    []string
+	Catalog   []config.DiscoveredModel
 }
 
-// runCapabilityDiscovery keeps adapter-backed model catalogs fresh without
-// making the request path depend on discovery. A failed /models endpoint never
-// disables an otherwise working account; the last known capabilities remain in
-// place until a later successful observation.
 func (g *Gateway) runCapabilityDiscovery(ctx context.Context) {
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -57,19 +53,17 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		if client == nil {
 			continue
 		}
-		models, err := discoverModelsForAccount(ctx, client, account)
+		catalog, err := discoverModelsForAccount(ctx, client, account)
 		if err != nil {
-			// Many OpenAI-compatible services do not expose /models. Discovery is
-			// opportunistic and must not turn that into an operational incident.
 			slog.Debug("upstream model discovery skipped", "account", account.ID, "error", err)
 			failures = append(failures, account.ID)
 			continue
 		}
-		models = config.FilterDiscoveredModels(account, models)
-		if len(models) == 0 {
+		catalog = config.FilterDiscoveredCatalog(account, catalog)
+		if len(catalog) == 0 {
 			continue
 		}
-		updates = append(updates, discoveredCapabilityUpdate{AccountID: account.ID, Models: models})
+		updates = append(updates, discoveredCapabilityUpdate{AccountID: account.ID, Catalog: catalog})
 	}
 
 	changedAccounts := 0
@@ -79,9 +73,15 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 			continue
 		}
 		updated := current
-		updated.Models = appendUniqueModels(current.Models, update.Models)
-		inferred := config.InferDiscoveredCapabilities(updated, updated.Models)
-		updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
+		discoveredIDs := discoveredModelIDs(update.Catalog)
+		inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
+		if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
+			updated.Models = discoveredIDs
+			updated.Capabilities = inferred
+		} else {
+			updated.Models = appendUniqueModels(current.Models, discoveredIDs)
+			updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
+		}
 		if sameModels(current.Models, updated.Models) && sameChannelCapabilities(current.Capabilities, updated.Capabilities) {
 			continue
 		}
@@ -99,7 +99,28 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 	return nil
 }
 
-func discoverModelsForAccount(ctx context.Context, client *http.Client, account config.Account) ([]string, error) {
+func discoverModelsForAccount(ctx context.Context, client *http.Client, account config.Account) ([]config.DiscoveredModel, error) {
+	if config.UseRichCodexCatalog(account) {
+		return fetchDiscoveredCatalog(ctx, client, account, true)
+	}
+	catalog, err := fetchDiscoveredCatalog(ctx, client, account, false)
+	if err != nil {
+		return nil, err
+	}
+	if config.UseRichCodexSupplement(account) {
+		// Lite2API's default cliproxy-oauth connection aggregates Claude, Gemini,
+		// Antigravity and Codex. Keep its complete /models list, then enrich only
+		// the Codex entries with the richer client catalog.
+		if rich, richErr := fetchDiscoveredCatalog(ctx, client, account, true); richErr == nil {
+			catalog = mergeDiscoveredCatalog(catalog, rich)
+		} else {
+			slog.Debug("Codex rich catalog supplement unavailable", "account", account.ID, "error", richErr)
+		}
+	}
+	return catalog, nil
+}
+
+func fetchDiscoveredCatalog(ctx context.Context, client *http.Client, account config.Account, rich bool) ([]config.DiscoveredModel, error) {
 	base, err := url.Parse(strings.TrimSpace(account.BaseURL))
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, errors.New("invalid account base URL")
@@ -108,6 +129,11 @@ func discoverModelsForAccount(ctx context.Context, client *http.Client, account 
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/models"
 	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
+	if rich {
+		query := endpoint.Query()
+		query.Set("client_version", "lite2api")
+		endpoint.RawQuery = query.Encode()
+	}
 
 	discoveryCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
@@ -138,21 +164,39 @@ func discoverModelsForAccount(ctx context.Context, client *http.Client, account 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("models endpoint returned %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return nil, err
 	}
-	models := decodeDiscoveredModelIDs(data)
+	models := decodeDiscoveredModels(data)
 	if len(models) == 0 {
 		return nil, errors.New("models endpoint returned no model IDs")
 	}
 	return models, nil
 }
 
-func decodeDiscoveredModelIDs(data []byte) []string {
-	type modelObject struct {
-		ID string `json:"id"`
+func mergeDiscoveredCatalog(base, rich []config.DiscoveredModel) []config.DiscoveredModel {
+	result := make([]config.DiscoveredModel, len(base))
+	copy(result, base)
+	byID := make(map[string]int, len(base)+len(rich))
+	for index, model := range result {
+		byID[model.ID] = index
 	}
+	for _, model := range rich {
+		if index, exists := byID[model.ID]; exists {
+			current := result[index]
+			current.ReasoningEfforts = mergeOrderedStrings(current.ReasoningEfforts, model.ReasoningEfforts)
+			current.ServiceTiers = mergeOrderedStrings(current.ServiceTiers, model.ServiceTiers)
+			result[index] = current
+			continue
+		}
+		byID[model.ID] = len(result)
+		result = append(result, model)
+	}
+	return result
+}
+
+func decodeDiscoveredModels(data []byte) []config.DiscoveredModel {
 	var envelope struct {
 		Data   []json.RawMessage `json:"data"`
 		Models []json.RawMessage `json:"models"`
@@ -168,26 +212,81 @@ func decodeDiscoveredModelIDs(data []byte) []string {
 			items = direct
 		}
 	}
-	result := make([]string, 0, len(items))
+
+	result := make([]config.DiscoveredModel, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, raw := range items {
+		model := decodeDiscoveredModel(raw)
+		if model.ID == "" || model.ID == "*" {
+			continue
+		}
+		if _, exists := seen[model.ID]; exists {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		result = append(result, model)
+	}
+	return result
+}
+
+func decodeDiscoveredModel(raw json.RawMessage) config.DiscoveredModel {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return config.DiscoveredModel{ID: strings.TrimSpace(text)}
+	}
+	var item struct {
+		ID                       string            `json:"id"`
+		Slug                     string            `json:"slug"`
+		SupportedReasoningLevels []json.RawMessage `json:"supported_reasoning_levels"`
+		ServiceTiers             []json.RawMessage `json:"service_tiers"`
+		AdditionalSpeedTiers     []string          `json:"additional_speed_tiers"`
+	}
+	if json.Unmarshal(raw, &item) != nil {
+		return config.DiscoveredModel{}
+	}
+	id := strings.TrimSpace(item.ID)
+	if id == "" {
+		id = strings.TrimSpace(item.Slug)
+	}
+	reasoning := rawStringOrObjectValues(item.SupportedReasoningLevels, "effort")
+	tiers := rawStringOrObjectValues(item.ServiceTiers, "id")
+	tiers = append(tiers, item.AdditionalSpeedTiers...)
+	return config.DiscoveredModel{ID: id, ReasoningEfforts: reasoning, ServiceTiers: tiers}
+}
+
+func rawStringOrObjectValues(items []json.RawMessage, key string) []string {
+	result := make([]string, 0, len(items))
+	for _, raw := range items {
 		var text string
-		if err := json.Unmarshal(raw, &text); err != nil {
-			var item modelObject
-			if json.Unmarshal(raw, &item) != nil {
-				continue
+		if json.Unmarshal(raw, &text) == nil {
+			if text = strings.TrimSpace(text); text != "" {
+				result = append(result, text)
 			}
-			text = item.ID
-		}
-		text = strings.TrimSpace(text)
-		if text == "" || text == "*" {
 			continue
 		}
-		if _, exists := seen[text]; exists {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(raw, &object) != nil {
 			continue
 		}
-		seen[text] = struct{}{}
-		result = append(result, text)
+		if json.Unmarshal(object[key], &text) == nil {
+			if text = strings.TrimSpace(text); text != "" {
+				result = append(result, text)
+			}
+		}
+	}
+	return result
+}
+
+func decodeDiscoveredModelIDs(data []byte) []string {
+	return discoveredModelIDs(decodeDiscoveredModels(data))
+}
+
+func discoveredModelIDs(models []config.DiscoveredModel) []string {
+	result := make([]string, 0, len(models))
+	for _, model := range models {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			result = append(result, id)
+		}
 	}
 	return result
 }

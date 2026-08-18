@@ -24,6 +24,9 @@ func TestFilterDiscoveredModelsScopesSharedCLIProxy(t *testing.T) {
 	if len(got) != len(models) {
 		t.Fatalf("aggregate scope=%v", got)
 	}
+	if !UseRichCodexCatalog(codex) || UseRichCodexCatalog(aggregate) || UseRichCodexCatalog(claude) {
+		t.Fatal("rich Codex catalog must only be requested for Codex-scoped CLIProxy connections")
+	}
 }
 
 func TestInferDiscoveredCapabilitiesUnifiesProviderSpecificModels(t *testing.T) {
@@ -47,6 +50,56 @@ func TestInferDiscoveredCapabilitiesUnifiesProviderSpecificModels(t *testing.T) 
 	}
 }
 
+func TestInferRichCodexCatalogCreatesFastProfile(t *testing.T) {
+	account := Account{ID: "cliproxy-codex", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: "http://127.0.0.1:8317/v1"}
+	caps := InferDiscoveredModelCapabilities(account, []DiscoveredModel{{
+		ID:               "gpt-5.6-sol",
+		ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
+		ServiceTiers:     []string{"priority"},
+	}})
+	byModel := make(map[string]ChannelCapability, len(caps))
+	for _, capability := range caps {
+		byModel[capability.Model] = capability
+	}
+	standard, ok := byModel["sol"]
+	if !ok || standard.UpstreamModel != "gpt-5.6-sol" {
+		t.Fatalf("standard capability=%+v", standard)
+	}
+	fast, ok := byModel["sol@fast"]
+	if !ok || fast.UpstreamModel != "gpt-5.6-sol" {
+		t.Fatalf("fast capability=%+v", fast)
+	}
+	for _, effort := range []string{"auto", "low", "medium", "high", "xhigh", "max"} {
+		if !containsString(fast.ReasoningEfforts, effort) {
+			t.Fatalf("missing effort %q in Fast profile %v", effort, fast.ReasoningEfforts)
+		}
+	}
+}
+
+func TestOfficialOpenAIFastFallbackIsConservative(t *testing.T) {
+	official := Account{ID: "openai", Type: "openai", BaseURL: "https://api.openai.com/v1"}
+	caps := InferDiscoveredModelCapabilities(official, []DiscoveredModel{{ID: "gpt-5.6-terra"}})
+	if !hasCapabilityModel(caps, "terra@fast") {
+		t.Fatalf("official OpenAI catalog should expose documented Fast profile: %+v", caps)
+	}
+	proxy := Account{ID: "proxy", Type: "openai", BaseURL: "https://proxy.example/v1"}
+	caps = InferDiscoveredModelCapabilities(proxy, []DiscoveredModel{{ID: "gpt-5.6-terra"}})
+	if hasCapabilityModel(caps, "terra@fast") {
+		t.Fatalf("third-party catalog without service tier metadata must not guess Fast support: %+v", caps)
+	}
+}
+
+func TestLegacyFastSlugIsNotExposedAsConcreteModel(t *testing.T) {
+	account := Account{ID: "aggregate", Type: "openai", AdapterID: "cli-proxy-api"}
+	caps := InferDiscoveredCapabilities(account, []string{"fast", "gpt-5.6-fast", "gpt-5.6-sol"})
+	if hasCapabilityModel(caps, "fast") || hasCapabilityModel(caps, "gpt-5.6-fast") {
+		t.Fatalf("legacy Fast slug leaked into concrete model catalog: %+v", caps)
+	}
+	if !hasCapabilityModel(caps, "sol") {
+		t.Fatalf("real model disappeared while filtering legacy Fast slug: %+v", caps)
+	}
+}
+
 func TestInferCodexCapabilitiesPrefersCanonicalModelID(t *testing.T) {
 	caps := InferCodexCapabilities([]string{"gpt-5.6", "sol", "gpt-5.6-sol"})
 	if len(caps) != 1 {
@@ -60,4 +113,13 @@ func TestInferCodexCapabilitiesPrefersCanonicalModelID(t *testing.T) {
 			t.Fatalf("missing effort %q in %v", effort, caps[0].ReasoningEfforts)
 		}
 	}
+}
+
+func hasCapabilityModel(caps []ChannelCapability, model string) bool {
+	for _, capability := range caps {
+		if capability.Model == model {
+			return true
+		}
+	}
+	return false
 }

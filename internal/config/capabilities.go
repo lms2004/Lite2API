@@ -58,8 +58,11 @@ func InferCodexCapabilities(models []string) []ChannelCapability {
 
 func isCodexModelID(model string) bool {
 	normalized := normalizeCodexModelID(model)
+	if normalized == "fast" || normalized == "gpt-5.6-fast" {
+		return false
+	}
 	switch normalized {
-	case "sol", "luna", "terra", "fast", "sol-max":
+	case "sol", "luna", "terra", "sol-max":
 		return true
 	default:
 		return strings.HasPrefix(normalized, "gpt-") || strings.Contains(normalized, "codex")
@@ -74,8 +77,6 @@ func codexLogicalModel(upstreamModel string) string {
 		return "luna"
 	case "gpt-5.6-terra", "terra":
 		return "terra"
-	case "gpt-5.6-fast", "fast":
-		return "fast"
 	case "gpt-5.6-sol-max", "sol-max":
 		return "sol-max"
 	default:
@@ -102,11 +103,11 @@ func supportsGPT56Reasoning(model string) bool {
 
 func codexModelPreference(model string) int {
 	switch normalizeCodexModelID(model) {
-	case "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-fast", "gpt-5.6-sol-max":
+	case "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol-max":
 		return 3
 	case "gpt-5.6":
 		return 2
-	case "sol", "luna", "terra", "fast", "sol-max":
+	case "sol", "luna", "terra", "sol-max":
 		return 1
 	default:
 		return 2

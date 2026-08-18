@@ -114,27 +114,27 @@ func TestInferCodexCapabilitiesSeparatesModelAndReasoningEffort(t *testing.T) {
 	capabilities := InferCodexCapabilities([]string{
 		"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6", "fast", "claude-test", "gpt-test", "*",
 	})
-	if len(capabilities) != 4 {
-		t.Fatalf("capabilities=%+v, want four routable Codex models", capabilities)
+	if len(capabilities) != 3 {
+		t.Fatalf("capabilities=%+v, want three concrete routable Codex models", capabilities)
 	}
 
 	byModel := make(map[string]ChannelCapability, len(capabilities))
 	for _, capability := range capabilities {
 		byModel[capability.Model] = capability
 	}
-	for _, model := range []string{"luna", "sol", "fast", "gpt-test"} {
+	for _, model := range []string{"luna", "sol", "gpt-test"} {
 		if _, ok := byModel[model]; !ok {
 			t.Fatalf("missing logical model %q in %+v", model, capabilities)
 		}
+	}
+	if _, ok := byModel["fast"]; ok {
+		t.Fatalf("Fast must be an execution profile, not a concrete model: %+v", capabilities)
 	}
 	if got := byModel["sol"].UpstreamModel; got != "gpt-5.6-sol" {
 		t.Fatalf("sol upstream model=%q", got)
 	}
 	if !containsString(byModel["sol"].ReasoningEfforts, "max") || !containsString(byModel["luna"].ReasoningEfforts, "max") {
 		t.Fatalf("GPT-5.6 capabilities must support max: %+v", byModel)
-	}
-	if len(byModel["fast"].ReasoningEfforts) != 1 || byModel["fast"].ReasoningEfforts[0] != "auto" {
-		t.Fatalf("unknown fast preset must delegate conservatively: %+v", byModel["fast"])
 	}
 	if _, ok := byModel["claude-test"]; ok {
 		t.Fatal("non-Codex model was inferred as a Codex capability")
