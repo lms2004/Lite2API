@@ -41,6 +41,8 @@ func (g *Gateway) Run(ctx context.Context) error {
 		slog.Info("lite2api listening", "address", cfg.Server.Listen)
 		errCh <- server.ListenAndServe()
 	}()
+	go g.runCapabilityDiscovery(ctx)
+
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)

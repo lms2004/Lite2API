@@ -10,8 +10,14 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	required := []string{
 		`dataset.ui = "native-v5"`,
 		`dataset.ui = "native-v6"`,
+		`dataset.ui = "native-v7"`,
 		`window.Lite2APINativeV5`,
 		`window.Lite2APINativeV6`,
+		`window.Lite2APINativeV7`,
+		`v7ModelDialog`,
+		`v7-model-trigger`,
+		`v7-effort-control`,
+		`搜索模型、上游或真实模型 ID`,
 		`id="view-monitor"`,
 		`id="view-routes"`,
 		`id="view-accounts"`,
@@ -73,7 +79,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function runExport(`,
 		`function targetOperationalState(`,
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.18-v6'`,
+		`const UI_BUILD='2026.08.18-v7'`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
 		`.key-setting-row`,
@@ -96,7 +102,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
-			t.Errorf("obsolete or unsafe UI surface leaked into native v6: %q", value)
+			t.Errorf("obsolete or unsafe UI surface leaked into native v7: %q", value)
 		}
 	}
 
@@ -105,7 +111,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		t.Error("all styles must remain inside the document head")
 	}
 	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("native v6 must expose one final style element")
+		t.Error("native v7 must expose one final style element")
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
