@@ -51,7 +51,7 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Verify Quiet Control source assets
+      - name: Verify UI source assets
         shell: bash
         run: |
           set -euo pipefail
@@ -59,11 +59,19 @@ jobs:
           test -s internal/web/quiet-control-pages.css
           test -s internal/web/quiet-control-enhancements.css
           test -s internal/web/quiet-control.js
+          test -s internal/web/apple-layout-v4.css
+          test -s internal/web/apple-layout-v4.js
           grep -Fq -- '--action: #4c8dff' internal/web/quiet-control-core.css
           grep -Fq -- '--healthy: #42c77a' internal/web/quiet-control-core.css
           grep -Fq -- '.nav{grid-template-columns:repeat(4,1fr)}' internal/web/quiet-control-enhancements.css
           grep -Fq -- 'content: attr(data-label)' internal/web/quiet-control-enhancements.css
           grep -Fq -- 'window.Lite2APIQuietControl' internal/web/quiet-control.js
+          grep -Fq -- '--canvas: #f5f5f7' internal/web/apple-layout-v4.css
+          grep -Fq -- '.apple-route-workspace' internal/web/apple-layout-v4.css
+          grep -Fq -- '.apple-overview-summary' internal/web/apple-layout-v4.css
+          grep -Fq -- 'window.Lite2APIAppleSimple' internal/web/apple-layout-v4.js
 
       - name: Check JavaScript syntax
-        run: node --check internal/web/quiet-control.js
+        run: |
+          node --check internal/web/quiet-control.js
+          node --check internal/web/apple-layout-v4.js
