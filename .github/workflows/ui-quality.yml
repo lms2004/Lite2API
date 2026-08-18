@@ -7,13 +7,15 @@ on:
       - "feat/**"
     paths:
       - "internal/web/**"
-      - "internal/gateway/server.go"
+      - "internal/config/**"
+      - "internal/gateway/**"
       - "go.mod"
       - ".github/workflows/ui-quality.yml"
   pull_request:
     paths:
       - "internal/web/**"
-      - "internal/gateway/server.go"
+      - "internal/config/**"
+      - "internal/gateway/**"
       - "go.mod"
       - ".github/workflows/ui-quality.yml"
 
@@ -26,7 +28,7 @@ concurrency:
 
 jobs:
   test:
-    name: Go tests and native UI contract
+    name: Go tests, discovery, and native UI contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -41,7 +43,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          files=$(gofmt -l internal/web internal/gateway)
+          files=$(gofmt -l internal/web internal/config internal/gateway)
           if [ -n "$files" ]; then
             echo "The following Go files require gofmt:"
             echo "$files"
@@ -51,14 +53,20 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Verify native source assets
+      - name: Verify capability and native source assets
         shell: bash
         run: |
           set -euo pipefail
+          test -s internal/config/capability_discovery.go
+          test -s internal/gateway/capabilitysync.go
+          grep -Fq -- 'capabilityDiscoveryInterval' internal/gateway/capabilitysync.go
+          grep -Fq -- 'InferDiscoveredCapabilities' internal/config/capability_discovery.go
           test -s internal/web/native-v5.css
           test -s internal/web/native-v5.js
           test -s internal/web/native-v6.css
           test -s internal/web/native-v6.js
+          test -s internal/web/native-v7.css
+          test -s internal/web/native-v7.js
           test -s internal/web/native-v5-shell.html
           test -s internal/web/native-v5-monitor.html
           test -s internal/web/native-v5-routes.html
@@ -66,10 +74,12 @@ jobs:
           test -s internal/web/native-v5-keys.html
           grep -Fq -- '--canvas:#f5f5f7' internal/web/native-v5.css
           grep -Fq -- '.grouped-surface,.grouped-section' internal/web/native-v6.css
-          grep -Fq -- '.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)' internal/web/native-v6.css
-          grep -Fq -- '.key-setting-row' internal/web/native-v6.css
+          grep -Fq -- '.v7-model-dialog' internal/web/native-v7.css
+          grep -Fq -- '.v7-effort-control' internal/web/native-v7.css
           grep -Fq -- 'window.Lite2APINativeV5' internal/web/native-v5.js
           grep -Fq -- 'window.Lite2APINativeV6' internal/web/native-v6.js
+          grep -Fq -- 'window.Lite2APINativeV7' internal/web/native-v7.js
+          grep -Fq -- '搜索模型、上游或真实模型 ID' internal/web/native-v7.js
           grep -Fq -- 'id="v5RouteList"' internal/web/native-v5-routes.html
           grep -Fq -- 'id="v6KeyList"' internal/web/native-v5-keys.html
           grep -Fq -- 'id="v6ClientBaseURL"' internal/web/native-v5-keys.html
@@ -78,3 +88,4 @@ jobs:
         run: |
           node --check internal/web/native-v5.js
           node --check internal/web/native-v6.js
+          node --check internal/web/native-v7.js
