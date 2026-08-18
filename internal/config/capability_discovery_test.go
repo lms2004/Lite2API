@@ -89,6 +89,17 @@ func TestOfficialOpenAIFastFallbackIsConservative(t *testing.T) {
 	}
 }
 
+func TestLegacyFastSlugIsNotExposedAsConcreteModel(t *testing.T) {
+	account := Account{ID: "aggregate", Type: "openai", AdapterID: "cli-proxy-api"}
+	caps := InferDiscoveredCapabilities(account, []string{"fast", "gpt-5.6-fast", "gpt-5.6-sol"})
+	if hasCapabilityModel(caps, "fast") || hasCapabilityModel(caps, "gpt-5.6-fast") {
+		t.Fatalf("legacy Fast slug leaked into concrete model catalog: %+v", caps)
+	}
+	if !hasCapabilityModel(caps, "sol") {
+		t.Fatalf("real model disappeared while filtering legacy Fast slug: %+v", caps)
+	}
+}
+
 func TestInferCodexCapabilitiesPrefersCanonicalModelID(t *testing.T) {
 	caps := InferCodexCapabilities([]string{"gpt-5.6", "sol", "gpt-5.6-sol"})
 	if len(caps) != 1 {
