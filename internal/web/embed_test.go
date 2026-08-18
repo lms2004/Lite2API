@@ -8,7 +8,7 @@ import (
 func TestEmbeddedAdminPageStructure(t *testing.T) {
 	page := string(IndexHTML)
 	required := []string{
-		`data-ui = "native-v5"`,
+		`dataset.ui = "native-v5"`,
 		`window.Lite2APINativeV5`,
 		`id="view-monitor"`,
 		`id="view-routes"`,
