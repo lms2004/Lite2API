@@ -60,11 +60,13 @@ func discoveryScope(account Account) string {
 	if !strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
 		return ""
 	}
+	// Only stable account identity determines scope. Discovered model names are
+	// deliberately excluded: an aggregate pool eventually contains every family
+	// and must remain aggregate on subsequent refreshes.
 	text := strings.ToLower(strings.Join([]string{
 		account.ID,
 		account.Name,
 		account.InstanceID,
-		strings.Join(account.Models, " "),
 	}, " "))
 	switch {
 	case strings.Contains(text, "claude-code"):
