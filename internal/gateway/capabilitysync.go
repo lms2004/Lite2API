@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -248,7 +247,3 @@ func findConfiguredAccount(accounts []config.Account, id string) (config.Account
 	}
 	return config.Account{}, false
 }
-
-// compile-time assertion: keep bytes imported while accepting direct-array model
-// responses without maintaining a second decoder implementation.
-var _ = bytes.MinRead
