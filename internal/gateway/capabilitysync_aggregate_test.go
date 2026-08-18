@@ -36,7 +36,7 @@ func TestAggregateCLIProxyKeepsFullCatalogAndAddsRichCodexMetadata(t *testing.T)
 			codex = model
 		}
 	}
-	if codex.ID == "" || !containsString(codex.ReasoningEfforts, "ultra") || !containsString(codex.ServiceTiers, "priority") {
+	if codex.ID == "" || !containsGatewayString(codex.ReasoningEfforts, "ultra") || !containsGatewayString(codex.ServiceTiers, "priority") {
 		t.Fatalf("rich Codex supplement not merged: %+v", codex)
 	}
 
@@ -49,6 +49,15 @@ func TestAggregateCLIProxyKeepsFullCatalogAndAddsRichCodexMetadata(t *testing.T)
 func hasGatewayCapability(caps []config.ChannelCapability, model string) bool {
 	for _, capability := range caps {
 		if capability.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
+func containsGatewayString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
 			return true
 		}
 	}
