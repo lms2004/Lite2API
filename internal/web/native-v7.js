@@ -4,7 +4,7 @@
 (() => {
   "use strict";
 
-  const BUILD = "Native 7.0 · 2026.08.18";
+  const BUILD = "Native 7.1 · 2026.08.18";
   const picker = { activeSelect: null, query: "", group: "all", scheduled: false };
   const $ = id => document.getElementById(id);
   const all = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -17,22 +17,30 @@
   function effortLabel(value) {
     return ({
       auto: "自动", none: "关闭", minimal: "最小", low: "低", medium: "中",
-      high: "高", xhigh: "极高", max: "最大"
+      high: "高", xhigh: "极高", max: "最大", ultra: "Ultra"
     })[value] || value;
   }
 
+  function modelProfile(model) {
+    const raw = String(model || "").trim();
+    const fast = raw.toLowerCase().endsWith("@fast");
+    return { base: fast ? raw.slice(0, -5) : raw, fast };
+  }
+
   function modelDisplayName(model) {
-    return ({
+    const profile = modelProfile(model);
+    const friendly = ({
       sol: "GPT-5.6 Sol",
       terra: "GPT-5.6 Terra",
       luna: "GPT-5.6 Luna",
       fast: "Fast",
       "sol-max": "Sol Max"
-    })[String(model || "").toLowerCase()] || model;
+    })[profile.base.toLowerCase()] || profile.base;
+    return profile.fast ? `${friendly} · Fast` : friendly;
   }
 
   function modelGroup(model) {
-    const text = String(model || "").toLowerCase();
+    const text = modelProfile(model).base.toLowerCase();
     if (/^(sol|terra|luna|fast|sol-max)$|gpt|codex|openai/.test(text)) return "openai";
     if (/claude|anthropic/.test(text)) return "claude";
     if (/gemini|google/.test(text)) return "gemini";
@@ -74,7 +82,7 @@
         if (capability.upstream_model) entry.upstreams.add(capability.upstream_model);
         for (const effort of capability.reasoning_efforts || []) entry.efforts.add(effort);
         const observed = `${model} ${capability.upstream_model || ""}`.toLowerCase();
-        if (/fast|priority/.test(observed)) entry.tags.add("Fast");
+        if (modelProfile(model).fast || /fast|priority/.test(observed)) entry.tags.add("Fast");
         if (/thinking|reasoner/.test(observed)) entry.tags.add("Thinking");
         if (/image|vision/.test(observed)) entry.tags.add("Vision");
       }
@@ -91,14 +99,17 @@
         sources: new Set(),
         upstreams: new Set(),
         efforts: new Set(),
-        tags: new Set(["当前"])
+        tags: new Set(modelProfile(model).fast ? ["Fast", "当前"] : ["当前"])
       });
     }
 
     const order = ["openai", "claude", "gemini", "grok", "deepseek", "other"];
     return Array.from(byModel.values()).sort((a, b) => {
       const groupDelta = order.indexOf(a.group) - order.indexOf(b.group);
-      return groupDelta || modelDisplayName(a.model).localeCompare(modelDisplayName(b.model), "zh-CN", { numeric: true });
+      if (groupDelta) return groupDelta;
+      const baseDelta = modelProfile(a.model).base.localeCompare(modelProfile(b.model).base, "zh-CN", { numeric: true });
+      if (baseDelta) return baseDelta;
+      return Number(modelProfile(a.model).fast) - Number(modelProfile(b.model).fast);
     });
   }
 
@@ -117,7 +128,7 @@
       <div class="v7-model-search-wrap"><input id="v7ModelSearch" type="search" autocomplete="off" placeholder="搜索模型、上游或真实模型 ID" aria-label="搜索模型"></div>
       <div id="v7ModelGroups" class="v7-model-groups" role="tablist" aria-label="模型分组"></div>
       <div id="v7ModelResults" class="v7-model-results"></div>
-      <div class="v7-model-dialog-foot">模型目录由上游自动同步；保存路由前不会影响当前流量。</div>`;
+      <div class="v7-model-dialog-foot">模型目录由上游自动同步；Fast 是执行模式，底层仍使用同一真实模型。保存路由前不会影响当前流量。</div>`;
     document.body.append(dialog);
     dialog.querySelector("[data-v7-close]").addEventListener("click", () => dialog.close());
     dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
@@ -275,12 +286,24 @@
     }));
   }
 
+  function syncRouteMasterLabels() {
+    const cards = all("#routeRows > .route-card");
+    const byAlias = new Map(cards.map(card => [card.querySelector(".route-alias")?.value?.trim(), card]));
+    all("#v5RouteList .route-master-item").forEach(button => {
+      const card = byAlias.get(button.dataset.route);
+      const modelSelect = card?.querySelector(".route-intent select");
+      const subtitle = button.querySelector("small");
+      if (modelSelect && subtitle) subtitle.textContent = modelDisplayName(modelSelect.value);
+    });
+  }
+
   function enhanceRoutes() {
     all("#routeRows .route-intent").forEach(intent => {
       const selects = all("select", intent);
       if (selects[0]) enhanceModelSelect(selects[0]);
       if (selects[1]) enhanceEffortSelect(selects[1]);
     });
+    syncRouteMasterLabels();
   }
 
   function sync() {
