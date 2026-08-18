@@ -53,7 +53,7 @@ func InferDiscoveredCapabilities(account Account, models []string) []ChannelCapa
 			ReasoningEfforts: efforts,
 		})
 	}
-	return coalesceCapabilities(capabilities)
+	return ExpandFastProfiles(account, coalesceCapabilities(capabilities))
 }
 
 func discoveryScope(account Account) string {
