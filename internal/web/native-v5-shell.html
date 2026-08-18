@@ -1,6 +1,6 @@
 <div class="app-shell native-shell">
 <aside class="sidebar" aria-label="Lite2API 主导航">
-  <div class="brand">
+  <div class="brand" title="Lite2API">
     <div class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-logo"></use></svg></div>
     <div class="brand-copy"><strong>Lite2API</strong></div>
   </div>
@@ -11,15 +11,15 @@
     <button data-view="keys" onclick="showView('keys')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><span>客户端</span></button>
   </nav>
   <details class="diagnostics-nav">
-    <summary>工具</summary>
+    <summary>更多</summary>
     <button data-view="prompt-test" onclick="showView('prompt-test')"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg><span>注入检测</span></button>
     <button data-view="adapters" onclick="showView('adapters')"><svg class="icon" aria-hidden="true"><use href="#i-adapters"></use></svg><span>适配器</span></button>
   </details>
-  <div class="sidebar-foot"><span id="uiBuild">UI build 2026.08.18-v5</span></div>
+  <div class="sidebar-foot sr-only"><span id="uiBuild">UI build 2026.08.18-v6</span></div>
 </aside>
 <main class="main">
   <header class="topbar">
-    <div class="topbar-title"><strong id="viewTitle">总览</strong><span id="viewSubtitle" hidden>运行状态</span></div>
-    <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>VPN</span><span id="lastUpdated" class="muted">等待同步</span></div>
+    <div class="topbar-title sr-only"><strong id="viewTitle">总览</strong><span id="viewSubtitle">运行状态</span></div>
+    <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>已连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
   </header>
   <div id="notice" class="notice" role="status" aria-live="polite"></div>

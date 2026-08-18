@@ -11,8 +11,14 @@ var legacyIndexHTML []byte
 //go:embed native-v5.css
 var nativeV5CSS []byte
 
+//go:embed native-v6.css
+var nativeV6CSS []byte
+
 //go:embed native-v5.js
 var nativeV5JS []byte
+
+//go:embed native-v6.js
+var nativeV6JS []byte
 
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
@@ -32,10 +38,9 @@ var nativeV5Keys []byte
 // IndexHTML is the complete self-contained admin page served by Lite2API.
 //
 // The legacy document remains the source of stable business functions and
-// low-frequency dialogs. Native v5 replaces the application shell and the four
-// core view markups before the page is embedded. The browser therefore receives
-// the final master-detail DOM directly; it no longer depends on Quiet Control
-// or Apple v4 scripts to move a dashboard-shaped DOM after load.
+// low-frequency dialogs. Native markup replaces the shell and four core views
+// before embedding. Native v6 then refines the content hierarchy without
+// changing management APIs or the business data model.
 var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
 
 func buildNativeIndexHTML(base []byte) []byte {
@@ -47,10 +52,12 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-routes"`), []byte(`<section id="view-monitor"`), bytes.TrimSpace(nativeV5Routes))
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.18-v5'`), 1)
+	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.18-v6'`), 1)
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f5f5f7">`), 1)
 
-	return buildIndexHTML(page, nativeV5CSS, nativeV5JS)
+	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS}, []byte("\n"))
+	return buildIndexHTML(page, css, js)
 }
 
 func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {

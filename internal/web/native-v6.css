@@ -1,0 +1,137 @@
+/* Lite2API Native v6 — content hierarchy pass.
+   Minimal does not mean empty: use a few meaningful grouped surfaces, hide
+   secondary detail by default, and let each page have one obvious center. */
+
+:root{--sidebar-w:204px}
+.view{max-width:1120px}
+.main{padding-inline:36px;padding-bottom:64px}
+.topbar{height:48px;margin:0 -36px 28px;padding:0 36px;border-bottom-color:color-mix(in srgb,var(--line) 72%,transparent)}
+.topbar-title{display:none!important}
+.vpn-auth{margin-left:auto;font-size:10px;gap:6px}
+.page-head{margin-bottom:22px}
+.page-head h1{font-size:31px}
+.page-head p{font-size:12px}
+.sidebar-foot{display:none!important}
+.diagnostics-nav>summary{display:flex;align-items:center;justify-content:space-between}
+.diagnostics-nav>summary:after{content:"›";font-size:15px;font-weight:400;transition:transform .14s ease}
+.diagnostics-nav[open]>summary:after{transform:rotate(90deg)}
+
+/* A small number of grouped surfaces gives hierarchy without returning to a card wall. */
+.grouped-surface,.grouped-section{border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden}
+.grouped-section.native-section{margin-top:20px}
+.grouped-section .native-section-head{min-height:49px;padding:0 16px}
+.grouped-section .empty-compact,.grouped-section .empty{padding:30px 16px}
+
+/* Overview: one status group, two evidence groups, one request group. */
+.overview-hero{padding:20px 24px 18px;border-bottom:0}
+.health-verdict{min-height:56px}
+.health-copy strong{font-size:23px}
+.health-verdict>.btn-ghost{min-height:30px;padding:4px 0;border:0;background:transparent;color:var(--blue);font-size:12px;font-weight:500}
+.health-verdict>.btn-ghost:hover{background:transparent;text-decoration:underline}
+.monitor-metrics{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.metric-card{min-height:72px;padding-inline:20px}
+.metric-card strong{font-size:25px}
+.metric-context{font-size:10px}
+.overview-split{margin-top:20px;grid-template-columns:minmax(0,1.45fr) minmax(300px,.75fr);gap:18px}
+.overview-split .grouped-section{margin:0}
+.route-health-row{min-height:58px;padding:10px 16px;grid-template-columns:minmax(86px,.72fr) minmax(200px,1.45fr) 64px 18px}
+.route-health-row .route-latency{display:none}
+.incident-item{min-height:58px;padding:10px 16px}
+.requests-section{margin-top:20px}
+.requests-section .native-section-head{padding-inline:16px}
+.request-summary{padding:8px 16px 4px}
+.requests-section .data-table th,.requests-section .data-table td{padding-inline:16px}
+.requests-section .pagination-note{padding:10px 16px 14px}
+.native-trends{margin-top:20px!important;border-top:1px solid var(--line)}
+.native-trends>summary{min-height:50px;padding:0 16px}
+.native-trends>.chart-toolbar{padding:0 16px 12px}
+.native-trends>.chart-grid{padding:0 16px 18px}
+
+/* Routes: content-sized settings workspace, not a giant empty editor canvas. */
+#routeSaveBtn:disabled{visibility:hidden}
+.route-workspace{min-height:0;grid-template-columns:218px minmax(0,1fr);border-radius:16px}
+.route-master{grid-template-rows:auto auto auto}
+.route-master-list{padding:8px;overflow:visible}
+.route-master-item{min-height:54px}
+.route-master-foot{min-height:38px;padding:9px 14px}
+.route-chain-list,.route-card{min-height:0}
+.route-card-head{min-height:64px;padding:14px 18px}
+.route-card-head>.icon-btn.danger{opacity:0;transition:opacity .12s ease}
+.route-card:hover .route-card-head>.icon-btn.danger{opacity:.65}
+.route-intent{padding:16px 18px 14px;grid-template-columns:minmax(260px,1fr) 150px;gap:12px;border-bottom:1px solid var(--line)}
+.route-intent-note{grid-column:1/-1;min-height:auto;margin-top:-3px;font-size:10px}
+.route-target-head{display:none}
+.route-targets{padding:6px 0}
+.route-target{min-height:66px;padding:8px 18px;grid-template-columns:42px minmax(220px,1.15fr) minmax(220px,1fr) 64px 28px;gap:10px}
+.target-order{grid-template-columns:auto 1fr}
+.target-order strong{font-size:13px}
+.target-field{gap:2px}
+.target-field select{min-height:34px;background:var(--surface-2)}
+.target-field small{font-size:9px}
+.target-upstream strong{font-size:10px}
+.target-upstream small{margin-top:2px;font-size:8px}
+.target-compat{text-align:right;font-size:10px}
+.route-target>.icon-btn{opacity:0}
+.route-target:hover>.icon-btn,.route-target:focus-within>.icon-btn{opacity:.7}
+.route-target-add{padding:8px 18px 14px}
+.route-card-empty{padding:28px 18px}
+
+/* Upstream: provider groups behave like Settings groups; full quota detail appears on demand. */
+.source-segment{margin-bottom:16px}
+.source-tools{min-height:42px;margin-bottom:12px;border-bottom:0}
+.channel-groups{display:grid;gap:14px}
+.channel-group{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+.channel-group:last-child{border-bottom:1px solid var(--line)}
+.channel-group-head{min-height:46px;padding:9px 16px;border-bottom:1px solid var(--line)}
+.channel-account{border-top:1px solid var(--line)}
+.channel-group-head+.channel-account{border-top:0}
+.channel-account>summary{min-height:70px;padding:11px 16px;grid-template-columns:minmax(210px,1fr) minmax(250px,1.18fr) 92px 16px;gap:16px}
+.channel-account>summary:hover{background:rgba(120,120,128,.035)}
+.channel-account[open]>summary{background:var(--surface-2)}
+.account-plan{display:inline-flex!important;width:auto!important;max-width:max-content!important;margin-left:6px!important;padding-inline:6px!important;vertical-align:1px}
+.quota-strip{grid-template-columns:repeat(2,minmax(110px,1fr));gap:14px}
+.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3){display:none}
+.channel-account:not([open]) .quota-reset{display:none}
+.channel-account:not([open]) .channel-account-status small{display:none}
+.quota-title{font-size:9px}.quota-title strong{font-size:9px}
+.quota-bar{height:4px;margin:5px 0 2px}
+.channel-account-detail{padding:12px 16px 16px;gap:16px;border-top:1px solid var(--line)}
+.source-pane>.pagination-note{padding:10px 4px 0}
+
+/* Client access: connection address + Settings-like key rows instead of a database table. */
+.client-endpoint-section{margin-top:0!important}
+.client-endpoint-row{min-height:64px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.client-endpoint-row>div{min-width:0}
+.setting-label{display:block;margin-bottom:3px;color:var(--muted);font-size:10px}
+.client-endpoint-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.key-list-panel{margin-top:18px!important;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+.key-list-panel .native-section-head{padding:0 16px}
+.key-settings-list{display:grid}
+.key-setting-row{min-height:72px;padding:11px 16px;display:grid;grid-template-columns:34px minmax(0,1.3fr) minmax(180px,.85fr) auto 28px;align-items:center;gap:12px;border-top:1px solid var(--line)}
+.key-setting-row:first-child{border-top:0}
+.key-setting-row:hover{background:rgba(120,120,128,.035)}
+.key-setting-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:9px;background:var(--blue-soft);color:var(--blue)}
+.key-setting-main{min-width:0}.key-setting-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px}.key-setting-main small{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10px}
+.key-setting-scope{min-width:0;color:var(--muted);font-size:10px}.key-setting-scope strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-size:11px;font-weight:550}.key-setting-scope span{display:block;margin-top:3px}
+.key-setting-state{text-align:right;white-space:nowrap}.key-setting-state small{display:block;margin-top:3px;color:var(--muted);font-size:9px}
+.key-setting-action{display:flex;justify-content:flex-end}.key-setting-action .icon-btn{opacity:.25}.key-setting-row:hover .key-setting-action .icon-btn{opacity:.8}
+.v6-key-data{display:none!important}
+
+@media(max-width:980px){
+  .view{max-width:none}
+  .overview-split{grid-template-columns:1fr}
+  .route-workspace{grid-template-columns:190px minmax(0,1fr)}
+  .route-intent{grid-template-columns:1fr 140px}
+  .route-target{grid-template-columns:36px minmax(190px,1fr) minmax(170px,.9fr) 58px 26px}
+  .channel-account>summary{grid-template-columns:minmax(200px,1fr) minmax(220px,1fr) 78px 16px}
+  .key-setting-row{grid-template-columns:34px minmax(0,1fr) auto 28px}.key-setting-scope{display:none}
+}
+@media(max-width:700px){
+  .main{padding-inline:16px}.topbar{margin-inline:-16px;padding-inline:16px}
+  .grouped-surface,.grouped-section,.key-list-panel,.channel-group{border-radius:13px}
+  .overview-hero{padding:16px}.monitor-metrics{grid-template-columns:1fr 1fr}.metric-card:nth-child(2){border-right:0}.metric-card:nth-child(n+3){padding-top:14px;border-top:1px solid var(--line)}
+  .route-workspace{display:block}.route-master{border-right:0;border-bottom:1px solid var(--line)}.route-master-list{display:flex;gap:5px;overflow:auto}.route-master-item{min-width:150px}.route-master-foot{display:none}
+  .route-intent{grid-template-columns:1fr}.route-target{grid-template-columns:32px minmax(0,1fr) 56px 26px}.target-upstream{grid-column:2}.target-compat{grid-column:3;grid-row:1/3}.route-target>.icon-btn{grid-column:4;grid-row:1/3}
+  .channel-account>summary{grid-template-columns:minmax(0,1fr) 16px}.quota-strip,.channel-account-status{grid-column:1/-1}.channel-account-caret{grid-column:2;grid-row:1}.channel-account-detail{grid-template-columns:1fr 1fr}
+  .key-setting-row{grid-template-columns:32px minmax(0,1fr) auto 26px;padding-inline:12px}.key-setting-state{font-size:10px}
+}
