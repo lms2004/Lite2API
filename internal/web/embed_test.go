@@ -9,7 +9,9 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	page := string(IndexHTML)
 	required := []string{
 		`dataset.ui = "native-v5"`,
+		`dataset.ui = "native-v6"`,
 		`window.Lite2APINativeV5`,
+		`window.Lite2APINativeV6`,
 		`id="view-monitor"`,
 		`id="view-routes"`,
 		`id="view-accounts"`,
@@ -18,6 +20,8 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="view-adapters"`,
 		`id="healthVerdict"`,
 		`id="monitorMetrics"`,
+		`class="overview-hero grouped-surface"`,
+		`class="native-section grouped-section route-summary-section"`,
 		`id="routeHealthSummary"`,
 		`id="incidentFeed"`,
 		`id="requestSearch"`,
@@ -44,6 +48,9 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="createdKeyCard"`,
 		`id="copyCreatedKeyBtn"`,
 		`id="clientSetup"`,
+		`id="v6ClientBaseURL"`,
+		`id="v6KeyList"`,
+		`class="table-wrap v6-key-data" hidden`,
 		`id="setupBaseURL"`,
 		`id="setupModel"`,
 		`id="setupCode"`,
@@ -66,8 +73,10 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function runExport(`,
 		`function targetOperationalState(`,
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.18-v5'`,
+		`const UI_BUILD='2026.08.18-v6'`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
+		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
+		`.key-setting-row`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -87,7 +96,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
-			t.Errorf("obsolete or unsafe UI surface leaked into native v5: %q", value)
+			t.Errorf("obsolete or unsafe UI surface leaked into native v6: %q", value)
 		}
 	}
 
@@ -96,7 +105,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		t.Error("all styles must remain inside the document head")
 	}
 	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("native v5 must expose one canonical style element")
+		t.Error("native v6 must expose one final style element")
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
@@ -112,7 +121,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 }
 
-func TestNativeV5IsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
+func TestNativeLayoutIsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
 	page := string(IndexHTML)
 	master := strings.Index(page, `id="v5RouteList"`)
 	detail := strings.Index(page, `id="routeRows"`)
@@ -124,6 +133,9 @@ func TestNativeV5IsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
 	}
 	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
 		t.Fatal("key creation must be progressive disclosure, not a permanent dashboard block")
+	}
+	if !strings.Contains(page, `id="v6KeyList"`) || !strings.Contains(page, `id="v6ClientBaseURL"`) {
+		t.Fatal("client page must expose the useful endpoint and settings-like key list")
 	}
 }
 
