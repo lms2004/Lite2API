@@ -447,6 +447,7 @@ func (c Config) Validate() error {
 			if _, ok := seen[id]; !ok {
 				return fmt.Errorf("route %q references unknown account %q", model, id)
 			}
+		}
 		if len(route.Targets) > 64 {
 			return fmt.Errorf("route %q has too many targets (maximum 64)", model)
 		}
