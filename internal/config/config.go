@@ -447,7 +447,6 @@ func (c Config) Validate() error {
 			if _, ok := seen[id]; !ok {
 				return fmt.Errorf("route %q references unknown account %q", model, id)
 			}
-		}
 		if len(route.Targets) > 64 {
 			return fmt.Errorf("route %q has too many targets (maximum 64)", model)
 		}
@@ -515,7 +514,7 @@ func AccountSupportsTargetModel(account Account, model string) bool {
 
 func ValidReasoningEffort(effort string) bool {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "", "auto", "none", "minimal", "low", "medium", "high", "max", "xhigh":
+	case "", "auto", "none", "minimal", "low", "medium", "high", "max", "xhigh", "ultra":
 		return true
 	default:
 		return false
@@ -587,7 +586,6 @@ func (c Config) GatewayKeys() []string {
 			if key = strings.TrimSpace(key); key != "" {
 				keys = append(keys, key)
 			}
-		}
 	}
 	return slices.Compact(keys)
 }
