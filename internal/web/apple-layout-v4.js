@@ -8,7 +8,12 @@
     route: "lite2api.apple.route",
     charts: "lite2api.overviewCharts"
   };
-  const state = { queued: false, syncingRoute: false, keySecretSeen: false };
+  const state = {
+    queued: false,
+    syncingRoute: false,
+    routeSignature: "",
+    keySecretSeen: false
+  };
 
   const byId = id => document.getElementById(id);
   const all = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -41,8 +46,6 @@
     if (build) build.textContent = BUILD;
     const brand = document.querySelector(".brand-copy strong");
     if (brand) brand.textContent = "Lite2API";
-    const title = document.querySelector(".topbar-title strong");
-    if (title && title.textContent === "运行总览") title.textContent = "Lite2API";
   }
 
   function installOverviewSummary() {
@@ -139,14 +142,28 @@
 
     cards.forEach(card => {
       const active = card === selected;
-      card.hidden = !active;
-      card.setAttribute("aria-hidden", String(!active));
+      if (card.hidden === active) card.hidden = !active;
+      if (card.getAttribute("aria-hidden") !== String(!active)) {
+        card.setAttribute("aria-hidden", String(!active));
+      }
     });
     all(".apple-route-item").forEach(button => {
-      button.setAttribute("aria-selected", String(button.dataset.routeAlias === value));
-      button.tabIndex = button.dataset.routeAlias === value ? 0 : -1;
+      const active = button.dataset.routeAlias === value;
+      if (button.getAttribute("aria-selected") !== String(active)) {
+        button.setAttribute("aria-selected", String(active));
+      }
+      button.tabIndex = active ? 0 : -1;
     });
     if (focus) later(() => selected.querySelector(".route-alias, select, button")?.focus({ preventScroll: true }));
+  }
+
+  function routeSignature(cards) {
+    return cards.map(card => [
+      routeAlias(card),
+      routeModel(card),
+      routeTone(card),
+      routeStateText(card)
+    ].join("::")).join("||");
   }
 
   function syncRouteWorkspace() {
@@ -156,9 +173,16 @@
     const list = workspace?.querySelector(".apple-route-list");
     if (!workspace || !list) return;
 
+    const selected = selectedRouteAlias(cards);
+    const signature = routeSignature(cards);
+    if (signature === state.routeSignature && list.children.length === cards.length) {
+      selectRoute(selected, false);
+      return;
+    }
+
     state.syncingRoute = true;
     try {
-      const selected = selectedRouteAlias(cards);
+      state.routeSignature = signature;
       list.replaceChildren();
       cards.forEach(card => {
         const alias = routeAlias(card);
@@ -171,7 +195,9 @@
         });
         const copy = el("span", "apple-route-copy");
         copy.append(el("strong", "", { text: alias }), el("small", "", { text: model }));
-        const status = el("span", `apple-route-state ${tone === "good" ? "" : tone}`.trim(), { text: routeStateText(card) });
+        const status = el("span", `apple-route-state ${tone === "good" ? "" : tone}`.trim(), {
+          text: routeStateText(card)
+        });
         button.append(copy, status);
         button.addEventListener("click", () => selectRoute(alias, true));
         list.append(button);
@@ -199,7 +225,7 @@
     const creator = byId("appleKeyCreator");
     const trigger = byId("appleKeyCreateTrigger");
     if (!creator || !trigger) return;
-    creator.hidden = !open;
+    if (creator.hidden === open) creator.hidden = !open;
     trigger.setAttribute("aria-expanded", String(open));
     if (open) later(() => creator.querySelector(".key-preset.active, .key-preset, button")?.focus({ preventScroll: true }));
   }
@@ -240,24 +266,23 @@
       head.after(creator);
     }
 
-    if (created && keyList && created.nextElementSibling !== byId("clientSetup") && !created.hidden) {
-      created.scrollIntoView({ block: "nearest" });
-    }
-
     const hasSecret = Boolean(byId("createdKey")?.value?.trim()) && created && !created.hidden;
     if (hasSecret && !state.keySecretSeen) {
       state.keySecretSeen = true;
       setKeyCreator(false);
       later(() => created.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
+    if (!hasSecret) state.keySecretSeen = false;
   }
 
   function simplifyTopbar() {
     const subtitle = byId("viewSubtitle");
-    if (subtitle) subtitle.hidden = true;
+    if (subtitle && !subtitle.hidden) subtitle.hidden = true;
     const command = document.querySelector(".qc-command-trigger");
-    if (command) {
-      command.firstChild && (command.firstChild.textContent = "搜索");
+    if (command && command.dataset.appleLabel !== "true") {
+      command.dataset.appleLabel = "true";
+      const text = Array.from(command.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+      if (text) text.textContent = "搜索";
       command.title = "搜索与快速操作";
     }
   }
