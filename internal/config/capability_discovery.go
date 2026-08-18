@@ -13,6 +13,14 @@ type DiscoveredModel struct {
 	ServiceTiers     []string
 }
 
+// UseRichCodexCatalog reports whether this CLIProxy connection represents the
+// Codex credential family. Aggregate CLIProxy pools must keep using the normal
+// /models list because the rich Codex endpoint intentionally contains Codex
+// models only.
+func UseRichCodexCatalog(account Account) bool {
+	return discoveryScope(account) == "codex"
+}
+
 // FilterDiscoveredModels scopes a shared adapter's /models response to the
 // channel represented by account. Generic OpenAI-compatible accounts retain the
 // full response. CLIProxy often exposes several credential families behind one
@@ -87,6 +95,10 @@ func InferDiscoveredModelCapabilities(account Account, catalog []DiscoveredModel
 		}
 		if len(efforts) == 0 {
 			efforts = []string{"auto"}
+		} else if !containsString(efforts, "auto") {
+			// Auto is Lite2API's delegation value: omit explicit reasoning and let
+			// the selected upstream use its own default.
+			efforts = append([]string{"auto"}, efforts...)
 		}
 		capability := ChannelCapability{
 			Model:            logicalModel,
