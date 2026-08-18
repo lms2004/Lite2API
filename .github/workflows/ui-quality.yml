@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   test:
-    name: Go tests and embedded UI contract
+    name: Go tests and native UI contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -51,27 +51,23 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Verify UI source assets
+      - name: Verify native v5 source assets
         shell: bash
         run: |
           set -euo pipefail
-          test -s internal/web/quiet-control-core.css
-          test -s internal/web/quiet-control-pages.css
-          test -s internal/web/quiet-control-enhancements.css
-          test -s internal/web/quiet-control.js
-          test -s internal/web/apple-layout-v4.css
-          test -s internal/web/apple-layout-v4.js
-          grep -Fq -- '--action: #4c8dff' internal/web/quiet-control-core.css
-          grep -Fq -- '--healthy: #42c77a' internal/web/quiet-control-core.css
-          grep -Fq -- '.nav{grid-template-columns:repeat(4,1fr)}' internal/web/quiet-control-enhancements.css
-          grep -Fq -- 'content: attr(data-label)' internal/web/quiet-control-enhancements.css
-          grep -Fq -- 'window.Lite2APIQuietControl' internal/web/quiet-control.js
-          grep -Fq -- '--canvas: #f5f5f7' internal/web/apple-layout-v4.css
-          grep -Fq -- '.apple-route-workspace' internal/web/apple-layout-v4.css
-          grep -Fq -- '.apple-overview-summary' internal/web/apple-layout-v4.css
-          grep -Fq -- 'window.Lite2APIAppleSimple' internal/web/apple-layout-v4.js
+          test -s internal/web/native-v5.css
+          test -s internal/web/native-v5.js
+          test -s internal/web/native-v5-shell.html
+          test -s internal/web/native-v5-monitor.html
+          test -s internal/web/native-v5-routes.html
+          test -s internal/web/native-v5-accounts.html
+          test -s internal/web/native-v5-keys.html
+          grep -Fq -- '--canvas:#f5f5f7' internal/web/native-v5.css
+          grep -Fq -- '.route-workspace{min-height:610px;display:grid;grid-template-columns:230px minmax(0,1fr)' internal/web/native-v5.css
+          grep -Fq -- '.nav{grid-template-columns:repeat(4,1fr)}' internal/web/native-v5.css
+          grep -Fq -- 'window.Lite2APINativeV5' internal/web/native-v5.js
+          grep -Fq -- 'id="v5RouteList"' internal/web/native-v5-routes.html
+          grep -Fq -- 'id="v5KeyDialog"' internal/web/native-v5-keys.html
 
       - name: Check JavaScript syntax
-        run: |
-          node --check internal/web/quiet-control.js
-          node --check internal/web/apple-layout-v4.js
+        run: node --check internal/web/native-v5.js
