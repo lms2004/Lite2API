@@ -21,11 +21,6 @@ func UseRichCodexCatalog(account Account) bool {
 	return discoveryScope(account) == "codex"
 }
 
-// FilterDiscoveredModels scopes a shared adapter's /models response to the
-// channel represented by account. Generic OpenAI-compatible accounts retain the
-// full response. CLIProxy often exposes several credential families behind one
-// endpoint, so a provider-specific account must not suddenly claim every model
-// served by the shared process.
 func FilterDiscoveredModels(account Account, models []string) []string {
 	result := make([]string, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -43,8 +38,6 @@ func FilterDiscoveredModels(account Account, models []string) []string {
 	return result
 }
 
-// FilterDiscoveredCatalog applies the same provider scope while preserving rich
-// capability metadata such as reasoning levels and service tiers.
 func FilterDiscoveredCatalog(account Account, models []DiscoveredModel) []DiscoveredModel {
 	result := make([]DiscoveredModel, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -66,9 +59,6 @@ func FilterDiscoveredCatalog(account Account, models []DiscoveredModel) []Discov
 	return result
 }
 
-// InferDiscoveredCapabilities keeps the string-only compatibility path used by
-// existing callers and tests. Rich catalog discovery should prefer
-// InferDiscoveredModelCapabilities.
 func InferDiscoveredCapabilities(account Account, models []string) []ChannelCapability {
 	catalog := make([]DiscoveredModel, 0, len(models))
 	for _, model := range models {
@@ -77,10 +67,6 @@ func InferDiscoveredCapabilities(account Account, models []string) []ChannelCapa
 	return InferDiscoveredModelCapabilities(account, catalog)
 }
 
-// InferDiscoveredModelCapabilities converts a live provider catalog into
-// logical route capabilities. Provider metadata wins over local heuristics. A
-// service tier is represented as a logical execution profile (for example
-// sol@fast) while keeping the concrete upstream model unchanged.
 func InferDiscoveredModelCapabilities(account Account, catalog []DiscoveredModel) []ChannelCapability {
 	catalog = FilterDiscoveredCatalog(account, catalog)
 	capabilities := make([]ChannelCapability, 0, len(catalog)*2)
@@ -95,7 +81,7 @@ func InferDiscoveredModelCapabilities(account Account, catalog []DiscoveredModel
 		}
 		if len(efforts) == 0 {
 			efforts = []string{"auto"}
-		} else if !containsString(efforts, "auto") {
+		} else if !discoveredContains(efforts, "auto") {
 			// Auto is Lite2API's delegation value: omit explicit reasoning and let
 			// the selected upstream use its own default.
 			efforts = append([]string{"auto"}, efforts...)
@@ -132,9 +118,6 @@ func discoveryScope(account Account) string {
 	if !strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
 		return ""
 	}
-	// Only stable account identity determines scope. Discovered model names are
-	// deliberately excluded: an aggregate pool eventually contains every family
-	// and must remain aggregate on subsequent refreshes.
 	text := strings.ToLower(strings.Join([]string{account.ID, account.Name, account.InstanceID}, " "))
 	switch {
 	case strings.Contains(text, "claude-code"):
@@ -171,6 +154,12 @@ func modelMatchesDiscoveryScope(scope, model string) bool {
 
 func inferGenericDiscoveredCapability(_ Account, upstreamModel string) (string, []string) {
 	normalized := strings.ToLower(strings.TrimSpace(upstreamModel))
+	// Fast is an execution tier/profile, never a concrete model. Some compatible
+	// catalogs still expose a historical fast slug; ignore it to avoid showing
+	// both a fake model and the real @fast profile.
+	if normalized == "fast" || normalized == "gpt-5.6-fast" {
+		return "", nil
+	}
 	logicalModel := strings.TrimSpace(upstreamModel)
 	efforts := []string{"auto"}
 
@@ -223,9 +212,6 @@ func discoveredFastAvailable(account Account, capability ChannelCapability, tier
 			return true
 		}
 	}
-	// The public OpenAI /v1/models response intentionally omits service-tier
-	// metadata. Restrict this fallback to the official API host and currently
-	// documented GPT-5.6 family rather than guessing for third-party proxies.
 	if !isOfficialOpenAIAPI(account.BaseURL) {
 		return false
 	}
@@ -240,6 +226,15 @@ func discoveredFastAvailable(account Account, capability ChannelCapability, tier
 func isOfficialOpenAIAPI(rawURL string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	return err == nil && strings.EqualFold(parsed.Hostname(), "api.openai.com")
+}
+
+func discoveredContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func coalesceCapabilities(values []ChannelCapability) []ChannelCapability {
