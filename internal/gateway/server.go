@@ -21,7 +21,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 	mux.HandleFunc("/admin/api/", g.ServeAdminAPI)
 	mux.HandleFunc("/admin", g.serveAdminPage)
 	mux.HandleFunc("/admin/", g.serveAdminPage)
-	mux.HandleFunc("/v1/", g.ServeGateway)
+	mux.Handle("/v1/", g.routeExecutionProfileHandler(http.HandlerFunc(g.ServeGateway)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
