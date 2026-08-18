@@ -309,6 +309,14 @@ func (s *Scheduler) Select(ctx context.Context, model, operation, session string
 	for {
 		selection, eligible := s.trySelect(model, operation, session, excluded)
 		if selection != nil {
+			// Claude Code may send or select a reasoning effort while using the
+			// Anthropic Messages endpoint. Lite2API accepts it for compatibility,
+			// but deliberately discards it before forwarding because upstream
+			// Anthropic-compatible schemas do not consistently accept the legacy
+			// top-level reasoning_effort field.
+			if operation == config.OperationAnthropic {
+				selection.ReasoningEffort = "none"
+			}
 			return selection, nil
 		}
 		if !eligible {
