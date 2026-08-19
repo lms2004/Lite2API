@@ -20,6 +20,9 @@ var nativeV7CSS []byte
 //go:embed native-v8.css
 var nativeV8CSS []byte
 
+//go:embed native-v9.css
+var nativeV9CSS []byte
+
 //go:embed native-v5.js
 var nativeV5JS []byte
 
@@ -49,9 +52,9 @@ var nativeV5Keys []byte
 // The legacy document remains the source of stable business functions and
 // low-frequency dialogs. Native markup replaces the shell and four core views
 // before embedding. Native v6 refines content hierarchy; v7 adds the
-// capability-aware model and reasoning controls without changing route APIs.
-// v8 is a presentation-only finish pass: one unified select control, a legible
-// type floor, and a single restrained motion system.
+// capability-aware model and reasoning controls without changing route APIs;
+// v8 standardizes interaction polish; v9 reconstructs the overview, route, and
+// upstream information architecture around operational decisions.
 var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
 
 func buildNativeIndexHTML(base []byte) []byte {
@@ -63,10 +66,10 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-routes"`), []byte(`<section id="view-monitor"`), bytes.TrimSpace(nativeV5Routes))
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.18-v7'`), 1)
-	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f5f5f7">`), 1)
+	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v9'`), 1)
+	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f3f3f5">`), 1)
 
-	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS}, []byte("\n"))
+	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS}, []byte("\n"))
 	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
