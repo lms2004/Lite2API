@@ -1,0 +1,44 @@
+name: Apply canonical usage retention patch
+
+on:
+  push:
+    branches:
+      - "feat/admin-canonical-usage-console-20260819"
+    paths:
+      - "tools/apply_usage_retention_patch.py"
+      - ".github/workflows/apply-usage-retention-patch.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-canonical-usage-retention
+  cancel-in-progress: false
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply 30-day aggregate patch
+        run: python3 tools/apply_usage_retention_patch.py
+      - name: Format and test
+        run: |
+          gofmt -w internal/gateway/stats.go internal/gateway/admin.go
+          node --check internal/web/app.js
+          go test ./...
+          go build -trimpath -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+      - name: Commit verified patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: retain 30-day call and token trends"
+          git push origin HEAD:feat/admin-canonical-usage-console-20260819
