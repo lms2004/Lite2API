@@ -1,0 +1,191 @@
+name: Native v10 final product acceptance
+
+on:
+  push:
+    branches:
+      - "feat/admin-v9-core-redesign-20260819"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "internal/web/**"
+      - "internal/gateway/accounttest.go"
+      - "internal/gateway/accounttest_test.go"
+      - "internal/gateway/admin.go"
+      - ".github/qa/**"
+      - ".github/workflows/admin-v10-product-qa-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-v10-final-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-acceptance:
+    name: Verify quota, usage, quality, onboarding, and import
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test, build, and validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go test ./... 2>&1 | tee evidence/go-test.log
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          "$RUNNER_TEMP/lite2api" -version | tee evidence/lite2api-version.txt
+          cp .github/qa/v10-preview-config.json "$RUNNER_TEMP/lite2api-v10-preview.json"
+          "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-v10-preview.json" -check-config | tee evidence/config-check.txt
+          git rev-parse HEAD | tee evidence/source-commit.txt
+
+      - name: Start deterministic model and quota fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python3 -u .github/qa/v10_fixtures.py > evidence/fixtures.log 2>&1 &
+          echo $! > evidence/fixtures.pid
+
+          for port in 45678 45680 45681 45683; do
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl --silent --show-error --fail "http://127.0.0.1:${port}/v1/models" > "evidence/models-${port}.json"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          done
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --fail http://127.0.0.1:45682/v0/management/auth-files > evidence/oauth-accounts.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+      - name: Deploy Lite2API and seed real usage
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup env \
+            LITE2API_API_KEYS="preview-client-key" \
+            LITE2API_ADMIN_TOKEN="preview-admin-token" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            PREVIEW_FAST_KEY="preview" \
+            PREVIEW_CLAUDE_KEY="preview" \
+            PREVIEW_GEMINI_KEY="preview" \
+            PREVIEW_GROK_KEY="preview" \
+            CLIPROXYAPI_MANAGEMENT_KEY="preview-management-key" \
+            "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-v10-preview.json" \
+            > evidence/lite2api-server.log 2>&1 &
+          echo $! > evidence/lite2api-server.pid
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            status="$(curl --silent --show-error --output evidence/health.json --write-out '%{http_code}' http://127.0.0.1:45679/health || true)"
+            if [ "$status" = "200" ] || [ "$status" = "503" ]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          curl --silent --show-error --fail http://127.0.0.1:45679/admin > evidence/admin.html
+
+          seed() {
+            local model="$1"
+            local index="$2"
+            curl --silent --show-error --fail \
+              --output "evidence/seed-${model}-${index}.json" \
+              http://127.0.0.1:45679/v1/chat/completions \
+              -H 'Authorization: Bearer preview-client-key' \
+              -H 'Content-Type: application/json' \
+              --data "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Usage seed ${index}\"}],\"stream\":false}"
+          }
+          for index in $(seq 1 14); do seed fast "$index"; done
+          for index in $(seq 1 9); do seed claude "$index"; done
+          for index in $(seq 1 6); do seed vision "$index"; done
+          sleep 2
+          curl --silent --show-error http://127.0.0.1:45679/health > evidence/health-after-seed.json
+
+      - name: Install browser dependencies and Chinese fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk > evidence/font-install.log
+          fc-cache -f
+          fc-match 'Noto Sans CJK SC' | tee evidence/font-match.txt
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf '%s\n' "$CHROME" > evidence/browser-executable.txt
+          mkdir -p "$RUNNER_TEMP/browser"
+          cd "$RUNNER_TEMP/browser"
+          npm init -y > "$GITHUB_WORKSPACE/evidence/npm-init.log" 2>&1
+          npm install --no-audit --no-fund playwright-core 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-install.log"
+
+      - name: Exercise every Native v10 product workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(cat evidence/browser-executable.txt)" \
+            OUTPUT_DIR="$GITHUB_WORKSPACE/evidence" \
+            NODE_PATH="$RUNNER_TEMP/browser/node_modules" \
+            node .github/qa/v10_capture.js 2>&1 | tee evidence/playwright-run.log
+          file evidence/*.png | tee evidence/screenshot-files.txt
+          sha256sum evidence/*.png | tee evidence/screenshot-sha256.txt
+
+      - name: Write acceptance report
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Lite2API Native v10 product acceptance"
+            echo
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Runner: ${RUNNER_OS}/${RUNNER_ARCH}"
+            echo "- Runtime: real Lite2API binary on 127.0.0.1:45679"
+            echo "- Data: five quota accounts and four model channels with distinct latency and one controlled flaky channel"
+            echo "- Verified: quota usage, reset time, call totals, success rate, P95 curves, per-channel aggregation, three-probe quality tests, nine provider onboarding branches, pre-save connection testing, and import dry-run"
+            echo "- Trend history: deterministic 24-hour visual fixture only; all account, quota, model, test, and import interactions use live HTTP paths"
+            echo
+            echo "## Health after seed"
+            echo '```json'
+            cat evidence/health-after-seed.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Browser diagnostics"
+            echo '```text'
+            cat evidence/browser-diagnostics.txt 2>/dev/null || true
+            echo '```'
+          } > evidence/v10-product-acceptance.md
+          find evidence -maxdepth 1 -type f -printf '%f %s bytes\n' | sort > evidence/file-list.txt
+
+      - name: Upload product evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-native-v10-product-acceptance-final
+          retention-days: 3
+          if-no-files-found: error
+          path: evidence/
