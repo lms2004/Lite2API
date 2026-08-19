@@ -1,50 +1,59 @@
-<section id="view-monitor" class="view active native-view native-overview">
-  <div class="page-head native-page-head">
-    <div><h1>总览</h1><p>先看现在能不能用，再看哪里值得处理。</p></div>
-  </div>
+<section id="view-monitor" class="view active native-view v9-page v9-overview">
+  <header class="v9-page-head">
+    <div class="v9-page-copy">
+      <span class="v9-kicker">Operations</span>
+      <h1>运行总览</h1>
+      <p>先确认访问层是否可用，再沿着路由、上游和请求证据定位问题。</p>
+    </div>
+    <div class="v9-page-meta"><span class="live-indicator">实时同步</span><span class="muted">最近 512 条请求</span></div>
+  </header>
 
-  <details class="native-trends grouped-section" open>
-    <summary><span>运行趋势</span><span id="chartRetention" class="muted">滚动保留 7 天</span></summary>
-    <div class="chart-toolbar">
-      <span id="chartWindowLabel" class="muted">全部本地数据 · 缺失时留空</span>
-      <label class="chart-range">范围<select id="chartRange" aria-label="趋势图时间范围"><option value="all" selected>全部本地数据</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option></select></label>
+  <section class="v9-command-center" aria-label="当前运行状态">
+    <div class="v9-health-pane">
+      <div class="v9-section-label"><span>当前结论</span><span class="muted">基于最近真实请求与上游状态</span></div>
+      <div id="healthVerdict" class="health-verdict">
+        <span class="health-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
+        <div class="health-copy"><strong>正在检查访问层</strong><span>等待最近一次真实请求与路由状态</span></div>
+      </div>
+      <div class="v9-health-foot"><span>状态只来自真实路由和请求，不用旧数据填补空白。</span><button class="text-action" onclick="showView('routes')">查看路由编排</button></div>
     </div>
-    <div class="chart-grid">
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>请求</strong><span>请求量与失败</span></div><div class="chart-legend"><span class="legend-item"><i class="legend-dot blue"></i>请求</span><span class="legend-item"><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="历史请求与失败趋势图"></canvas></div></section>
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>延迟</strong><span id="chartWindow">全部本地数据</span></div></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="历史 P95 延迟趋势图"></canvas></div></section>
-    </div>
-  </details>
-
-  <section class="overview-hero grouped-surface" aria-label="当前运行状态">
-    <div id="healthVerdict" class="health-verdict">
-      <span class="health-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
-      <div class="health-copy"><strong>正在检查</strong><span>等待最近一次真实请求与上游状态</span></div>
-    </div>
-    <div id="monitorMetrics" class="monitor-metrics"></div>
+    <div id="monitorMetrics" class="monitor-metrics v9-metric-grid"></div>
   </section>
 
-  <div class="overview-split">
-    <section class="native-section grouped-section route-summary-section">
-      <div class="native-section-head"><h2>路由</h2><button class="text-action" onclick="showView('routes')">查看全部</button></div>
+  <div class="v9-ops-grid">
+    <section class="v9-surface v9-route-health">
+      <div class="v9-surface-head"><div><span class="v9-kicker">Routing</span><h2>路由健康</h2></div><button class="text-action" onclick="showView('routes')">进入路由</button></div>
       <div id="routeHealthSummary" class="route-health-list"></div>
     </section>
-    <section class="native-section grouped-section incident-section">
-      <div class="native-section-head"><h2>最近异常</h2></div>
+    <section class="v9-surface v9-incidents">
+      <div class="v9-surface-head"><div><span class="v9-kicker">Attention</span><h2>最近异常</h2></div><span class="muted">优先处理新近错误</span></div>
       <div id="incidentFeed" class="incident-list"></div>
     </section>
   </div>
 
-  <section class="native-section grouped-section requests-section">
-    <div class="native-section-head request-head">
-      <h2>最近请求</h2>
+  <details class="v9-surface v9-trends" open>
+    <summary>
+      <div><span class="v9-kicker">History</span><strong>运行趋势</strong><span id="chartRetention" class="muted">滚动保留 7 天</span></div>
+      <label class="chart-range" onclick="event.stopPropagation()">范围<select id="chartRange" aria-label="趋势图时间范围"><option value="all" selected>全部本地数据</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option></select></label>
+    </summary>
+    <div class="chart-toolbar"><span id="chartWindowLabel" class="muted">全部本地数据 · 缺失时留空</span></div>
+    <div class="chart-grid">
+      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>请求质量</strong><span>请求量与失败</span></div><div class="chart-legend"><span class="legend-item"><i class="legend-dot blue"></i>请求</span><span class="legend-item"><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="历史请求与失败趋势图"></canvas></div></section>
+      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>P95 延迟</strong><span id="chartWindow">全部本地数据</span></div></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="历史 P95 延迟趋势图"></canvas></div></section>
+    </div>
+  </details>
+
+  <section class="v9-surface v9-requests">
+    <div class="v9-surface-head v9-request-head">
+      <div><span class="v9-kicker">Evidence</span><h2>最近请求</h2></div>
       <div class="monitor-toolbar">
-        <div class="search"><input id="requestSearch" aria-label="搜索请求" placeholder="搜索"></div>
+        <div class="search"><input id="requestSearch" aria-label="搜索请求" placeholder="搜索模型、上游或错误"></div>
         <select id="requestModel" aria-label="模型筛选"><option value="">全部模型</option></select>
         <select id="requestStatus" aria-label="请求状态筛选"><option value="">全部状态</option><option value="success">成功</option><option value="limited">限流</option><option value="error">错误</option></select>
       </div>
     </div>
     <div id="requestSummary" class="request-summary"></div>
-    <div class="table-wrap"><table class="data-table request-table"><thead><tr><th>时间</th><th>模型</th><th>上游</th><th>输入 / 输出</th><th>Token</th><th>结果</th><th>耗时</th><th>错误</th></tr></thead><tbody id="requests"></tbody></table></div>
+    <div class="table-wrap"><table class="data-table request-table"><thead><tr><th>时间</th><th>客户端模型</th><th>真实上游</th><th>输入 / 输出</th><th>Token</th><th>结果</th><th>耗时</th><th>错误</th></tr></thead><tbody id="requests"></tbody></table></div>
     <div id="requestCount" class="pagination-note">0 条请求</div>
   </section>
 
