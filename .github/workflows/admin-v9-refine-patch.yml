@@ -37,11 +37,12 @@ jobs:
           path = Path('.github/workflows/admin-v9-visual-qa.yml')
           text = path.read_text()
           marker = 'Fresh screenshot probes keep the operational window current.'
+
           if marker not in text:
-              old = """            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', {
-              data: { token: 'preview-admin-token' },
-            });"""
-              new = """            // Fresh screenshot probes keep the operational window current.
+              login_anchor = "            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', {"
+              if login_anchor not in text:
+                  raise SystemExit('login insertion anchor not found')
+              probe = """            // Fresh screenshot probes keep the operational window current.
             // The final successful request proves recovery, while Native v9 keeps
             // the preceding Grok failure visible in the incident surface.
             async function previewProbe(model, label) {
@@ -70,44 +71,41 @@ jobs:
               await previewProbe(model, label);
             }
 
-            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', {
-              data: { token: 'preview-admin-token' },
-            });"""
-              if old not in text:
-                  raise SystemExit('login insertion anchor not found')
-              text = text.replace(old, new, 1)
+"""
+              text = text.replace(login_anchor, probe + login_anchor, 1)
 
-              old = """            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-1440.png'), fullPage: false, animations: 'disabled' });
-            record('[capture] overview');"""
-              new = """            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-1440.png'), fullPage: false, animations: 'disabled' });
-            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-full.png'), fullPage: true, animations: 'disabled' });
-            record('[capture] overview');"""
-              if old not in text:
+              overview_capture = "            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-1440.png'), fullPage: false, animations: 'disabled' });"
+              if overview_capture not in text:
                   raise SystemExit('overview screenshot anchor not found')
-              text = text.replace(old, new, 1)
+              text = text.replace(
+                  overview_capture,
+                  overview_capture + "\n            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-full.png'), fullPage: true, animations: 'disabled' });",
+                  1,
+              )
 
-              old = """            if (await deepseek.count()) await deepseek.click();
-            await page.waitForTimeout(1500);
-            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-1440.png'), fullPage: false, animations: 'disabled' });
-            record('[capture] routes');"""
-              new = """            if (await deepseek.count()) await deepseek.click();
-            await page.waitForTimeout(900);
-            await page.evaluate(() => document.activeElement?.blur());
-            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-1440.png'), fullPage: false, animations: 'disabled' });
-            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-full.png'), fullPage: true, animations: 'disabled' });
-            record('[capture] routes');"""
-              if old not in text:
+              route_wait = "            await page.waitForTimeout(1500);"
+              route_capture = "            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-1440.png'), fullPage: false, animations: 'disabled' });"
+              if route_wait not in text or route_capture not in text:
                   raise SystemExit('route screenshot anchor not found')
-              text = text.replace(old, new, 1)
+              text = text.replace(
+                  route_wait,
+                  "            await page.waitForTimeout(900);\n            await page.evaluate(() => document.activeElement?.blur());",
+                  1,
+              )
+              text = text.replace(
+                  route_capture,
+                  route_capture + "\n            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-full.png'), fullPage: true, animations: 'disabled' });",
+                  1,
+              )
 
-              old = """            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-1440.png'), fullPage: false, animations: 'disabled' });
-            record('[capture] upstreams');"""
-              new = """            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-1440.png'), fullPage: false, animations: 'disabled' });
-            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-full.png'), fullPage: true, animations: 'disabled' });
-            record('[capture] upstreams');"""
-              if old not in text:
+              upstream_capture = "            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-1440.png'), fullPage: false, animations: 'disabled' });"
+              if upstream_capture not in text:
                   raise SystemExit('upstream screenshot anchor not found')
-              text = text.replace(old, new, 1)
+              text = text.replace(
+                  upstream_capture,
+                  upstream_capture + "\n            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-full.png'), fullPage: true, animations: 'disabled' });",
+                  1,
+              )
 
               text = text.replace(
                   '- Screenshots: overview, routes, upstreams at 1440 x 1000',
