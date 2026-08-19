@@ -38,6 +38,13 @@
     return "ready";
   }
 
+  function refineRouteCopy(cards) {
+    cards.forEach(card => {
+      const chain = card.querySelector(".route-chain-meta span:last-child");
+      if (chain) chain.textContent = chain.textContent.replace(/(\d+)\s*级真实渠道\s*fallback/i, "$1 级真实上游链");
+    });
+  }
+
   function routeSignature(cards) {
     return cards.map(card => [routeAlias(card), routeModel(card), routeTone(card)].join("::")).join("||");
   }
@@ -72,6 +79,7 @@
     const list = $("v5RouteList");
     if (!list) return;
     const cards = routeCards();
+    refineRouteCopy(cards);
     const signature = routeSignature(cards);
     const selected = selectedRoute(cards);
 
@@ -90,7 +98,9 @@
         button.innerHTML = `<span class="route-master-copy"><strong></strong><small></small></span><span class="route-master-state ${tone === "ready" ? "" : tone}" aria-hidden="true"></span>`;
         button.querySelector("strong").textContent = alias;
         button.querySelector("small").textContent = model;
-        button.addEventListener("click", () => selectRoute(alias, true));
+        // Pointer selection should keep focus in the master list. Editing the
+        // alias remains an explicit action instead of an accidental side effect.
+        button.addEventListener("click", () => selectRoute(alias, false));
         list.append(button);
       });
     }
