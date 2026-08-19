@@ -1,61 +1,81 @@
-<section id="view-monitor" class="view active native-view v9-page v9-overview">
-  <header class="v9-page-head">
-    <div class="v9-page-copy">
-      <span class="v9-kicker">Operations</span>
-      <h1>运行总览</h1>
-      <p>先确认访问层是否可用，再沿着路由、上游和请求证据定位问题。</p>
+<section id="view-monitor" class="view active native-view v10-page v10-usage">
+  <header class="v10-page-head">
+    <div>
+      <span class="v10-eyebrow">Usage & quota</span>
+      <h1>用量与额度</h1>
+      <p>只看四件事：额度用了多少、调用了多少次、现在有多快、各渠道是否真的可用。</p>
     </div>
-    <div class="v9-page-meta"><span class="live-indicator">实时同步</span><span class="muted">最近 512 条请求</span></div>
+    <label class="v10-range">统计范围
+      <select id="chartRange" aria-label="统计与趋势范围">
+        <option value="1h">最近 1 小时</option>
+        <option value="6h">最近 6 小时</option>
+        <option value="24h" selected>最近 24 小时</option>
+        <option value="3d">最近 3 天</option>
+        <option value="7d">最近 7 天</option>
+      </select>
+    </label>
   </header>
 
-  <section class="v9-command-center" aria-label="当前运行状态">
-    <div class="v9-health-pane">
-      <div class="v9-section-label"><span>当前结论</span><span class="muted">基于最近真实请求与上游状态</span></div>
-      <div id="healthVerdict" class="health-verdict">
-        <span class="health-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
-        <div class="health-copy"><strong>正在检查访问层</strong><span>等待最近一次真实请求与路由状态</span></div>
-      </div>
-      <div class="v9-health-foot"><span>状态只来自真实路由和请求，不用旧数据填补空白。</span><button class="text-action" onclick="showView('routes')">查看路由编排</button></div>
-    </div>
-    <div id="monitorMetrics" class="monitor-metrics v9-metric-grid"></div>
+  <section class="v10-kpi-strip" aria-label="所选时间范围的关键指标">
+    <article><span>调用次数</span><strong id="v10CallCount">—</strong><small id="v10CallContext">正在读取趋势</small></article>
+    <article><span>成功率</span><strong id="v10SuccessRate">—</strong><small id="v10FailureContext">失败次数尚未计算</small></article>
+    <article><span>P95 响应速度</span><strong id="v10P95Latency">—</strong><small id="v10LatencyContext">越低越快</small></article>
+    <article><span>故障切换</span><strong id="v10FailoverCount">—</strong><small>累计自动切换次数</small></article>
   </section>
 
-  <div class="v9-ops-grid">
-    <section class="v9-surface v9-route-health">
-      <div class="v9-surface-head"><div><span class="v9-kicker">Routing</span><h2>路由健康</h2></div><button class="text-action" onclick="showView('routes')">进入路由</button></div>
-      <div id="routeHealthSummary" class="route-health-list"></div>
+  <div class="v10-primary-grid">
+    <section class="v10-surface v10-quota-panel">
+      <div class="v10-surface-head">
+        <div><span class="v10-eyebrow">Quota</span><h2>账号额度</h2><p>按账号展示真实窗口、已用比例和重置时间；未知不会当作 0%。</p></div>
+        <button class="text-action" onclick="showView('accounts')">管理账号</button>
+      </div>
+      <div id="v10QuotaBoard" class="v10-quota-board"><div class="v10-empty">正在读取账号额度…</div></div>
     </section>
-    <section class="v9-surface v9-incidents">
-      <div class="v9-surface-head"><div><span class="v9-kicker">Attention</span><h2>最近异常</h2></div><span class="muted">优先处理新近错误</span></div>
-      <div id="incidentFeed" class="incident-list"></div>
+
+    <section class="v10-surface v10-quality-panel">
+      <div class="v10-surface-head">
+        <div><span class="v10-eyebrow">Quality test</span><h2>渠道质量</h2><p>直连指定账号连续测试 3 次，不经过 fallback。</p></div>
+        <button id="v10TestAllChannels" class="primary" type="button" onclick="v10TestAllChannels()">测试全部</button>
+      </div>
+      <div class="v10-quality-head"><span>渠道</span><span>可用性</span><span>速度</span><span>输出</span><span>结论</span><span></span></div>
+      <div id="v10QualityRows" class="v10-quality-rows"><div class="v10-empty">正在读取可测试渠道…</div></div>
+      <p class="v10-quality-note">质量测试会产生极少量真实模型用量；每个渠道发送 3 次最短回复请求。</p>
     </section>
   </div>
 
-  <details class="v9-surface v9-trends" open>
-    <summary>
-      <div><span class="v9-kicker">History</span><strong>运行趋势</strong><span id="chartRetention" class="muted">滚动保留 7 天</span></div>
-      <label class="chart-range" onclick="event.stopPropagation()">范围<select id="chartRange" aria-label="趋势图时间范围"><option value="all" selected>全部本地数据</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option></select></label>
-    </summary>
-    <div class="chart-toolbar"><span id="chartWindowLabel" class="muted">全部本地数据 · 缺失时留空</span></div>
-    <div class="chart-grid">
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>请求质量</strong><span>请求量与失败</span></div><div class="chart-legend"><span class="legend-item"><i class="legend-dot blue"></i>请求</span><span class="legend-item"><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="历史请求与失败趋势图"></canvas></div></section>
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>P95 延迟</strong><span id="chartWindow">全部本地数据</span></div></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="历史 P95 延迟趋势图"></canvas></div></section>
+  <section class="v10-surface v10-trend-panel">
+    <div class="v10-surface-head">
+      <div><span class="v10-eyebrow">Trend</span><h2>调用量与速度变化</h2><p id="chartRetention">本地滚动保留 7 天</p></div>
+      <div class="v10-chart-summary"><span id="chartWindowLabel">最近 24 小时</span><span id="chartWindow">P95 延迟</span></div>
     </div>
-  </details>
-
-  <section class="v9-surface v9-requests">
-    <div class="v9-surface-head v9-request-head">
-      <div><span class="v9-kicker">Evidence</span><h2>最近请求</h2></div>
-      <div class="monitor-toolbar">
-        <div class="search"><input id="requestSearch" aria-label="搜索请求" placeholder="搜索模型、上游或错误"></div>
-        <select id="requestModel" aria-label="模型筛选"><option value="">全部模型</option></select>
-        <select id="requestStatus" aria-label="请求状态筛选"><option value="">全部状态</option><option value="success">成功</option><option value="limited">限流</option><option value="error">错误</option></select>
-      </div>
+    <div class="v10-chart-grid">
+      <section><div class="chart-head"><strong>调用次数</strong><div class="chart-legend"><span><i class="legend-dot blue"></i>请求</span><span><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="调用次数与失败趋势"></canvas></div></section>
+      <section><div class="chart-head"><strong>P95 响应速度</strong><span class="muted">毫秒</span></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="P95 响应速度趋势"></canvas></div></section>
     </div>
-    <div id="requestSummary" class="request-summary"></div>
-    <div class="table-wrap"><table class="data-table request-table"><thead><tr><th>时间</th><th>客户端模型</th><th>真实上游</th><th>输入 / 输出</th><th>Token</th><th>结果</th><th>耗时</th><th>错误</th></tr></thead><tbody id="requests"></tbody></table></div>
-    <div id="requestCount" class="pagination-note">0 条请求</div>
   </section>
 
+  <section class="v10-surface v10-channel-usage">
+    <div class="v10-surface-head">
+      <div><span class="v10-eyebrow">By channel</span><h2>各渠道使用情况</h2><p>基于当前保留的请求明细统计调用次数、成功率、平均速度与 Token。</p></div>
+      <span id="v10ChannelUsageScope" class="muted">最近请求窗口</span>
+    </div>
+    <div class="v10-channel-table-head"><span>渠道</span><span>调用</span><span>成功率</span><span>平均速度</span><span>P95</span><span>Token</span></div>
+    <div id="v10ChannelUsageRows" class="v10-channel-table"><div class="v10-empty">正在聚合渠道数据…</div></div>
+  </section>
+
+  <details class="v10-surface v10-request-evidence">
+    <summary><div><span class="v10-eyebrow">Request evidence</span><strong>最近请求明细</strong></div><span id="requestCount" class="muted">0 条请求</span></summary>
+    <div class="v10-request-tools">
+      <div id="requestSummary" class="request-summary"></div>
+      <div class="monitor-toolbar"><div class="search"><input id="requestSearch" aria-label="搜索请求" placeholder="搜索模型、账号或错误"></div><select id="requestModel" aria-label="模型筛选"><option value="">全部模型</option></select><select id="requestStatus" aria-label="请求状态筛选"><option value="">全部状态</option><option value="success">成功</option><option value="limited">限流</option><option value="error">错误</option></select></div>
+    </div>
+    <div class="table-wrap"><table class="data-table request-table"><thead><tr><th>时间</th><th>客户端模型</th><th>真实上游</th><th>输入 / 输出</th><th>Token</th><th>结果</th><th>耗时</th><th>错误</th></tr></thead><tbody id="requests"></tbody></table></div>
+  </details>
+
+  <!-- Legacy render targets stay available to the stable business renderer. -->
+  <div id="healthVerdict" hidden></div>
+  <div id="monitorMetrics" hidden></div>
+  <div id="routeHealthSummary" hidden></div>
+  <div id="incidentFeed" hidden></div>
   <p id="chartSummary" class="sr-only" aria-live="polite"></p>
 </section>
