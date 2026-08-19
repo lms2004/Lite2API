@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - "feat/chatgpt-deploy-preview-20260819"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: chatgpt-lite2api-deploy-preview
+  group: chatgpt-lite2api-deploy-preview-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,8 +23,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Checkout exact repository state
+      - name: Checkout exact head revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -28,15 +34,95 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build Lite2API
+      - name: Test and build Lite2API
         shell: bash
         run: |
           set -euo pipefail
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          go test ./...
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          go build -trimpath -ldflags "-s -w -X main.version=${SOURCE_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
           "$RUNNER_TEMP/lite2api" -version | tee lite2api-version.txt
-          git rev-parse HEAD | tee lite2api-commit.txt
+          printf '%s\n' "$SOURCE_SHA" | tee lite2api-commit.txt
 
-      - name: Start isolated Lite2API service
+      - name: Start deterministic mock upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/mock_upstream.py" <<'PY'
+          import json
+          import time
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              protocol_version = "HTTP/1.1"
+
+              def log_message(self, fmt, *args):
+                  print("mock-upstream:", fmt % args, flush=True)
+
+              def send_json(self, status, payload):
+                  data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(data)))
+                  self.end_headers()
+                  self.wfile.write(data)
+
+              def do_GET(self):
+                  if self.path.rstrip("/") == "/v1/models":
+                      self.send_json(200, {
+                          "object": "list",
+                          "data": [{
+                              "id": "deepseek-v4-flash",
+                              "object": "model",
+                              "created": 0,
+                              "owned_by": "lite2api-ci"
+                          }]
+                      })
+                      return
+                  self.send_json(404, {"error": {"message": "not found"}})
+
+              def do_POST(self):
+                  length = int(self.headers.get("Content-Length", "0") or "0")
+                  if length:
+                      self.rfile.read(length)
+                  if self.path.rstrip("/") == "/v1/chat/completions":
+                      self.send_json(200, {
+                          "id": "chatcmpl-lite2api-ci",
+                          "object": "chat.completion",
+                          "created": int(time.time()),
+                          "model": "deepseek-v4-flash",
+                          "choices": [{
+                              "index": 0,
+                              "message": {
+                                  "role": "assistant",
+                                  "content": "Lite2API deployment probe OK"
+                              },
+                              "finish_reason": "stop"
+                          }],
+                          "usage": {
+                              "prompt_tokens": 6,
+                              "completion_tokens": 5,
+                              "total_tokens": 11
+                          }
+                      })
+                      return
+                  self.send_json(404, {"error": {"message": "not found"}})
+
+          ThreadingHTTPServer(("127.0.0.1", 45678), Handler).serve_forever()
+          PY
+
+          nohup python3 "$RUNNER_TEMP/mock_upstream.py" > mock-upstream.log 2>&1 &
+          echo $! > mock-upstream.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:45678/v1/models > mock-models.json; then
+              break
+            fi
+            sleep 1
+          done
+          test -s mock-models.json
+          cat mock-models.json
+
+      - name: Start isolated Lite2API service and verify routing
         shell: bash
         run: |
           set -euo pipefail
@@ -44,7 +130,7 @@ jobs:
           nohup env \
             LITE2API_API_KEYS="ci-preview-gateway-key-20260819" \
             LITE2API_ADMIN_TOKEN="ci-preview-admin-token-20260819" \
-            LITE2API_ADMIN_AUTO_LOGIN="true" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
             LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
             LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
             ATOMCODE2API_KEY="ci-preview-upstream-key" \
@@ -54,21 +140,34 @@ jobs:
 
           ready=0
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:45679/health > lite2api-health.json; then
-              ready=1
-              break
+            status="$(curl --silent --show-error -o lite2api-health.json -w '%{http_code}' http://127.0.0.1:45679/health || true)"
+            if [ "$status" = "200" ] || [ "$status" = "503" ]; then
+              if grep -q '"liveness":"ok"' lite2api-health.json; then
+                ready=1
+                break
+              fi
             fi
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then
-            echo "Lite2API did not become healthy" >&2
+            echo "Lite2API did not become live" >&2
             cat lite2api-server.log >&2 || true
             exit 1
           fi
+
           curl --fail --silent --show-error http://127.0.0.1:45679/admin > /dev/null
+          curl --fail --silent --show-error \
+            http://127.0.0.1:45679/v1/chat/completions \
+            -H 'Authorization: Bearer ci-preview-gateway-key-20260819' \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"deployment probe"}],"stream":false}' \
+            | tee lite2api-probe-response.json
+          grep -q 'Lite2API deployment probe OK' lite2api-probe-response.json
+
+          curl --silent --show-error http://127.0.0.1:45679/health > lite2api-health.json
           cat lite2api-health.json
 
-      - name: Capture live admin page in Chromium
+      - name: Capture authenticated live pages in Chromium
         shell: bash
         run: |
           set -euo pipefail
@@ -111,7 +210,7 @@ jobs:
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: '' }),
+                body: JSON.stringify({ token: 'ci-preview-admin-token-20260819' }),
               });
               return { status: response.status, body: await response.text() };
             });
@@ -131,13 +230,24 @@ jobs:
               return { status: response.status, body: await response.text() };
             });
             diagnostics.push(`[session] ${session.status} ${session.body}`);
-            diagnostics.push(`[state] ${state.status} ${state.body.slice(0, 2000)}`);
+            diagnostics.push(`[state] ${state.status} ${state.body.slice(0, 3000)}`);
             if (session.status !== 200 || state.status !== 200) throw new Error('authenticated admin API verification failed');
 
-            await page.screenshot({
-              path: `${process.env.OUTPUT_DIR}/lite2api-admin-1440.png`,
-              fullPage: false,
-            });
+            async function capture(name, selector) {
+              if (selector) {
+                await page.locator(selector).click();
+                await page.waitForTimeout(1800);
+              }
+              await page.screenshot({
+                path: `${process.env.OUTPUT_DIR}/${name}`,
+                fullPage: false,
+              });
+            }
+
+            await capture('lite2api-admin-overview-1440.png', null);
+            await capture('lite2api-admin-routes-1440.png', '[data-view="routes"]');
+            await capture('lite2api-admin-accounts-1440.png', '[data-view="accounts"]');
+
             fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-admin-page.html`, await page.content());
             fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-browser-diagnostics.txt`, diagnostics.join('\n') + '\n');
             await browser.close();
@@ -147,27 +257,36 @@ jobs:
           });
           NODE
 
-          file "$GITHUB_WORKSPACE/lite2api-admin-1440.png"
+          file "$GITHUB_WORKSPACE"/lite2api-admin-*-1440.png
 
       - name: Write deployment report
         if: always()
         shell: bash
         run: |
+          SOURCE_SHA="$(cat lite2api-commit.txt 2>/dev/null || git rev-parse HEAD)"
           {
             echo "# Lite2API isolated deployment report"
             echo
             echo "- Repository: lms2004/Lite2API"
-            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Source commit: ${SOURCE_SHA}"
             echo "- Runner: ${RUNNER_OS}/${RUNNER_ARCH}"
-            echo "- Build: go build ./cmd/lite2api"
+            echo "- Build: go test ./... + go build ./cmd/lite2api"
             echo "- Service URL: http://127.0.0.1:45679"
             echo "- Health endpoint: /health"
             echo "- Admin endpoint: /admin"
+            echo "- Browser: Playwright Core with runner Chromium/Chrome"
             echo "- Screenshot viewport: 1440 x 1000"
+            echo "- End-to-end probe: client → Lite2API → mock OpenAI-compatible upstream"
             echo
             echo "## Health response"
             echo '```json'
             cat lite2api-health.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Probe response"
+            echo '```json'
+            cat lite2api-probe-response.json 2>/dev/null || true
             echo
             echo '```'
             echo
@@ -185,11 +304,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           path: |
-            lite2api-admin-1440.png
+            lite2api-admin-overview-1440.png
+            lite2api-admin-routes-1440.png
+            lite2api-admin-accounts-1440.png
             lite2api-admin-page.html
             lite2api-browser-diagnostics.txt
             lite2api-deployment-report.md
             lite2api-health.json
+            lite2api-probe-response.json
             lite2api-server.log
+            mock-upstream.log
+            mock-models.json
             lite2api-version.txt
             lite2api-commit.txt
