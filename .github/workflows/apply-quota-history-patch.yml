@@ -1,0 +1,44 @@
+name: Apply persistent quota history
+
+on:
+  push:
+    branches:
+      - "feat/admin-canonical-usage-console-20260819"
+    paths:
+      - "tools/apply_quota_history_patch.py"
+      - ".github/workflows/apply-quota-history-patch.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-canonical-quota-history
+  cancel-in-progress: false
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply persistent quota history patch
+        run: python3 tools/apply_quota_history_patch.py
+      - name: Format and test
+        run: |
+          gofmt -w internal/gateway/quotahistory.go internal/gateway/quotahistory_test.go internal/gateway/admin.go
+          node --check internal/web/app.js
+          go test ./...
+          go build -trimpath -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+      - name: Commit verified patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: persist 30-day quota observations"
+          git push origin HEAD:feat/admin-canonical-usage-console-20260819
