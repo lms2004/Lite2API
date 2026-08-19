@@ -203,6 +203,18 @@ jobs:
           cat lite2api-health.json
           cat lite2api-probe-response.json
 
+      - name: Install CJK fonts for Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            fonts-noto-cjk \
+            fonts-noto-color-emoji
+          fc-cache -f
+          fc-list :lang=zh family | sort -u | head -n 30 | tee cjk-fonts.txt
+          test -s cjk-fonts.txt
+
       - name: Capture authenticated admin pages with Playwright
         shell: bash
         run: |
@@ -381,6 +393,7 @@ jobs:
             echo "- Service: http://127.0.0.1:45679"
             echo "- Browser: Playwright Core with the GitHub runner's Chrome/Chromium"
             echo "- Screenshot viewport: 1440 × 1000"
+            echo "- CJK fonts: Noto CJK installed and verified with fontconfig"
             echo
             echo "## Health response"
             echo '```json'
@@ -426,3 +439,4 @@ jobs:
             mock-upstream.log
             mock-models.json
             browser-executable.txt
+            cjk-fonts.txt
