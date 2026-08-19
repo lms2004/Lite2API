@@ -5,6 +5,21 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Lite2API 多模型网关管理台：统一管理账号、密钥、模型路由、请求监控与平台适配器。">
   <meta name="theme-color" content="#080c12">
+  <script>
+    (() => {
+      const modes = ['system', 'light', 'dark'];
+      try {
+        const stored = localStorage.getItem('lite2api_theme_mode');
+        const mode = modes.includes(stored) ? stored : 'system';
+        const dark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = mode;
+        document.documentElement.dataset.themeResolved = dark ? 'dark' : 'light';
+      } catch (_) {
+        document.documentElement.dataset.theme = 'system';
+        document.documentElement.dataset.themeResolved = 'light';
+      }
+    })();
+  </script>
   <title>Lite2API 管理台</title>
   <style>
     :root{--bg:#080b12;--sidebar:#0d111b;--surface:#111722;--surface2:#161e2b;--surface3:#1b2534;--line:#253147;--text:#f5f7fb;--muted:#8d9bb2;--accent:#5ee3b3;--accent2:#62a8ff;--danger:#ff718b;--warning:#f8c15c;--shadow:0 18px 50px rgba(0,0,0,.24)}

@@ -20,6 +20,16 @@
 <main class="main">
   <header class="topbar">
     <div class="topbar-title sr-only"><strong id="viewTitle">用量与额度</strong><span id="viewSubtitle">额度、调用量、速度与渠道质量</span></div>
-    <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>已连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
+    <div class="topbar-tools">
+      <div class="theme-control">
+        <label class="theme-control-label" for="themeMode">主题</label>
+        <select id="themeMode" aria-label="页面主题" onchange="setThemeMode(this.value)">
+          <option value="system">跟随系统</option>
+          <option value="light">白天模式</option>
+          <option value="dark">夜间模式</option>
+        </select>
+      </div>
+      <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>已连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
+    </div>
   </header>
   <div id="notice" class="notice" role="status" aria-live="polite"></div>

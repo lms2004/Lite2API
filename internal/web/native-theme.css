@@ -1,0 +1,135 @@
+/* Lite2API theme tokens. This file is appended after every Native layer so
+   explicit light/dark choices win over the older system media queries. */
+
+html[data-theme-resolved="light"]{
+  color-scheme:light;
+  --bg:#f3f3f5;
+  --canvas:#f3f3f5;
+  --sidebar:rgba(248,248,250,.94);
+  --surface:#fff;
+  --surface-2:#f7f7f9;
+  --surface-3:#efeff2;
+  --surface-raised:#fff;
+  --surface-soft:#f7f7f9;
+  --surface-muted:#efeff2;
+  --surface-glass:rgba(255,255,255,.86);
+  --line:rgba(30,30,34,.10);
+  --line-strong:rgba(30,30,34,.18);
+  --text:#18181b;
+  --text-2:#4c4c52;
+  --muted:#7d7d85;
+  --muted2:#92929a;
+  --blue:#0a6cff;
+  --blue-soft:rgba(10,108,255,.10);
+  --green:#1f8f4d;
+  --green-soft:rgba(31,143,77,.11);
+  --orange:#b06500;
+  --orange-soft:rgba(176,101,0,.11);
+  --red:#d72b3f;
+  --red-soft:rgba(215,43,63,.10);
+  --accent:#168947;
+  --accent-strong:#0f7040;
+  --accent2:#0a6cff;
+  --danger:#d72b3f;
+  --warning:#b06500;
+  --action:#3478e9;
+  --action-strong:#2865ce;
+  --healthy:#1f8f4d;
+  --shadow:0 1px 2px rgba(0,0,0,.035),0 14px 38px rgba(0,0,0,.045);
+  --v9-radius:18px;
+  --v9-radius-small:13px;
+  --v9-shadow:0 1px 2px rgba(0,0,0,.035),0 14px 38px rgba(0,0,0,.045);
+  --v9-shadow-float:0 16px 48px rgba(0,0,0,.14);
+  --v10-canvas:#f4f4f6;
+  --v10-surface:#fff;
+  --v10-soft:#f7f7f9;
+  --v10-muted:#707078;
+  --v10-text:#171719;
+  --v10-line:rgba(28,28,32,.10);
+  --v10-line-strong:rgba(28,28,32,.18);
+  --v10-blue:#0868f2;
+  --v10-blue-soft:rgba(8,104,242,.10);
+  --v10-green:#168947;
+  --v10-green-soft:rgba(22,137,71,.11);
+  --v10-orange:#ae6500;
+  --v10-orange-soft:rgba(174,101,0,.11);
+  --v10-red:#d52b42;
+  --v10-red-soft:rgba(213,43,66,.10);
+  --v10-shadow:0 1px 2px rgba(0,0,0,.035),0 12px 34px rgba(0,0,0,.045);
+  --v8-caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23777780' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E");
+}
+
+html[data-theme-resolved="dark"]{
+  color-scheme:dark;
+  --bg:#171719;
+  --canvas:#171719;
+  --sidebar:rgba(28,28,30,.94);
+  --surface:#252527;
+  --surface-2:#2c2c2f;
+  --surface-3:#343438;
+  --surface-raised:#2b2b2e;
+  --surface-soft:#2c2c2f;
+  --surface-muted:#343438;
+  --surface-glass:rgba(37,37,39,.92);
+  --line:rgba(245,245,247,.10);
+  --line-strong:rgba(245,245,247,.18);
+  --text:#f4f4f6;
+  --text-2:#d0d0d5;
+  --muted:#a0a0a8;
+  --muted2:#85858d;
+  --blue:#5b9dff;
+  --blue-soft:rgba(91,157,255,.17);
+  --green:#4bd07e;
+  --green-soft:rgba(75,208,126,.16);
+  --orange:#f4ae4f;
+  --orange-soft:rgba(244,174,79,.16);
+  --red:#ff7080;
+  --red-soft:rgba(255,112,128,.15);
+  --accent:#4bd07e;
+  --accent-strong:#36b665;
+  --accent2:#6ca9ff;
+  --danger:#ff7080;
+  --warning:#f4ae4f;
+  --action:#5b9dff;
+  --action-strong:#76b1ff;
+  --healthy:#4bd07e;
+  --shadow:0 1px 2px rgba(0,0,0,.24),0 18px 48px rgba(0,0,0,.18);
+  --v9-radius:18px;
+  --v9-radius-small:13px;
+  --v9-shadow:0 1px 2px rgba(0,0,0,.24),0 18px 48px rgba(0,0,0,.18);
+  --v9-shadow-float:0 18px 58px rgba(0,0,0,.42);
+  --v10-canvas:#171719;
+  --v10-surface:#252527;
+  --v10-soft:#2c2c2f;
+  --v10-muted:#a0a0a8;
+  --v10-text:#f4f4f6;
+  --v10-line:rgba(245,245,247,.10);
+  --v10-line-strong:rgba(245,245,247,.18);
+  --v10-blue:#6ca9ff;
+  --v10-blue-soft:rgba(108,169,255,.17);
+  --v10-green:#4bd07e;
+  --v10-green-soft:rgba(75,208,126,.16);
+  --v10-orange:#f4ae4f;
+  --v10-orange-soft:rgba(244,174,79,.16);
+  --v10-red:#ff7080;
+  --v10-red-soft:rgba(255,112,128,.15);
+  --v10-shadow:0 1px 2px rgba(0,0,0,.24),0 18px 48px rgba(0,0,0,.18);
+  --v8-caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23a8a8b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E");
+}
+
+html[data-theme-resolved="light"] .brand-mark{background:linear-gradient(145deg,#1f2024,#0f1012);color:#fff;border-color:transparent}
+html[data-theme-resolved="dark"] .brand-mark{background:#f4f4f6;color:#111;border-color:transparent}
+html[data-theme-resolved="light"] .nav button.active{background:var(--surface);color:var(--text)}
+html[data-theme-resolved="dark"] .nav button.active{background:#142a45;color:#eef5ff}
+
+.topbar-tools{display:flex;align-items:center;justify-content:flex-end;gap:16px;min-width:0}
+.theme-control{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;white-space:nowrap}
+.theme-control select{min-width:108px;height:32px;padding:5px 28px 5px 10px;border-color:var(--line);background:var(--surface-soft);color:var(--text);font-size:11px;appearance:none!important;-webkit-appearance:none!important;background-image:var(--v8-caret)!important;background-repeat:no-repeat!important;background-position:right 9px center!important;background-size:12px 12px!important}
+html[data-theme-resolved="light"] dialog::backdrop{background:rgba(20,20,24,.24)}
+html[data-theme-resolved="dark"] dialog::backdrop{background:rgba(0,0,0,.58)}
+
+@media(max-width:620px){
+  .topbar-tools{gap:8px}
+  .theme-control-label{display:none}
+  .theme-control select{min-width:94px}
+}
