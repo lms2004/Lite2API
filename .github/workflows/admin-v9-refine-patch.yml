@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "feat/admin-v9-core-redesign-20260819"
+      - "chore/admin-v9-refine-runner-20260819"
   pull_request:
     branches:
       - main
