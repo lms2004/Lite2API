@@ -1,0 +1,49 @@
+/* Native v9 refinement — fixes found by the first seeded Playwright pass. */
+
+/* The generic `.health-copy span` rule must not turn the semantic verdict word
+   into a small block subtitle. Keep the result in the headline and give it its
+   actual health color. */
+.v9-command-center .health-copy strong{white-space:nowrap}
+.v9-command-center .health-copy strong .health-label{
+  display:inline;
+  max-width:none;
+  margin:0;
+  color:inherit;
+  font:inherit;
+}
+.v9-command-center .health-verdict.ready .health-label{color:var(--green)}
+.v9-command-center .health-verdict.degraded .health-label{color:var(--orange)}
+.v9-command-center .health-verdict.unavailable .health-label{color:var(--red)}
+.v9-command-center .health-verdict.unknown .health-label{color:var(--muted)}
+
+/* Route target evidence reads as a state, not another unstructured text cell. */
+.v9-routes .target-compat{
+  min-height:24px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:var(--green-soft);
+  color:var(--green);
+  font-weight:650;
+  white-space:nowrap;
+}
+.v9-routes .target-compat.unknown{
+  background:var(--surface-soft);
+  color:var(--muted);
+  font-weight:550;
+}
+.v9-routes .target-compat.warn{
+  background:var(--orange-soft);
+  color:var(--orange);
+}
+.v9-routes .target-compat.off{
+  background:var(--red-soft);
+  color:var(--red);
+}
+
+/* Do not retain a loud editing ring when the master list merely changes which
+   route is selected. Keyboard focus remains visible through :focus-visible. */
+.v9-routes .route-alias:focus:not(:focus-visible){outline:0;border-color:transparent}
+
+@media(max-width:700px){
+  .v9-command-center .health-copy strong{white-space:normal}
+}
