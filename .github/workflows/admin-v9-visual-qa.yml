@@ -1,0 +1,650 @@
+name: Native v9 seeded visual QA
+
+on:
+  push:
+    branches:
+      - "feat/admin-v9-core-redesign-20260819"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "internal/web/**"
+      - ".github/workflows/admin-v9-visual-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-v9-visual-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  seeded-live-capture:
+    name: Build, seed, deploy, and capture three core pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout redesign branch
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test and build Lite2API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go test ./... 2>&1 | tee evidence/go-test.log
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_SHA}" \
+            -o "$RUNNER_TEMP/lite2api" \
+            ./cmd/lite2api
+          "$RUNNER_TEMP/lite2api" -version | tee evidence/lite2api-version.txt
+          git rev-parse HEAD | tee evidence/source-commit.txt
+
+      - name: Write seeded preview configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/lite2api-v9-preview.json" <<'JSON'
+          {
+            "server": {
+              "listen": "127.0.0.1:45679",
+              "api_key_env": "LITE2API_API_KEYS",
+              "admin_token_env": "LITE2API_ADMIN_TOKEN",
+              "client_keys_path": "client_keys.preview.json",
+              "admin_allowed_cidrs": ["127.0.0.0/8", "::1/128"],
+              "trusted_proxy_cidrs": ["127.0.0.0/8", "::1/128"],
+              "admin_session_ttl": "30m",
+              "max_body_bytes": 8388608,
+              "max_inflight_requests": 64,
+              "request_read_timeout": "30s",
+              "queue_timeout": "30s",
+              "response_header_timeout": "30s",
+              "stream_idle_timeout": "2m",
+              "idle_conn_timeout": "90s",
+              "max_idle_conns": 128,
+              "max_idle_conns_per_host": 64,
+              "max_conns_per_host": 64,
+              "failure_threshold": 3,
+              "circuit_cooldown": "30s",
+              "max_failover_attempts": 3,
+              "allow_private_http_upstream": true,
+              "request_log_path": "request.preview.log",
+              "request_log_max_bytes": 8388608,
+              "request_log_backups": 1
+            },
+            "accounts": [
+              {
+                "id": "codex-team",
+                "name": "Codex Team Pool",
+                "type": "openai",
+                "adapter_id": "cli-proxy-api",
+                "instance_id": "preview",
+                "operations": ["openai.chat", "openai.responses"],
+                "base_url": "http://127.0.0.1:45678/v1",
+                "api_key_env": "PREVIEW_CODEX_KEY",
+                "models": ["gpt-5.6-codex", "gpt-5.6-codex-fast"],
+                "capabilities": [
+                  {"model": "sol", "upstream_model": "gpt-5.6-codex", "reasoning_efforts": ["auto", "low", "medium", "high", "ultra"]},
+                  {"model": "sol@fast", "upstream_model": "gpt-5.6-codex-fast", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+                ],
+                "priority": 0,
+                "weight": 3,
+                "concurrency": 12,
+                "enabled": true
+              },
+              {
+                "id": "claude-team",
+                "name": "Claude Research",
+                "type": "openai",
+                "adapter_id": "generic-openai",
+                "instance_id": "preview",
+                "operations": ["openai.chat"],
+                "base_url": "http://127.0.0.1:45680/v1",
+                "api_key_env": "PREVIEW_CLAUDE_KEY",
+                "models": ["claude-sonnet-4-6"],
+                "capabilities": [
+                  {"model": "claude", "upstream_model": "claude-sonnet-4-6", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+                ],
+                "priority": 0,
+                "weight": 2,
+                "concurrency": 8,
+                "enabled": true
+              },
+              {
+                "id": "gemini-team",
+                "name": "Gemini Workspace",
+                "type": "openai",
+                "adapter_id": "gemini-openai",
+                "instance_id": "preview",
+                "operations": ["openai.chat"],
+                "base_url": "http://127.0.0.1:45681/v1",
+                "api_key_env": "PREVIEW_GEMINI_KEY",
+                "models": ["gemini-3.6-flash", "gemini-3.6-pro-vision"],
+                "capabilities": [
+                  {"model": "gemini", "upstream_model": "gemini-3.6-flash", "reasoning_efforts": ["auto", "minimal", "low", "medium", "high"]},
+                  {"model": "vision", "upstream_model": "gemini-3.6-pro-vision", "reasoning_efforts": ["auto", "medium", "high"]}
+                ],
+                "priority": 0,
+                "weight": 2,
+                "concurrency": 10,
+                "enabled": true
+              },
+              {
+                "id": "deepseek-primary",
+                "name": "DeepSeek Primary",
+                "type": "openai",
+                "adapter_id": "generic-openai",
+                "instance_id": "preview-primary",
+                "operations": ["openai.chat"],
+                "base_url": "http://127.0.0.1:45683/v1",
+                "api_key_env": "PREVIEW_DEEPSEEK_KEY",
+                "models": ["deepseek-reasoner"],
+                "capabilities": [
+                  {"model": "deepseek", "upstream_model": "deepseek-reasoner", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+                ],
+                "priority": 0,
+                "weight": 3,
+                "concurrency": 6,
+                "enabled": true
+              },
+              {
+                "id": "deepseek-backup",
+                "name": "DeepSeek Backup",
+                "type": "openai",
+                "adapter_id": "generic-openai",
+                "instance_id": "preview-backup",
+                "operations": ["openai.chat"],
+                "base_url": "http://127.0.0.1:45684/v1",
+                "api_key_env": "PREVIEW_DEEPSEEK_BACKUP_KEY",
+                "models": ["deepseek-reasoner"],
+                "capabilities": [
+                  {"model": "deepseek", "upstream_model": "deepseek-reasoner", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+                ],
+                "priority": 1,
+                "weight": 1,
+                "concurrency": 4,
+                "enabled": true
+              },
+              {
+                "id": "grok-canary",
+                "name": "Grok Canary",
+                "type": "openai",
+                "adapter_id": "generic-openai",
+                "instance_id": "preview-canary",
+                "operations": ["openai.chat"],
+                "base_url": "http://127.0.0.1:45685/v1",
+                "api_key_env": "PREVIEW_GROK_KEY",
+                "models": ["grok-4.5"],
+                "capabilities": [
+                  {"model": "grok", "upstream_model": "grok-4.5", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+                ],
+                "priority": 0,
+                "weight": 1,
+                "concurrency": 2,
+                "enabled": true
+              }
+            ],
+            "routes": {
+              "deepseek": {
+                "model": "deepseek",
+                "reasoning_effort": "high",
+                "targets": [
+                  {"account": "deepseek-primary"},
+                  {"account": "deepseek-backup"}
+                ]
+              },
+              "sol": {
+                "model": "sol",
+                "reasoning_effort": "high",
+                "targets": [{"account": "codex-team"}]
+              },
+              "sol-fast": {
+                "model": "sol@fast",
+                "reasoning_effort": "medium",
+                "targets": [{"account": "codex-team"}]
+              },
+              "claude": {
+                "model": "claude",
+                "reasoning_effort": "high",
+                "targets": [{"account": "claude-team"}]
+              },
+              "gemini": {
+                "model": "gemini",
+                "reasoning_effort": "medium",
+                "targets": [{"account": "gemini-team"}]
+              },
+              "vision": {
+                "model": "vision",
+                "reasoning_effort": "high",
+                "targets": [{"account": "gemini-team"}]
+              },
+              "grok": {
+                "model": "grok",
+                "reasoning_effort": "high",
+                "targets": [{"account": "grok-canary"}]
+              }
+            }
+          }
+          JSON
+          "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-v9-preview.json" -check-config | tee evidence/config-check.txt
+
+      - name: Start seeded upstream and OAuth fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/preview_fixtures.py" <<'PY'
+          import json
+          import threading
+          import time
+          from datetime import datetime, timedelta, timezone
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          PROFILES = {
+              45678: {"name": "Codex Team Pool", "models": ["gpt-5.6-codex", "gpt-5.6-codex-fast"], "delay": 0.045, "status": 200},
+              45680: {"name": "Claude Research", "models": ["claude-sonnet-4-6"], "delay": 0.085, "status": 200},
+              45681: {"name": "Gemini Workspace", "models": ["gemini-3.6-flash", "gemini-3.6-pro-vision"], "delay": 0.065, "status": 200},
+              45683: {"name": "DeepSeek Primary", "models": ["deepseek-reasoner"], "delay": 0.035, "status": 429},
+              45684: {"name": "DeepSeek Backup", "models": ["deepseek-reasoner"], "delay": 0.115, "status": 200},
+              45685: {"name": "Grok Canary", "models": ["grok-4.5"], "delay": 0.055, "status": 503},
+          }
+
+          def iso(hours=0):
+              return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
+
+          class ModelHandler(BaseHTTPRequestHandler):
+              protocol_version = "HTTP/1.1"
+
+              def log_message(self, fmt, *args):
+                  print(f"upstream:{self.server.server_port}: " + (fmt % args), flush=True)
+
+              def send_json(self, status, payload):
+                  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def do_GET(self):
+                  profile = PROFILES[self.server.server_port]
+                  if self.path.rstrip("/") == "/v1/models":
+                      self.send_json(200, {"object": "list", "data": [
+                          {"id": model, "object": "model", "created": 0, "owned_by": profile["name"]}
+                          for model in profile["models"]
+                      ]})
+                      return
+                  self.send_json(404, {"error": {"message": "not found"}})
+
+              def do_POST(self):
+                  profile = PROFILES[self.server.server_port]
+                  length = int(self.headers.get("Content-Length", "0") or "0")
+                  raw = self.rfile.read(length) if length else b"{}"
+                  try:
+                      request = json.loads(raw.decode("utf-8"))
+                  except Exception:
+                      request = {}
+                  time.sleep(profile["delay"])
+                  if self.path.rstrip("/") != "/v1/chat/completions":
+                      self.send_json(404, {"error": {"message": "not found"}})
+                      return
+                  if profile["status"] == 429:
+                      self.send_json(429, {"error": {"message": "Primary pool is rate limited", "type": "rate_limit_error"}})
+                      return
+                  if profile["status"] == 503:
+                      self.send_json(503, {"error": {"message": "Canary upstream maintenance", "type": "upstream_error"}})
+                      return
+                  model = request.get("model") or profile["models"][0]
+                  prompt_size = len(json.dumps(request.get("messages") or [], ensure_ascii=False))
+                  input_tokens = 28 + prompt_size // 12
+                  output_tokens = 22 + self.server.server_port % 9
+                  self.send_json(200, {
+                      "id": f"chatcmpl-preview-{self.server.server_port}-{int(time.time()*1000)}",
+                      "object": "chat.completion",
+                      "created": int(time.time()),
+                      "model": model,
+                      "choices": [{
+                          "index": 0,
+                          "message": {"role": "assistant", "content": f"{profile['name']} preview response"},
+                          "finish_reason": "stop"
+                      }],
+                      "usage": {
+                          "prompt_tokens": input_tokens,
+                          "completion_tokens": output_tokens,
+                          "total_tokens": input_tokens + output_tokens,
+                          "prompt_tokens_details": {"cached_tokens": input_tokens // 4}
+                      }
+                  })
+
+          class OAuthHandler(BaseHTTPRequestHandler):
+              protocol_version = "HTTP/1.1"
+
+              def log_message(self, fmt, *args):
+                  print("oauth-fixture: " + (fmt % args), flush=True)
+
+              def send_json(self, status, payload):
+                  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def do_GET(self):
+                  if self.path.split("?", 1)[0] != "/v0/management/auth-files":
+                      self.send_json(404, {"error": "not found"})
+                      return
+                  self.send_json(200, {"files": [
+                      {
+                          "id": "codex-team-a.json", "auth_index": "codex-a", "provider": "openai",
+                          "label": "design@studio.example", "account_type": "ChatGPT Team", "status": "active",
+                          "success": 1842, "failed": 9, "updated_at": iso(-1), "last_refresh": iso(-2),
+                          "quota": {"exceeded": False},
+                          "quota_windows": [
+                              {"kind": "five_hour", "label": "5 小时窗口", "used_percentage": 38.0, "status": "available", "reset_at": iso(2), "observed_at": iso(), "source": "provider"},
+                              {"kind": "seven_day", "label": "7 天窗口", "used_percentage": 61.0, "status": "available", "reset_at": iso(42), "observed_at": iso(), "source": "provider"}
+                          ],
+                          "prompt_usage": {"provider": "codex", "model": "gpt-5.6-codex", "input_tokens": 1840, "output_tokens": 632, "reasoning_tokens": 420, "cached_tokens": 718, "total_tokens": 2892, "observed_at": iso(), "source": "provider_usage", "latency_ms": 920}
+                      },
+                      {
+                          "id": "codex-team-b.json", "auth_index": "codex-b", "provider": "openai",
+                          "label": "infra@studio.example", "account_type": "ChatGPT Pro", "status": "active",
+                          "success": 963, "failed": 4, "updated_at": iso(-1), "last_refresh": iso(-3),
+                          "quota": {"exceeded": False},
+                          "quota_windows": [
+                              {"kind": "five_hour", "label": "5 小时窗口", "used_percentage": 72.0, "status": "available", "reset_at": iso(1), "observed_at": iso(), "source": "provider"},
+                              {"kind": "seven_day", "label": "7 天窗口", "used_percentage": 44.0, "status": "available", "reset_at": iso(36), "observed_at": iso(), "source": "provider"}
+                          ]
+                      },
+                      {
+                          "id": "claude-research.json", "auth_index": "claude-a", "provider": "claude",
+                          "email": "research@lab.example", "account_type": "Claude Max", "status": "active",
+                          "success": 728, "failed": 3, "updated_at": iso(-1), "last_refresh": iso(-4),
+                          "quota": {"exceeded": False},
+                          "quota_windows": [
+                              {"kind": "five_hour", "label": "Session", "used_percentage": 27.0, "status": "available", "reset_at": iso(3), "observed_at": iso(), "source": "provider"},
+                              {"kind": "seven_day_sonnet", "label": "Sonnet 周额度", "used_percentage": 84.0, "status": "available", "reset_at": iso(58), "observed_at": iso(), "source": "provider"}
+                          ]
+                      },
+                      {
+                          "id": "gemini-workspace.json", "auth_index": "gemini-a", "provider": "gemini-cli",
+                          "email": "ai@workspace.example", "account_type": "Workspace", "status": "active",
+                          "success": 515, "failed": 8, "updated_at": iso(-1), "last_refresh": iso(-5),
+                          "quota": {"exceeded": False},
+                          "quota_windows": [
+                              {"kind": "daily", "label": "每日请求", "used_percentage": 46.0, "status": "available", "reset_at": iso(9), "observed_at": iso(), "source": "provider"},
+                              {"kind": "model_quota", "model": "Gemini Pro", "remaining": 42.0, "unit": "requests", "status": "available", "reset_at": iso(9), "observed_at": iso(), "source": "provider"}
+                          ]
+                      },
+                      {
+                          "id": "antigravity-canary.json", "auth_index": "antigravity-a", "provider": "antigravity",
+                          "label": "canary@workspace.example", "account_type": "Preview", "status": "unavailable",
+                          "unavailable": True, "success": 121, "failed": 17, "updated_at": iso(-2), "last_refresh": iso(-8),
+                          "next_retry_after": iso(1), "quota": {"exceeded": True},
+                          "quota_windows": [
+                              {"kind": "model_cooldown", "model": "Gemini Preview", "status": "cooldown", "reset_at": iso(1), "observed_at": iso(), "source": "provider"}
+                          ]
+                      }
+                  ]})
+
+          servers = []
+          for port in PROFILES:
+              server = ThreadingHTTPServer(("127.0.0.1", port), ModelHandler)
+              servers.append(server)
+              threading.Thread(target=server.serve_forever, daemon=True).start()
+          oauth = ThreadingHTTPServer(("127.0.0.1", 45682), OAuthHandler)
+          servers.append(oauth)
+          threading.Thread(target=oauth.serve_forever, daemon=True).start()
+          print("preview fixtures ready", flush=True)
+          while True:
+              time.sleep(3600)
+          PY
+
+          nohup python3 -u "$RUNNER_TEMP/preview_fixtures.py" > evidence/fixture-server.log 2>&1 &
+          echo $! > evidence/fixture-server.pid
+          for port in 45678 45680 45681 45683 45684 45685; do
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl --silent --show-error --fail "http://127.0.0.1:${port}/v1/models" > "evidence/models-${port}.json"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          done
+          curl --silent --show-error --fail \
+            -H 'Authorization: Bearer preview-management-key' \
+            http://127.0.0.1:45682/v0/management/auth-files \
+            > evidence/oauth-accounts.json
+
+      - name: Deploy Lite2API and seed real requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup env \
+            LITE2API_API_KEYS="preview-client-key" \
+            LITE2API_ADMIN_TOKEN="preview-admin-token" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            PREVIEW_CODEX_KEY="preview" \
+            PREVIEW_CLAUDE_KEY="preview" \
+            PREVIEW_GEMINI_KEY="preview" \
+            PREVIEW_DEEPSEEK_KEY="preview" \
+            PREVIEW_DEEPSEEK_BACKUP_KEY="preview" \
+            PREVIEW_GROK_KEY="preview" \
+            CLIPROXYAPI_MANAGEMENT_KEY="preview-management-key" \
+            "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-v9-preview.json" \
+            > evidence/lite2api-server.log 2>&1 &
+          echo $! > evidence/lite2api-server.pid
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            status="$(curl --silent --show-error --output evidence/health.json --write-out '%{http_code}' http://127.0.0.1:45679/health || true)"
+            if [ "$status" = "200" ] || [ "$status" = "503" ]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          call_model() {
+            local model="$1"
+            local index="$2"
+            curl --silent --show-error \
+              --output "evidence/seed-${model}-${index}.json" \
+              --write-out '%{http_code}' \
+              http://127.0.0.1:45679/v1/chat/completions \
+              -H 'Authorization: Bearer preview-client-key' \
+              -H 'Content-Type: application/json' \
+              --data "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Seeded visual QA request ${index} for ${model}\"}],\"stream\":false}" \
+              >> evidence/seed-statuses.txt
+            printf ' %s %s\n' "$model" "$index" >> evidence/seed-statuses.txt
+          }
+
+          for i in $(seq 1 12); do call_model sol "$i"; done
+          for i in $(seq 1 8); do call_model sol-fast "$i"; done
+          for i in $(seq 1 7); do call_model claude "$i"; done
+          for i in $(seq 1 7); do call_model gemini "$i"; done
+          for i in $(seq 1 6); do call_model deepseek "$i"; done
+          for i in $(seq 1 4); do call_model vision "$i"; done
+          call_model grok 1 || true
+
+          sleep 3
+          curl --silent --show-error http://127.0.0.1:45679/health > evidence/health-after-seed.json
+
+      - name: Install browser dependencies and CJK fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk > evidence/font-install.log
+          fc-cache -f
+          fc-match 'Noto Sans CJK SC' | tee evidence/font-match.txt
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf '%s\n' "$CHROME" > evidence/browser-executable.txt
+          mkdir -p "$RUNNER_TEMP/browser"
+          cd "$RUNNER_TEMP/browser"
+          npm init -y > "$GITHUB_WORKSPACE/evidence/npm-init.log" 2>&1
+          npm install --no-audit --no-fund playwright-core 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-install.log"
+
+      - name: Capture overview, routes, and upstream pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/browser/capture.js" <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { chromium } = require('playwright-core');
+
+          const output = process.env.OUTPUT_DIR;
+          const diagnostics = [];
+          const record = message => {
+            const line = `${new Date().toISOString()} ${message}`;
+            diagnostics.push(line);
+            fs.writeFileSync(path.join(output, 'browser-diagnostics.txt'), diagnostics.join('\n') + '\n');
+            console.log(line);
+          };
+
+          function trendFixture() {
+            const points = [];
+            const now = Date.now();
+            const requests = [18,22,19,28,34,31,42,49,46,58,64,61,72,68,79,84,91,88,104,112,98,87,76,69];
+            const failed =   [0, 1, 0, 1, 0, 2, 1, 0, 1, 2, 1, 0, 1, 1, 2, 1, 1, 0, 2, 1, 2, 1, 0, 1];
+            const p95 =      [640,710,680,760,720,840,790,740,820,910,860,810,880,940,1020,970,890,850,930,1080,990,910,830,780];
+            for (let index = 0; index < requests.length; index += 1) {
+              points.push({
+                time: new Date(now - (requests.length - 1 - index) * 60 * 60 * 1000).toISOString(),
+                requests: requests[index],
+                failed: failed[index],
+                p95_latency_ms: p95[index],
+              });
+            }
+            return { range_seconds: 86400, bucket_seconds: 3600, retention_seconds: 604800, points };
+          }
+
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true,
+              executablePath: process.env.CHROME,
+              args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+            });
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'zh-CN',
+              colorScheme: 'light',
+              reducedMotion: 'reduce',
+            });
+            const page = await context.newPage();
+            page.on('console', message => record(`[console:${message.type()}] ${message.text()}`));
+            page.on('pageerror', error => record(`[pageerror] ${error.stack || error.message}`));
+            page.on('requestfailed', request => record(`[requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
+
+            await page.route('**/admin/api/trends?*', async route => {
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(trendFixture()) });
+            });
+
+            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', {
+              data: { token: 'preview-admin-token' },
+            });
+            const loginBody = await login.text();
+            record(`[login] ${login.status()} ${loginBody}`);
+            if (!login.ok()) throw new Error(`admin login failed: ${login.status()} ${loginBody}`);
+
+            await page.goto('http://127.0.0.1:45679/admin', { waitUntil: 'domcontentloaded', timeout: 45000 });
+            await page.waitForSelector('.native-shell', { state: 'visible', timeout: 30000 });
+            await page.waitForSelector('#view-monitor.active .v9-command-center', { state: 'visible', timeout: 30000 });
+            await page.waitForFunction(() => document.querySelectorAll('#routeHealthSummary .route-health-row').length >= 5, null, { timeout: 30000 });
+            await page.waitForTimeout(2200);
+            await page.screenshot({ path: path.join(output, 'lite2api-v9-overview-1440.png'), fullPage: false, animations: 'disabled' });
+            record('[capture] overview');
+
+            await page.locator('button[data-view="routes"]').click();
+            await page.waitForSelector('#view-routes.active .v9-route-studio', { state: 'visible', timeout: 20000 });
+            await page.waitForSelector('#v5RouteList .route-master-item', { state: 'visible', timeout: 20000 });
+            const deepseek = page.locator('#v5RouteList .route-master-item').filter({ hasText: 'deepseek' }).first();
+            if (await deepseek.count()) await deepseek.click();
+            await page.waitForTimeout(1500);
+            await page.screenshot({ path: path.join(output, 'lite2api-v9-routes-1440.png'), fullPage: false, animations: 'disabled' });
+            record('[capture] routes');
+
+            await page.locator('button[data-view="accounts"]').click();
+            await page.waitForSelector('#view-accounts.active .v9-source-studio', { state: 'visible', timeout: 20000 });
+            await page.waitForFunction(() => document.querySelectorAll('#oauthAccounts .channel-account').length >= 4, null, { timeout: 30000 });
+            await page.waitForTimeout(1600);
+            await page.screenshot({ path: path.join(output, 'lite2api-v9-upstreams-1440.png'), fullPage: false, animations: 'disabled' });
+            record('[capture] upstreams');
+
+            const state = await context.request.get('http://127.0.0.1:45679/admin/api/state');
+            const oauth = await context.request.get('http://127.0.0.1:45679/admin/api/oauth/accounts');
+            fs.writeFileSync(path.join(output, 'admin-state.json'), await state.text());
+            fs.writeFileSync(path.join(output, 'oauth-state.json'), await oauth.text());
+            fs.writeFileSync(path.join(output, 'rendered-admin.html'), await page.content());
+            await browser.close();
+          })().catch(error => {
+            record(`[fatal] ${error.stack || error.message || error}`);
+            console.error(error.stack || error);
+            process.exit(1);
+          });
+          NODE
+
+          cd "$RUNNER_TEMP/browser"
+          CHROME="$(cat "$GITHUB_WORKSPACE/evidence/browser-executable.txt")" \
+            OUTPUT_DIR="$GITHUB_WORKSPACE/evidence" \
+            node capture.js 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-run.log"
+          file "$GITHUB_WORKSPACE/evidence"/*.png | tee "$GITHUB_WORKSPACE/evidence/screenshot-files.txt"
+          sha256sum "$GITHUB_WORKSPACE/evidence"/*.png | tee "$GITHUB_WORKSPACE/evidence/screenshot-sha256.txt"
+
+      - name: Write QA report
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Lite2API Native v9 seeded visual QA"
+            echo
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Runner: ${RUNNER_OS}/${RUNNER_ARCH}"
+            echo "- Source validation: go test ./... + go build ./cmd/lite2api"
+            echo "- Runtime: real Lite2API process on 127.0.0.1:45679"
+            echo "- Seed: six local model connections, seven client routes, five OAuth credentials"
+            echo "- Requests: real gateway requests including a rate-limit failover and one canary failure"
+            echo "- Chart history: deterministic visual fixture intercepted only for the Playwright preview"
+            echo "- Screenshots: overview, routes, upstreams at 1440 x 1000"
+            echo
+            echo "## Health"
+            echo '```json'
+            cat evidence/health-after-seed.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Seed request statuses"
+            echo '```text'
+            cat evidence/seed-statuses.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Server log tail"
+            echo '```text'
+            tail -n 120 evidence/lite2api-server.log 2>/dev/null || true
+            echo '```'
+          } > evidence/visual-qa-report.md
+          find evidence -maxdepth 1 -type f -printf '%f %s bytes\n' | sort > evidence/file-list.txt
+
+      - name: Upload Native v9 visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-native-v9-seeded-visual-qa
+          retention-days: 2
+          if-no-files-found: error
+          path: evidence/
