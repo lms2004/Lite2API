@@ -67,6 +67,8 @@ jobs:
           test -s internal/web/native-v6.js
           test -s internal/web/native-v7.css
           test -s internal/web/native-v7.js
+          test -s internal/web/native-v8.css
+          test -s internal/web/native-v9.css
           test -s internal/web/native-v5-shell.html
           test -s internal/web/native-v5-monitor.html
           test -s internal/web/native-v5-routes.html
@@ -76,11 +78,19 @@ jobs:
           grep -Fq -- '.grouped-surface,.grouped-section' internal/web/native-v6.css
           grep -Fq -- '.v7-model-dialog' internal/web/native-v7.css
           grep -Fq -- '.v7-effort-control' internal/web/native-v7.css
+          grep -Fq -- 'Native v8' internal/web/native-v8.css
+          grep -Fq -- 'Native v9' internal/web/native-v9.css
+          grep -Fq -- '.v9-command-center' internal/web/native-v9.css
+          grep -Fq -- '.v9-route-studio' internal/web/native-v9.css
+          grep -Fq -- '.v9-source-studio' internal/web/native-v9.css
           grep -Fq -- 'window.Lite2APINativeV5' internal/web/native-v5.js
           grep -Fq -- 'window.Lite2APINativeV6' internal/web/native-v6.js
           grep -Fq -- 'window.Lite2APINativeV7' internal/web/native-v7.js
           grep -Fq -- '搜索模型、上游或真实模型 ID' internal/web/native-v7.js
           grep -Fq -- 'id="v5RouteList"' internal/web/native-v5-routes.html
+          grep -Fq -- 'class="v9-route-studio"' internal/web/native-v5-routes.html
+          grep -Fq -- 'class="v9-source-studio"' internal/web/native-v5-accounts.html
+          grep -Fq -- 'class="v9-command-center"' internal/web/native-v5-monitor.html
           grep -Fq -- 'id="v6KeyList"' internal/web/native-v5-keys.html
           grep -Fq -- 'id="v6ClientBaseURL"' internal/web/native-v5-keys.html
 
