@@ -29,6 +29,9 @@ var nativeV9RefineCSS []byte
 //go:embed native-v10.css
 var nativeV10CSS []byte
 
+//go:embed native-v10-dialog-polish.css
+var nativeV10DialogPolishCSS []byte
+
 //go:embed native-v5.js
 var nativeV5JS []byte
 
@@ -49,6 +52,9 @@ var nativeV10QuotaJS []byte
 
 //go:embed native-v10-provider-fixes.js
 var nativeV10ProviderFixesJS []byte
+
+//go:embed native-v10-provider-methods.js
+var nativeV10ProviderMethodsJS []byte
 
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
@@ -88,8 +94,8 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v10'`), 1)
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f4f4f6">`), 1)
 
-	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS}, []byte("\n"))
+	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 
