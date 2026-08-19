@@ -1,0 +1,69 @@
+name: Temporary Native v10 product QA fixup
+
+on:
+  push:
+    branches:
+      - "feat/admin-v9-core-redesign-20260819"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-remove-self:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/admin-v9-core-redesign-20260819
+          fetch-depth: 1
+      - name: Repair the strict product fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/admin-v10-product-qa.yml')
+          text = path.read_text()
+          text = text.replace('"unavailable":true', '"unavailable":True')
+
+          old = """            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', { data: { token: 'preview-admin-token' } });
+            if (!login.ok()) throw new Error(`admin login failed: ${login.status()} ${await login.text()}`);
+"""
+          new = """            const login = await context.request.post('http://127.0.0.1:45679/admin/api/login', { data: { token: 'preview-admin-token' } });
+            const loginBody = await login.text();
+            if (!login.ok()) throw new Error(`admin login failed: ${login.status()} ${loginBody}`);
+            const loginData = JSON.parse(loginBody);
+"""
+          if 'const loginData = JSON.parse(loginBody);' not in text:
+              if old not in text:
+                  raise SystemExit('login anchor not found')
+              text = text.replace(old, new, 1)
+
+          old = """            const accountTest = await context.request.post('http://127.0.0.1:45679/admin/api/accounts/test', {
+              data: { account: { id:'api-contract-test', name:'API Contract Test', type:'openai', base_url:'http://127.0.0.1:45678/v1', api_key:'preview', auth_header:'Authorization', auth_scheme:'Bearer', concurrency:1, weight:1, enabled:true } },
+            });
+"""
+          new = """            const accountTest = await context.request.post('http://127.0.0.1:45679/admin/api/accounts/test', {
+              headers: { 'X-CSRF-Token': loginData.csrf },
+              data: { account: { id:'api-contract-test', name:'API Contract Test', type:'openai', base_url:'http://127.0.0.1:45678/v1', api_key:'preview', auth_header:'Authorization', auth_scheme:'Bearer', concurrency:1, weight:1, enabled:true } },
+            });
+"""
+          if "headers: { 'X-CSRF-Token': loginData.csrf }" not in text:
+              if old not in text:
+                  raise SystemExit('account test anchor not found')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+          rm .github/workflows/v10-product-qa-fixup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/admin-v10-product-qa.yml .github/workflows/v10-product-qa-fixup.yml
+          git commit -m "ci: fix Native v10 quota fixture and CSRF probe"
+          git push origin HEAD:feat/admin-v9-core-redesign-20260819
