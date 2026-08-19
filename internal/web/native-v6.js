@@ -60,6 +60,13 @@
     return (cell?.innerText || cell?.textContent || "").replace(/\s+/g, " ").trim();
   }
 
+  // The stable renderer renames the legacy tbody id from `keys` to `keyRows`
+  // before the native layers load. Keep the enhancement compatible with both
+  // the remapped production DOM and the unremapped fixture/preview DOM.
+  function keyTableBody() {
+    return byId("keyRows") || byId("keys");
+  }
+
   function keyRowFromTable(row) {
     const cells = all(":scope > td", row);
     if (cells.length < 7 || cells[0]?.hasAttribute("colspan")) return null;
@@ -114,7 +121,7 @@
   }
 
   function syncKeyList() {
-    const tbody = byId("keys");
+    const tbody = keyTableBody();
     const list = byId("v6KeyList");
     if (!tbody || !list) return;
     const rows = all(":scope > tr", tbody);
@@ -160,7 +167,7 @@
   function installObservers() {
     const updated = byId("lastUpdated");
     if (updated) new MutationObserver(syncFreshness).observe(updated, { childList: true, subtree: true, characterData: true });
-    const keys = byId("keys");
+    const keys = keyTableBody();
     if (keys) new MutationObserver(schedule).observe(keys, { childList: true, subtree: true, characterData: true, attributes: true });
   }
 

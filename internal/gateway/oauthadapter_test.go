@@ -13,6 +13,7 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	const managementKey = "management-test-secret"
 	const serviceKey = "service-test-secret"
 	var callbackReceived atomic.Bool
+	var statusPatched atomic.Bool
 	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0/management/codex-auth-url":
@@ -36,6 +37,19 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 				status = "ok"
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": status})
+		case "/v0/management/auth-files/status":
+			var payload struct {
+				Name     string `json:"name"`
+				Disabled bool   `json:"disabled"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Name != "codex-user@example.com.json" || !payload.Disabled {
+				t.Errorf("unexpected auth status patch: %+v", payload)
+			}
+			statusPatched.Store(true)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "disabled": true})
 		case "/v0/management/auth-files":
 			writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{{
 				"id": "codex-user@example.com.json", "auth_index": "safe-index", "provider": "codex",
@@ -104,6 +118,13 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	g.ServeAdminAPI(accountsW, accounts)
 	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || !strings.Contains(accountsW.Body.String(), `"input_tokens":128`) || !strings.Contains(accountsW.Body.String(), `"cached_tokens":64`) || !strings.Contains(accountsW.Body.String(), `"reasoning_tokens":8`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
 		t.Fatalf("accounts status=%d body=%s", accountsW.Code, accountsW.Body.String())
+	}
+
+	toggle := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/accounts/status", `{"id":"safe-index","disabled":true}`, cookie, csrf)
+	toggleW := httptest.NewRecorder()
+	g.ServeAdminAPI(toggleW, toggle)
+	if toggleW.Code != http.StatusOK || !statusPatched.Load() {
+		t.Fatalf("toggle status=%d body=%s patched=%v", toggleW.Code, toggleW.Body.String(), statusPatched.Load())
 	}
 }
 

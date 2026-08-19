@@ -62,6 +62,9 @@ var nativeV10ProviderMethodsJS []byte
 //go:embed native-theme.js
 var nativeThemeJS []byte
 
+//go:embed native-account-status.js
+var nativeAccountStatusJS []byte
+
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
 
@@ -97,11 +100,11 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
 	page = replaceRange(page, []byte(`<dialog id="quickAuthDialog"`), []byte(`<dialog id="exportDialog"`), bytes.TrimSpace(nativeV10AccountDialogs))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v10'`), 1)
+	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v11'`), 1)
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f4f4f6">`), 1)
 
 	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeAccountStatusJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 

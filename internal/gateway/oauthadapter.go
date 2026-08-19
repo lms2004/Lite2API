@@ -51,6 +51,11 @@ type oauthStatusInput struct {
 	Provider string `json:"provider,omitempty"`
 }
 
+type oauthAccountStatusInput struct {
+	ID       string `json:"id"`
+	Disabled *bool  `json:"disabled"`
+}
+
 type oauthAdapterResponse struct {
 	Status string `json:"status"`
 	URL    string `json:"url"`
@@ -64,6 +69,7 @@ type oauthCredential struct {
 	Identity       string             `json:"identity"`
 	Plan           string             `json:"plan,omitempty"`
 	Status         string             `json:"status"`
+	Disabled       bool               `json:"disabled"`
 	Ready          bool               `json:"ready"`
 	Success        int64              `json:"success"`
 	Failed         int64              `json:"failed"`
@@ -105,6 +111,7 @@ type oauthQuotaWindow struct {
 type oauthAuthFilesResponse struct {
 	Files []struct {
 		ID             string `json:"id"`
+		Name           string `json:"name"`
 		AuthIndex      string `json:"auth_index"`
 		Provider       string `json:"provider"`
 		Label          string `json:"label"`
@@ -231,6 +238,53 @@ func (g *Gateway) serveOAuthAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": credentials})
 }
 
+func (g *Gateway) serveOAuthAccountStatus(w http.ResponseWriter, r *http.Request) {
+	var input oauthAccountStatusInput
+	if decodeAdminJSON(w, r, &input) != nil {
+		return
+	}
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		writeAPIErrorCode(w, http.StatusBadRequest, "OAuth account id is required", "invalid_request_error", "invalid_oauth_account")
+		return
+	}
+	if input.Disabled == nil {
+		writeAPIErrorCode(w, http.StatusBadRequest, "disabled is required", "invalid_request_error", "invalid_oauth_account")
+		return
+	}
+
+	var result struct {
+		Status   string `json:"status"`
+		Disabled bool   `json:"disabled"`
+	}
+	payload := map[string]any{"name": resolveOAuthAccountName(r.Context(), input.ID), "disabled": *input.Disabled}
+	if err := callOAuthAdapter(r.Context(), http.MethodPatch, "auth-files/status", nil, payload, &result); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "disabled": *input.Disabled})
+}
+
+// resolveOAuthAccountName translates the stable auth_index exposed in the
+// admin UI to the auth file name accepted by CLIProxyAPI's status endpoint.
+// Falling back to the supplied ID keeps this compatible with adapters that
+// already accept auth_index directly.
+func resolveOAuthAccountName(ctx context.Context, id string) string {
+	var payload oauthAuthFilesResponse
+	if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &payload); err != nil {
+		return id
+	}
+	for _, item := range payload.Files {
+		if id != strings.TrimSpace(item.AuthIndex) && id != strings.TrimSpace(item.ID) && id != strings.TrimSpace(item.Name) {
+			continue
+		}
+		if name := firstNonEmpty(strings.TrimSpace(item.Name), strings.TrimSpace(item.ID)); name != "" {
+			return name
+		}
+	}
+	return id
+}
+
 func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 	var payload oauthAuthFilesResponse
 	if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &payload); err != nil {
@@ -264,7 +318,7 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 		copy(quotaWindows, item.QuotaWindows)
 		credentials = append(credentials, oauthCredential{
 			ID: id, Provider: provider, Identity: maskCredentialIdentity(identity),
-			Plan: strings.TrimSpace(item.AccountType), Status: status,
+			Plan: strings.TrimSpace(item.AccountType), Status: status, Disabled: item.Disabled,
 			Ready:   status == "active" && !item.Disabled && !item.Unavailable,
 			Success: item.Success, Failed: item.Failed, UpdatedAt: item.UpdatedAt, LastRefresh: item.LastRefresh,
 			NextRetryAfter: item.NextRetryAfter, QuotaExceeded: item.Quota.Exceeded,
