@@ -1,0 +1,428 @@
+name: Lite2API isolated Runner capture
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-and-capture:
+    name: Test, deploy, verify, and capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact Lite2API source revision
+        uses: actions/checkout@v4
+        with:
+          ref: 0fbc955393e079553bee84c4e37ddef257c8347c
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test and build Lite2API
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... | tee lite2api-go-test.log
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=0fbc955393e079553bee84c4e37ddef257c8347c" \
+            -o "$RUNNER_TEMP/lite2api" \
+            ./cmd/lite2api
+          "$RUNNER_TEMP/lite2api" -version | tee lite2api-version.txt
+          git rev-parse HEAD | tee lite2api-source-commit.txt
+
+      - name: Start deterministic OpenAI-compatible upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/mock_upstream.py" <<'PY'
+          import json
+          import time
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              server_version = "Lite2APIRunnerUpstream/1.0"
+
+              def log_message(self, fmt, *args):
+                  print("mock-upstream:", fmt % args, flush=True)
+
+              def send_json(self, status, payload):
+                  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def do_GET(self):
+                  if self.path.rstrip("/") == "/v1/models":
+                      self.send_json(200, {
+                          "object": "list",
+                          "data": [
+                              {
+                                  "id": "deepseek-v4-flash",
+                                  "object": "model",
+                                  "created": 0,
+                                  "owned_by": "lite2api-runner"
+                              },
+                              {
+                                  "id": "Qwen/Qwen3-VL-8B-Instruct",
+                                  "object": "model",
+                                  "created": 0,
+                                  "owned_by": "lite2api-runner"
+                              }
+                          ]
+                      })
+                      return
+                  self.send_json(404, {"error": {"message": "not found"}})
+
+              def do_POST(self):
+                  length = int(self.headers.get("Content-Length", "0") or "0")
+                  raw = self.rfile.read(length) if length else b"{}"
+                  try:
+                      request = json.loads(raw.decode("utf-8"))
+                  except Exception:
+                      request = {}
+
+                  if self.path.rstrip("/") == "/v1/chat/completions":
+                      model = request.get("model") or "deepseek-v4-flash"
+                      self.send_json(200, {
+                          "id": "chatcmpl-lite2api-runner",
+                          "object": "chat.completion",
+                          "created": int(time.time()),
+                          "model": model,
+                          "choices": [{
+                              "index": 0,
+                              "message": {
+                                  "role": "assistant",
+                                  "content": "Lite2API GitHub Runner deployment verified."
+                              },
+                              "finish_reason": "stop"
+                          }],
+                          "usage": {
+                              "prompt_tokens": 12,
+                              "completion_tokens": 7,
+                              "total_tokens": 19
+                          }
+                      })
+                      return
+
+                  self.send_json(404, {"error": {"message": "not found"}})
+
+          ThreadingHTTPServer(("127.0.0.1", 45678), Handler).serve_forever()
+          PY
+
+          nohup python3 -u "$RUNNER_TEMP/mock_upstream.py" > mock-upstream.log 2>&1 &
+          echo $! > mock-upstream.pid
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:45678/v1/models \
+              > mock-models.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat mock-upstream.log >&2 || true
+            exit 1
+          fi
+          cat mock-models.json
+
+      - name: Deploy Lite2API and verify end-to-end routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp config.example.json "$RUNNER_TEMP/lite2api-config.json"
+
+          nohup env \
+            LITE2API_API_KEYS="ci-preview-gateway-key-20260819" \
+            LITE2API_ADMIN_TOKEN="ci-preview-admin-token-20260819" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            ATOMCODE2API_KEY="ci-preview-upstream-key" \
+            "$RUNNER_TEMP/lite2api" \
+              -config "$RUNNER_TEMP/lite2api-config.json" \
+            > lite2api-server.log 2>&1 &
+          echo $! > lite2api-server.pid
+
+          live=0
+          for attempt in $(seq 1 60); do
+            status="$(curl --silent --show-error \
+              --output lite2api-health.json \
+              --write-out '%{http_code}' \
+              http://127.0.0.1:45679/health || true)"
+            printf '%s\n' "$status" > lite2api-health-status.txt
+            if { [ "$status" = "200" ] || [ "$status" = "503" ]; } \
+              && grep -q '"liveness":"ok"' lite2api-health.json; then
+              live=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$live" -ne 1 ]; then
+            echo "Lite2API did not expose a valid liveness response" >&2
+            cat lite2api-server.log >&2 || true
+            exit 1
+          fi
+
+          admin_status="$(curl --silent --show-error \
+            --output lite2api-admin-response.html \
+            --write-out '%{http_code}' \
+            http://127.0.0.1:45679/admin)"
+          test "$admin_status" = "200"
+          grep -q 'Lite2API' lite2api-admin-response.html
+
+          probe_status="$(curl --silent --show-error \
+            --output lite2api-probe-response.json \
+            --write-out '%{http_code}' \
+            http://127.0.0.1:45679/v1/chat/completions \
+            -H 'Authorization: Bearer ci-preview-gateway-key-20260819' \
+            -H 'Content-Type: application/json' \
+            --data '{"model":"deepseek-fast","messages":[{"role":"user","content":"GitHub Runner deployment check"}],"stream":false}')"
+          printf '%s\n' "$probe_status" > lite2api-probe-status.txt
+          test "$probe_status" = "200"
+          grep -q 'Lite2API GitHub Runner deployment verified' lite2api-probe-response.json
+
+          sleep 2
+          curl --silent --show-error \
+            http://127.0.0.1:45679/health \
+            > lite2api-health.json
+          cat lite2api-health.json
+          cat lite2api-probe-response.json
+
+      - name: Capture authenticated admin pages with Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome \
+            || command -v google-chrome-stable \
+            || command -v chromium \
+            || command -v chromium-browser \
+            || true)"
+          if [ -z "$CHROME" ]; then
+            echo "No Chrome or Chromium executable found" >&2
+            exit 1
+          fi
+          printf '%s\n' "$CHROME" | tee browser-executable.txt
+
+          mkdir -p "$RUNNER_TEMP/lite2api-browser"
+          cd "$RUNNER_TEMP/lite2api-browser"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --silent playwright-core
+
+          CHROME="$CHROME" OUTPUT_DIR="$GITHUB_WORKSPACE" node <<'NODE'
+          const fs = require('node:fs');
+          const { chromium } = require('playwright-core');
+
+          const output = process.env.OUTPUT_DIR;
+          const diagnostics = [];
+
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true,
+              executablePath: process.env.CHROME,
+              args: [
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--font-render-hinting=none'
+              ],
+            });
+
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'zh-CN',
+            });
+            const page = await context.newPage();
+
+            page.on('console', (message) => {
+              diagnostics.push(`[console:${message.type()}] ${message.text()}`);
+            });
+            page.on('pageerror', (error) => {
+              diagnostics.push(`[pageerror] ${error.stack || error.message}`);
+            });
+            page.on('requestfailed', (request) => {
+              diagnostics.push(
+                `[requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`
+              );
+            });
+
+            await page.goto('http://127.0.0.1:45679/admin', {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+
+            const login = await page.evaluate(async () => {
+              const response = await fetch('/admin/api/login', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  token: 'ci-preview-admin-token-20260819'
+                }),
+              });
+              return {
+                status: response.status,
+                body: await response.text(),
+              };
+            });
+            diagnostics.push(`[login] ${login.status} ${login.body}`);
+            if (login.status !== 200) {
+              throw new Error(`Admin login failed: ${login.status} ${login.body}`);
+            }
+
+            const stateResponse = page.waitForResponse(
+              (response) => response.url().includes('/admin/api/state') && response.status() === 200,
+              { timeout: 30000 }
+            );
+            await page.reload({
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await stateResponse;
+            await page.waitForSelector('#view-monitor.active', { timeout: 15000 });
+            await page.waitForTimeout(2500);
+
+            const verification = await page.evaluate(async () => {
+              const sessionResponse = await fetch('/admin/api/session', {
+                credentials: 'include'
+              });
+              const stateResponse = await fetch('/admin/api/state', {
+                credentials: 'include'
+              });
+              return {
+                sessionStatus: sessionResponse.status,
+                sessionBody: await sessionResponse.text(),
+                stateStatus: stateResponse.status,
+                stateBody: await stateResponse.text(),
+              };
+            });
+
+            diagnostics.push(
+              `[session] ${verification.sessionStatus} ${verification.sessionBody}`
+            );
+            diagnostics.push(
+              `[state] ${verification.stateStatus} ${verification.stateBody.slice(0, 4000)}`
+            );
+            if (verification.sessionStatus !== 200 || verification.stateStatus !== 200) {
+              throw new Error('Authenticated admin API verification failed');
+            }
+            fs.writeFileSync(
+              `${output}/lite2api-admin-state.json`,
+              verification.stateBody
+            );
+
+            async function capture(filename, view) {
+              if (view) {
+                await page.locator(`button[data-view="${view}"]`).first().click();
+                await page.waitForSelector(`#view-${view}.active`, { timeout: 15000 });
+                await page.waitForTimeout(1800);
+              }
+              await page.screenshot({
+                path: `${output}/${filename}`,
+                fullPage: false,
+              });
+            }
+
+            await capture('lite2api-admin-overview-1440.png', null);
+            await capture('lite2api-admin-routes-1440.png', 'routes');
+            await capture('lite2api-admin-accounts-1440.png', 'accounts');
+
+            fs.writeFileSync(
+              `${output}/lite2api-admin-page.html`,
+              await page.content()
+            );
+            fs.writeFileSync(
+              `${output}/lite2api-browser-diagnostics.txt`,
+              diagnostics.join('\n') + '\n'
+            );
+
+            await browser.close();
+          })().catch((error) => {
+            diagnostics.push(`[fatal] ${error.stack || error.message}`);
+            fs.writeFileSync(
+              `${output}/lite2api-browser-diagnostics.txt`,
+              diagnostics.join('\n') + '\n'
+            );
+            console.error(error.stack || error);
+            process.exit(1);
+          });
+          NODE
+
+          cd "$GITHUB_WORKSPACE"
+          file lite2api-admin-overview-1440.png
+          file lite2api-admin-routes-1440.png
+          file lite2api-admin-accounts-1440.png
+
+      - name: Write deployment report
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Lite2API GitHub Runner deployment report"
+            echo
+            echo "- Repository: lms2004/Lite2API"
+            echo "- Source commit: 0fbc955393e079553bee84c4e37ddef257c8347c"
+            echo "- Runner: ${RUNNER_OS}/${RUNNER_ARCH}"
+            echo "- Verification: go test, go build, liveness, admin HTML, authenticated admin APIs, and end-to-end routed chat request"
+            echo "- Service: http://127.0.0.1:45679"
+            echo "- Browser: Playwright Core with the GitHub runner's Chrome/Chromium"
+            echo "- Screenshot viewport: 1440 × 1000"
+            echo
+            echo "## Health response"
+            echo '```json'
+            cat lite2api-health.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## End-to-end probe response"
+            echo '```json'
+            cat lite2api-probe-response.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Server log tail"
+            echo '```text'
+            tail -n 120 lite2api-server.log 2>/dev/null || true
+            echo '```'
+          } > lite2api-deployment-report.md
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-runner-capture
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            lite2api-admin-overview-1440.png
+            lite2api-admin-routes-1440.png
+            lite2api-admin-accounts-1440.png
+            lite2api-admin-page.html
+            lite2api-admin-state.json
+            lite2api-browser-diagnostics.txt
+            lite2api-deployment-report.md
+            lite2api-health.json
+            lite2api-health-status.txt
+            lite2api-probe-response.json
+            lite2api-probe-status.txt
+            lite2api-server.log
+            lite2api-go-test.log
+            lite2api-version.txt
+            lite2api-source-commit.txt
+            mock-upstream.log
+            mock-models.json
+            browser-executable.txt
