@@ -59,42 +59,50 @@ jobs:
           set -euo pipefail
           test -s internal/config/capability_discovery.go
           test -s internal/gateway/capabilitysync.go
+          test -s internal/gateway/accounttest.go
           grep -Fq -- 'capabilityDiscoveryInterval' internal/gateway/capabilitysync.go
           grep -Fq -- 'InferDiscoveredCapabilities' internal/config/capability_discovery.go
-          test -s internal/web/native-v5.css
-          test -s internal/web/native-v5.js
-          test -s internal/web/native-v6.css
-          test -s internal/web/native-v6.js
-          test -s internal/web/native-v7.css
-          test -s internal/web/native-v7.js
-          test -s internal/web/native-v8.css
-          test -s internal/web/native-v9.css
-          test -s internal/web/native-v9-refine.css
-          test -s internal/web/native-v9.js
-          test -s internal/web/native-v5-shell.html
-          test -s internal/web/native-v5-monitor.html
-          test -s internal/web/native-v5-routes.html
-          test -s internal/web/native-v5-accounts.html
-          test -s internal/web/native-v5-keys.html
+          grep -Fq -- 'serveAccountTest' internal/gateway/admin.go
+          grep -Fq -- 'probeAccountModels' internal/gateway/accounttest.go
+
+          for file in \
+            internal/web/native-v5.css \
+            internal/web/native-v5.js \
+            internal/web/native-v6.css \
+            internal/web/native-v6.js \
+            internal/web/native-v7.css \
+            internal/web/native-v7.js \
+            internal/web/native-v8.css \
+            internal/web/native-v9.css \
+            internal/web/native-v9-refine.css \
+            internal/web/native-v9.js \
+            internal/web/native-v10.css \
+            internal/web/native-v10.js \
+            internal/web/native-v10-account-dialogs.html \
+            internal/web/native-v5-shell.html \
+            internal/web/native-v5-monitor.html \
+            internal/web/native-v5-routes.html \
+            internal/web/native-v5-accounts.html \
+            internal/web/native-v5-keys.html; do
+            test -s "$file"
+          done
+
           grep -Fq -- '--canvas:#f5f5f7' internal/web/native-v5.css
           grep -Fq -- '.grouped-surface,.grouped-section' internal/web/native-v6.css
           grep -Fq -- '.v7-model-dialog' internal/web/native-v7.css
-          grep -Fq -- '.v7-effort-control' internal/web/native-v7.css
           grep -Fq -- 'Native v8' internal/web/native-v8.css
           grep -Fq -- 'Native v9' internal/web/native-v9.css
-          grep -Fq -- 'Native v9 refinement' internal/web/native-v9-refine.css
-          grep -Fq -- '.v9-command-center' internal/web/native-v9.css
-          grep -Fq -- '.v9-route-studio' internal/web/native-v9.css
-          grep -Fq -- '.v9-source-studio' internal/web/native-v9.css
-          grep -Fq -- 'window.Lite2APINativeV5' internal/web/native-v5.js
-          grep -Fq -- 'window.Lite2APINativeV6' internal/web/native-v6.js
-          grep -Fq -- 'window.Lite2APINativeV7' internal/web/native-v7.js
-          grep -Fq -- 'window.Lite2APINativeV9' internal/web/native-v9.js
-          grep -Fq -- '搜索模型、上游或真实模型 ID' internal/web/native-v7.js
-          grep -Fq -- 'id="v5RouteList"' internal/web/native-v5-routes.html
+          grep -Fq -- 'Native v10' internal/web/native-v10.css
+          grep -Fq -- '.v10-kpi-strip' internal/web/native-v10.css
+          grep -Fq -- '.v10-onboarding-body' internal/web/native-v10.css
+          grep -Fq -- 'window.Lite2APINativeV10' internal/web/native-v10.js
+          grep -Fq -- 'id="v10ProviderGrid"' internal/web/native-v10-account-dialogs.html
+          grep -Fq -- 'id="v10TestAccountBtn"' internal/web/native-v10-account-dialogs.html
+          grep -Fq -- 'id="resultOAuthImported"' internal/web/native-v10-account-dialogs.html
           grep -Fq -- 'class="v9-route-studio"' internal/web/native-v5-routes.html
-          grep -Fq -- 'class="v9-source-studio"' internal/web/native-v5-accounts.html
-          grep -Fq -- 'class="v9-command-center"' internal/web/native-v5-monitor.html
+          grep -Fq -- 'class="v10-account-workspace"' internal/web/native-v5-accounts.html
+          grep -Fq -- 'id="v10QuotaBoard"' internal/web/native-v5-monitor.html
+          grep -Fq -- 'id="v10QualityRows"' internal/web/native-v5-monitor.html
           grep -Fq -- 'id="v6KeyList"' internal/web/native-v5-keys.html
           grep -Fq -- 'id="v6ClientBaseURL"' internal/web/native-v5-keys.html
 
@@ -104,3 +112,4 @@ jobs:
           node --check internal/web/native-v6.js
           node --check internal/web/native-v7.js
           node --check internal/web/native-v9.js
+          node --check internal/web/native-v10.js
