@@ -1,0 +1,158 @@
+name: Apply canonical Lite2API admin refactor
+
+on:
+  push:
+    branches:
+      - "feat/admin-canonical-usage-console-20260819"
+    paths:
+      - "tools/apply_canonical_refactor.py"
+      - ".github/workflows/apply-canonical-refactor.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-canonical-admin-refactor
+  cancel-in-progress: false
+
+jobs:
+  migrate-test-render-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply one-shot canonical migration
+        run: python3 tools/apply_canonical_refactor.py
+
+      - name: Format, test, and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w internal/web/embed.go internal/web/embed_test.go
+          node --check internal/web/app.js
+          go test ./...
+          go build -trimpath -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          "$RUNNER_TEMP/lite2api" -config .github/qa/canonical-preview-config.json -check-config
+          test "$(find internal/web -maxdepth 1 -name 'native-v*' | wc -l)" = "0"
+          test ! -e internal/web/index.html
+
+      - name: Start deterministic upstream and quota fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/canonical-preview
+          nohup python3 -u .github/qa/canonical_fixtures.py > docs/canonical-preview/fixtures.log 2>&1 &
+          for port in 45678 45680 45681 45683; do
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${port}/v1/models" > "docs/canonical-preview/models-${port}.json"; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          done
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:45682/v0/management/auth-files > docs/canonical-preview/oauth-accounts.json; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+      - name: Deploy Lite2API and seed real usage
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup env \
+            LITE2API_API_KEYS="preview-client-key" \
+            LITE2API_ADMIN_TOKEN="preview-admin-token" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            PREVIEW_FAST_KEY="preview" \
+            PREVIEW_CLAUDE_KEY="preview" \
+            PREVIEW_GEMINI_KEY="preview" \
+            PREVIEW_GROK_KEY="preview" \
+            CLIPROXYAPI_MANAGEMENT_KEY="preview-management-key" \
+            "$RUNNER_TEMP/lite2api" -config .github/qa/canonical-preview-config.json \
+            > docs/canonical-preview/lite2api.log 2>&1 &
+          ready=0
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS -o docs/canonical-preview/health.json -w '%{http_code}' http://127.0.0.1:45679/health || true)
+            if [ "$code" = "200" ] || [ "$code" = "503" ]; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          curl -fsS http://127.0.0.1:45679/admin > /dev/null
+          seed() {
+            curl -fsS http://127.0.0.1:45679/v1/chat/completions \
+              -H 'Authorization: Bearer preview-client-key' \
+              -H 'Content-Type: application/json' \
+              --data "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"Usage seed $2\"}],\"stream\":false}" \
+              > "docs/canonical-preview/seed-$1-$2.json"
+          }
+          for index in $(seq 1 14); do seed fast "$index"; done
+          for index in $(seq 1 9); do seed claude "$index"; done
+          for index in $(seq 1 6); do seed vision "$index"; done
+
+      - name: Install browser support and Chinese fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk > docs/canonical-preview/font-install.log
+          fc-cache -f
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)
+          test -n "$CHROME"
+          echo "$CHROME" > docs/canonical-preview/browser.txt
+          mkdir -p "$RUNNER_TEMP/browser"
+          cd "$RUNNER_TEMP/browser"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright-core >/dev/null
+
+      - name: Exercise complete product workflow with Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME=$(cat docs/canonical-preview/browser.txt) \
+            OUTPUT_DIR="$GITHUB_WORKSPACE/docs/canonical-preview" \
+            NODE_PATH="$RUNNER_TEMP/browser/node_modules" \
+            node .github/qa/canonical_capture.js 2>&1 | tee docs/canonical-preview/playwright.log
+          file docs/canonical-preview/*.png | tee docs/canonical-preview/screenshots.txt
+          sha256sum docs/canonical-preview/*.png > docs/canonical-preview/SHA256SUMS.txt
+          cat > docs/canonical-preview/status.json <<JSON
+          {
+            "ok": true,
+            "source_commit": "${GITHUB_SHA}",
+            "runner": "${RUNNER_OS}/${RUNNER_ARCH}",
+            "tests": ["go test ./...", "go build", "node --check", "real gateway seed", "quota fixture", "three-run direct quality", "nine provider branches", "unsaved connection test", "import dry-run"],
+            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          JSON
+
+      - name: Commit canonical implementation and preview evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ui: replace layered admin with canonical usage console"
+          git push origin HEAD:feat/admin-canonical-usage-console-20260819
+
+      - name: Upload migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-canonical-migration-evidence
+          retention-days: 3
+          if-no-files-found: error
+          path: docs/canonical-preview/
