@@ -1,0 +1,191 @@
+name: ChatGPT Lite2API deployment evidence publisher
+
+on:
+  push:
+    branches:
+      - "feat/chatgpt-deploy-preview-20260819"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chatgpt-lite2api-deploy-evidence
+  cancel-in-progress: true
+
+jobs:
+  deploy-capture-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and start Lite2API
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          cp config.example.json "$RUNNER_TEMP/lite2api-config.json"
+          nohup env \
+            LITE2API_API_KEYS="ci-preview-gateway-key-20260819" \
+            LITE2API_ADMIN_TOKEN="ci-preview-admin-token-20260819" \
+            LITE2API_ADMIN_AUTO_LOGIN="true" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            ATOMCODE2API_KEY="ci-preview-upstream-key" \
+            "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-config.json" \
+            > "$GITHUB_WORKSPACE/lite2api-server.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/lite2api-server.pid"
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:45679/health > "$GITHUB_WORKSPACE/lite2api-health.json"; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat "$GITHUB_WORKSPACE/lite2api-server.log" >&2 || true
+            exit 1
+          fi
+          curl --fail --silent --show-error http://127.0.0.1:45679/admin > /dev/null
+
+      - name: Render authenticated admin page
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          mkdir -p "$RUNNER_TEMP/lite2api-browser"
+          cd "$RUNNER_TEMP/lite2api-browser"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --silent playwright-core >/dev/null
+
+          CHROME="$CHROME" OUTPUT_DIR="$GITHUB_WORKSPACE" node <<'NODE'
+          const fs = require('node:fs');
+          const { chromium } = require('playwright-core');
+
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true,
+              executablePath: process.env.CHROME,
+              args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+            });
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'zh-CN',
+            });
+            const page = await context.newPage();
+            const diagnostics = [];
+            page.on('console', (msg) => diagnostics.push(`[console:${msg.type()}] ${msg.text()}`));
+            page.on('pageerror', (err) => diagnostics.push(`[pageerror] ${err.stack || err.message}`));
+            page.on('requestfailed', (req) => diagnostics.push(`[requestfailed] ${req.method()} ${req.url()} ${req.failure()?.errorText || ''}`));
+
+            await page.goto('http://127.0.0.1:45679/admin', { waitUntil: 'domcontentloaded', timeout: 30000 });
+            const login = await page.evaluate(async () => {
+              const response = await fetch('/admin/api/login', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: 'ci-preview-admin-token-20260819' }),
+              });
+              return { status: response.status, body: await response.text() };
+            });
+            diagnostics.push(`[login] ${login.status} ${login.body}`);
+            if (login.status !== 200) throw new Error(`admin login failed: ${login.status} ${login.body}`);
+
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForFunction(() => document.body && document.body.innerText.includes('Lite2API'), null, { timeout: 15000 });
+            await page.waitForTimeout(5000);
+
+            const verification = await page.evaluate(async () => {
+              const sessionResponse = await fetch('/admin/api/session', { credentials: 'include' });
+              const stateResponse = await fetch('/admin/api/state', { credentials: 'include' });
+              return {
+                sessionStatus: sessionResponse.status,
+                sessionBody: await sessionResponse.text(),
+                stateStatus: stateResponse.status,
+                stateBody: (await stateResponse.text()).slice(0, 3000),
+              };
+            });
+            diagnostics.push(`[session] ${verification.sessionStatus} ${verification.sessionBody}`);
+            diagnostics.push(`[state] ${verification.stateStatus} ${verification.stateBody}`);
+            if (verification.sessionStatus !== 200 || verification.stateStatus !== 200) {
+              throw new Error('authenticated admin API verification failed');
+            }
+
+            await page.screenshot({
+              path: `${process.env.OUTPUT_DIR}/lite2api-admin-1440.png`,
+              fullPage: false,
+            });
+            fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-admin-page.html`, await page.content());
+            fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-browser-diagnostics.txt`, diagnostics.join('\n') + '\n');
+            await browser.close();
+          })().catch((error) => {
+            console.error(error.stack || error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Prepare evidence bundle
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preview-output
+          if [ -f lite2api-admin-1440.png ]; then
+            base64 -w 76 lite2api-admin-1440.png > preview-output/lite2api-admin-1440.png.b64
+            cp lite2api-admin-page.html preview-output/ 2>/dev/null || true
+            cp lite2api-browser-diagnostics.txt preview-output/ 2>/dev/null || true
+          fi
+          cp lite2api-health.json preview-output/ 2>/dev/null || true
+          cp lite2api-server.log preview-output/ 2>/dev/null || true
+          {
+            echo "# Lite2API isolated deployment report"
+            echo
+            echo "- Repository: lms2004/Lite2API"
+            echo "- Code baseline: 0fbc955393e079553bee84c4e37ddef257c8347c"
+            echo "- Workflow commit: ${GITHUB_SHA}"
+            echo "- Build command: go build ./cmd/lite2api"
+            echo "- Service: http://127.0.0.1:45679"
+            echo "- Verified endpoints: /health, /admin, /admin/api/session, /admin/api/state"
+            echo "- Browser viewport: 1440 x 1000"
+            echo
+            echo "## Health response"
+            echo '```json'
+            cat lite2api-health.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Server log tail"
+            echo '```text'
+            tail -n 100 lite2api-server.log 2>/dev/null || true
+            echo '```'
+          } > preview-output/deployment-report.md
+          sha256sum preview-output/* > preview-output/SHA256SUMS.txt
+
+      - name: Commit evidence to temporary preview branch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f preview-output
+          if git diff --cached --quiet; then
+            echo "No evidence files to publish"
+            exit 0
+          fi
+          git commit -m "ci: publish Lite2API deployment evidence [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
