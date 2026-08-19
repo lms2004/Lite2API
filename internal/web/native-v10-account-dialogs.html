@@ -1,0 +1,155 @@
+<dialog id="quickAuthDialog" class="v10-onboarding-dialog" aria-labelledby="v10OnboardingTitle">
+  <div class="v10-dialog-shell">
+    <header class="v10-dialog-head">
+      <div><span class="v10-eyebrow">Account onboarding</span><h2 id="v10OnboardingTitle">添加账号</h2><p>选择平台后，只展示该平台真正支持的认证方式。</p></div>
+      <button class="close-btn" type="button" onclick="closeDialog('quickAuthDialog')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+    </header>
+    <div class="v10-onboarding-body">
+      <aside class="v10-provider-column">
+        <div class="v10-step-label"><b>1</b><span>选择平台</span></div>
+        <div id="v10ProviderGrid" class="v10-provider-grid">
+          <button type="button" data-v10-provider="codex" onclick="v10SelectOnboardingProvider('codex')"><span class="provider-icon provider-openai"><svg class="provider-logo"><use href="#b-openai"></use></svg></span><span><strong>OpenAI / Codex</strong><small>ChatGPT OAuth 或 API Key</small></span></button>
+          <button type="button" data-v10-provider="anthropic" onclick="v10SelectOnboardingProvider('anthropic')"><span class="provider-icon provider-anthropic"><svg class="provider-logo"><use href="#b-anthropic"></use></svg></span><span><strong>Claude</strong><small>OAuth / Setup Token / API Key</small></span></button>
+          <button type="button" data-v10-provider="gemini" onclick="v10SelectOnboardingProvider('gemini')"><span class="provider-icon provider-gemini"><svg class="provider-logo"><use href="#b-gemini"></use></svg></span><span><strong>Gemini</strong><small>Google OAuth、API Key 或 Web</small></span></button>
+          <button type="button" data-v10-provider="antigravity" onclick="v10SelectOnboardingProvider('antigravity')"><span class="provider-icon provider-gemini"><svg class="provider-logo"><use href="#b-gemini"></use></svg></span><span><strong>Antigravity</strong><small>Google OAuth 账号池</small></span></button>
+          <button type="button" data-v10-provider="kimi" onclick="v10SelectOnboardingProvider('kimi')"><span class="provider-icon provider-kimi"><svg class="icon"><use href="#i-moon"></use></svg></span><span><strong>Kimi</strong><small>设备授权或 API Key</small></span></button>
+          <button type="button" data-v10-provider="grok" onclick="v10SelectOnboardingProvider('grok')"><span class="provider-icon provider-xai"><svg class="provider-logo"><use href="#b-x"></use></svg></span><span><strong>Grok / xAI</strong><small>API Key、Grok2API 或 SSO</small></span></button>
+          <button type="button" data-v10-provider="deepseek" onclick="v10SelectOnboardingProvider('deepseek')"><span class="provider-icon provider-deepseek"><svg class="provider-logo"><use href="#b-deepseek"></use></svg></span><span><strong>DeepSeek</strong><small>官方 API Key</small></span></button>
+          <button type="button" data-v10-provider="atom" onclick="v10SelectOnboardingProvider('atom')"><span class="provider-icon provider-local"><svg class="icon"><use href="#i-atom"></use></svg></span><span><strong>AtomCode</strong><small>本机订阅适配器</small></span></button>
+          <button type="button" data-v10-provider="custom" onclick="v10SelectOnboardingProvider('custom')"><span class="provider-icon provider-custom"><svg class="icon"><use href="#i-plus"></use></svg></span><span><strong>自定义服务</strong><small>任意兼容 Base URL</small></span></button>
+        </div>
+      </aside>
+
+      <main class="v10-method-column">
+        <div class="v10-step-label"><b>2</b><span>选择接入方式</span></div>
+        <div id="v10ProviderSummary" class="v10-provider-summary"></div>
+        <div id="v10MethodGrid" class="v10-method-grid"></div>
+
+        <section id="oauthSession" class="oauth-session v10-oauth-session" hidden>
+          <div id="oauthProgress" class="oauth-progress"><span class="oauth-spinner"></span><div><strong id="oauthStatusTitle">正在生成授权链接</strong><div id="oauthStatusDetail" class="muted">请稍候</div></div></div>
+          <div id="oauthLinkField" class="oauth-field" hidden><label>打开授权链接</label><div class="oauth-link-row"><input id="oauthAuthURL" readonly aria-label="OAuth 授权链接"><button type="button" class="btn-ghost" onclick="copyOAuthURL()">复制</button><button type="button" class="primary" onclick="openOAuthURL()">打开认证</button></div></div>
+          <div id="oauthCallbackField" class="oauth-field oauth-callback" hidden><label>粘贴认证后的完整回调 URL</label><p class="v10-inline-help">浏览器停在 localhost 且显示无法访问通常是正常的；复制地址栏完整 URL 粘贴到这里。</p><textarea id="oauthCallbackURL" placeholder="http://localhost:.../?code=...&state=..." onpaste="setTimeout(autoSubmitOAuthCallback,0)"></textarea><div class="actions"><button type="button" class="btn-ghost" onclick="pasteOAuthCallback()">从剪贴板粘贴</button><button id="oauthSubmitCallback" type="button" class="primary" onclick="submitOAuthCallback()">提交并加入账号池</button></div></div>
+        </section>
+      </main>
+
+      <aside class="v10-onboarding-aside">
+        <div class="v10-step-label"><b>3</b><span>完成前检查</span></div>
+        <div id="v10OnboardingChecklist" class="v10-checklist"></div>
+        <button type="button" class="v10-import-card" onclick="v10OpenImportFromOnboarding()"><svg class="icon"><use href="#i-upload"></use></svg><span><strong>已有账号文件？</strong><small>直接批量导入 Lite2API / Sub2API JSON</small></span></button>
+      </aside>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="webProxyDialog" class="v10-web-dialog">
+  <div class="v10-dialog-shell">
+    <header class="v10-dialog-head"><div><span class="v10-eyebrow">Isolated web adapter</span><h2 id="webProxyTitle">Web 凭据接入</h2><p id="webProxySubtitle">Cookie 只交给隔离适配器，不进入 Lite2API 核心配置。</p></div><button class="close-btn" type="button" onclick="closeDialog('webProxyDialog')" aria-label="关闭"><svg class="icon"><use href="#i-close"></use></svg></button></header>
+    <div class="v10-web-body">
+      <div id="webProxyStatus" class="warning"></div>
+      <div id="webProxySteps" class="v10-instruction-list"></div>
+      <label class="v10-field">浏览器扩展或适配器导出内容<textarea id="webProxyInput" placeholder="粘贴 Cookie-Editor JSON、Netscape Cookie 或适配器 SSO 文本"></textarea></label>
+      <p class="v10-security-note">内容只在当前浏览器中整理，不会提交给 Lite2API。整理后请写入对应隔离适配器的凭据存储。</p>
+    </div>
+    <footer class="v10-dialog-foot"><button type="button" class="btn-ghost" onclick="closeDialog('webProxyDialog')">取消</button><button type="button" class="primary" onclick="normalizeWebCredential()">本地整理并复制</button></footer>
+  </div>
+</dialog>
+
+<dialog id="accountDialog" class="v10-manual-account-dialog">
+  <form id="accountForm" class="v10-dialog-shell">
+    <header class="v10-dialog-head"><div><span class="v10-eyebrow">Manual connection</span><h2 id="accountDialogTitle">添加 API 连接</h2><p id="accountDialogHint">平台预设只填必要字段，高级配置保持可控默认值。</p></div><button class="close-btn" type="button" onclick="closeDialog('accountDialog')" aria-label="关闭"><svg class="icon"><use href="#i-close"></use></svg></button></header>
+
+    <div class="v10-manual-body">
+      <aside class="v10-template-column">
+        <div class="v10-step-label"><b>1</b><span>连接类型</span></div>
+        <div id="accountPlatformChoices" class="v10-template-grid">
+          <button type="button" class="platform-option" data-template="openai" onclick="selectAccountTemplate('openai')"><span class="provider-icon provider-openai"><svg class="provider-logo"><use href="#b-openai"></use></svg></span><span><strong>OpenAI</strong><small>官方 / 兼容 API</small></span></button>
+          <button type="button" class="platform-option" data-template="anthropic" onclick="selectAccountTemplate('anthropic')"><span class="provider-icon provider-anthropic"><svg class="provider-logo"><use href="#b-anthropic"></use></svg></span><span><strong>Anthropic</strong><small>Claude Messages</small></span></button>
+          <button type="button" class="platform-option" data-template="gemini" onclick="selectAccountTemplate('gemini')"><span class="provider-icon provider-gemini"><svg class="provider-logo"><use href="#b-gemini"></use></svg></span><span><strong>Gemini API</strong><small>Google OpenAI 兼容端点</small></span></button>
+          <button type="button" class="platform-option" data-template="deepseek" onclick="selectAccountTemplate('deepseek')"><span class="provider-icon provider-deepseek"><svg class="provider-logo"><use href="#b-deepseek"></use></svg></span><span><strong>DeepSeek</strong><small>Chat / Reasoner</small></span></button>
+          <button type="button" class="platform-option" data-template="xai" onclick="selectAccountTemplate('xai')"><span class="provider-icon provider-xai"><svg class="provider-logo"><use href="#b-x"></use></svg></span><span><strong>xAI</strong><small>Grok 官方 API</small></span></button>
+          <button type="button" class="platform-option" data-template="kimi-api" onclick="selectAccountTemplate('kimi-api')"><span class="provider-icon provider-kimi"><svg class="icon"><use href="#i-moon"></use></svg></span><span><strong>Kimi API</strong><small>Moonshot 官方接口</small></span></button>
+          <button type="button" class="platform-option" data-template="cliproxy" onclick="selectAccountTemplate('cliproxy')"><span class="provider-icon provider-gateway"><svg class="icon"><use href="#i-gateway"></use></svg></span><span><strong>OAuth 聚合池</strong><small>Codex / Claude / Gemini</small></span></button>
+          <button type="button" class="platform-option" data-template="grok-adapter" onclick="selectAccountTemplate('grok-adapter')"><span class="provider-icon provider-xai"><svg class="provider-logo"><use href="#b-x"></use></svg></span><span><strong>Grok2API</strong><small>本机多账号适配器</small></span></button>
+          <button type="button" class="platform-option" data-template="gemini-web" onclick="selectAccountTemplate('gemini-web')"><span class="provider-icon provider-gemini"><svg class="provider-logo"><use href="#b-gemini"></use></svg></span><span><strong>Gemini Web</strong><small>Cookie 隔离适配器</small></span></button>
+          <button type="button" class="platform-option" data-template="atom" onclick="selectAccountTemplate('atom')"><span class="provider-icon provider-local"><svg class="icon"><use href="#i-atom"></use></svg></span><span><strong>AtomCode</strong><small>本机订阅适配器</small></span></button>
+          <button type="button" class="platform-option" data-template="custom" onclick="selectAccountTemplate('custom')"><span class="provider-icon provider-custom"><svg class="icon"><use href="#i-plus"></use></svg></span><span><strong>自定义</strong><small>任意兼容服务</small></span></button>
+        </div>
+      </aside>
+
+      <main class="v10-config-column">
+        <div class="v10-step-label"><b>2</b><span>填写连接信息</span></div>
+        <div class="v10-form-section">
+          <div class="v10-form-grid">
+            <label class="v10-field">显示名称<input name="name" placeholder="例如：OpenAI 主账号" required oninput="syncAccountPreview()"></label>
+            <label class="v10-field">Base URL<input name="base_url" type="url" placeholder="https://api.example.com/v1" required oninput="syncAccountPreview()"></label>
+          </div>
+          <div class="v10-auth-choice" role="radiogroup" aria-label="凭据保存方式">
+            <label class="auth-option"><input type="radio" name="credential_mode" value="key" onchange="setCredentialMode('key')" checked><span><strong>直接填写 API Key</strong><small>保存到受保护配置；适合官方接口</small></span></label>
+            <label class="auth-option"><input type="radio" name="credential_mode" value="env" onchange="setCredentialMode('env')"><span><strong>读取环境变量</strong><small>配置只保存变量名；适合服务器与容器</small></span></label>
+          </div>
+          <label id="apiKeyWrap" class="v10-field">API Key<input name="api_key" type="password" autocomplete="new-password" placeholder="粘贴密钥；编辑时留空会保留原值"></label>
+          <label id="apiKeyEnvWrap" class="v10-field" hidden>密钥环境变量<input name="api_key_env" placeholder="例如 OPENAI_API_KEY"></label>
+          <label class="v10-field">可用模型<input name="models" placeholder="逗号分隔；留空表示接受任意模型" oninput="renderModelSuggestions();syncAccountPreview()"></label>
+          <div id="modelSuggestions" class="model-chips"></div>
+          <p id="accountPresetNote" class="v10-provider-note"></p>
+        </div>
+
+        <details id="accountAdvanced" class="v10-advanced-panel">
+          <summary>高级设置 <span>协议、ID、并发、映射、代理与请求头</span></summary>
+          <div class="v10-advanced-grid">
+            <label class="v10-field">唯一 ID<input name="id" placeholder="openai-main" pattern="[A-Za-z0-9._-]{1,64}" required></label>
+            <label class="v10-field">协议<select name="type"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic Messages</option></select></label>
+            <label class="v10-field">并发上限<input name="concurrency" type="number" value="2" min="0"></label>
+            <label class="v10-field">保存状态<select name="enabled"><option value="true">立即启用</option><option value="false">先保存为停用</option></select></label>
+            <label class="v10-field">优先级<input name="priority" type="number" value="0" min="0"></label>
+            <label class="v10-field">权重<input name="weight" type="number" value="1" min="1"></label>
+            <label class="v10-field">认证 Header<select name="auth_header"><option value="">自动</option><option value="authorization">Authorization</option><option value="x-api-key">x-api-key</option><option value="none">不发送认证头</option></select></label>
+            <label class="v10-field">认证 Scheme<input name="auth_scheme" placeholder="Bearer；留空由协议决定"></label>
+            <label class="v10-field v10-span-2">模型映射 JSON<input name="model_map" value="{}" placeholder='{"alias":"upstream-model"}'></label>
+            <label class="v10-field v10-span-2">代理 URL<input name="proxy_url" type="url" placeholder="http://user:pass@127.0.0.1:8080"></label>
+            <label class="v10-field v10-span-2">固定请求头 JSON<input name="headers" value="{}" placeholder='{"X-Custom":"value"}'></label>
+            <label class="v10-field v10-span-2">环境变量请求头 JSON<input name="headers_env" value="{}" placeholder='{"X-Token":"TOKEN_ENV"}'></label>
+          </div>
+        </details>
+      </main>
+
+      <aside class="v10-review-column">
+        <div class="v10-step-label"><b>3</b><span>验证并保存</span></div>
+        <div class="account-preview v10-account-preview"><div><span class="v10-eyebrow">Connection preview</span><strong id="accountPreviewTitle">OpenAI API</strong><span id="accountPreviewDetail">OpenAI 兼容 · API Key</span></div><span class="badge good">保存后热加载</span></div>
+        <div class="v10-test-card"><strong>保存前连接测试</strong><p>调用上游模型目录，验证地址、认证、代理和返回格式，不创建账号。</p><button id="v10TestAccountBtn" type="button" class="btn-ghost" onclick="v10TestAccountConnection()">测试连接</button><div id="v10AccountTestResult" class="v10-test-result" role="status" aria-live="polite">尚未测试</div></div>
+        <ul class="v10-save-checklist"><li>密钥不会显示在测试结果中</li><li>重复 ID 会更新现有连接</li><li>路由不会自动绑定新连接</li></ul>
+      </aside>
+    </div>
+
+    <footer class="v10-dialog-foot"><button type="button" class="btn-ghost" onclick="closeDialog('accountDialog')">取消</button><button class="primary" type="submit">保存并热加载</button></footer>
+  </form>
+</dialog>
+
+<dialog id="importDialog" class="v10-import-dialog">
+  <div class="v10-dialog-shell">
+    <header class="v10-dialog-head"><div><span class="v10-eyebrow">Bulk import</span><h2>批量导入账号</h2><p>先本地解析和预检查，再明确决定跳过还是更新冲突项。</p></div><button class="close-btn" type="button" onclick="closeDialog('importDialog')" aria-label="关闭"><svg class="icon"><use href="#i-close"></use></svg></button></header>
+    <div class="v10-import-body">
+      <section class="v10-import-source">
+        <div class="v10-step-label"><b>1</b><span>选择文件</span></div>
+        <div id="importDropzone" class="dropzone v10-dropzone" tabindex="0"><div class="drop-icon"><svg class="icon"><use href="#i-upload"></use></svg></div><strong>拖入一个或多个 JSON 文件</strong><span>支持 Lite2API 导出与 Sub2API v1 账号数据；浏览器先本地解析。</span><input id="importFileInput" type="file" accept="application/json,.json" multiple hidden></div>
+        <div id="importFiles" class="file-list"></div>
+        <p class="v10-security-note">单次最多 500 个账号、总请求不超过 1 MiB。文件可能包含明文凭据，请仅从可信位置导入。</p>
+      </section>
+      <section class="v10-import-options">
+        <div class="v10-step-label"><b>2</b><span>冲突处理</span></div>
+        <label class="v10-field">重复账号<select id="importMode"><option value="skip">跳过已有账号（推荐）</option><option value="upsert">更新配置，保留未填写密钥</option></select></label>
+        <div class="v10-import-explain"><strong>预检查会做什么？</strong><span>识别格式、验证字段、检查重复 ID、计算代理复用和需要创建的账号，但不会写入配置。</span></div>
+        <button type="button" class="text-action" onclick="downloadTemplate()">下载标准导入模板</button>
+      </section>
+      <section class="v10-import-review">
+        <div class="v10-step-label"><b>3</b><span>预检查结果</span></div>
+        <div id="importResult" class="result-box v10-import-result" hidden>
+          <div class="result-grid"><div><span>代理新增</span><strong id="resultProxyCreated">0</strong></div><div><span>代理复用</span><strong id="resultProxyReused">0</strong></div><div><span>代理失败</span><strong id="resultProxyFailed">0</strong></div><div><span>账号新增</span><strong id="resultCreated">0</strong></div><div><span>账号更新</span><strong id="resultUpdated">0</strong></div><div><span>账号跳过</span><strong id="resultSkipped">0</strong></div><div><span>账号失败</span><strong id="resultFailed">0</strong></div></div>
+          <div id="importErrors" class="error-list" hidden></div>
+        </div>
+        <div id="v10ImportIdle" class="v10-import-idle"><strong>等待预检查</strong><span>选择文件后点击下方“预检查”，确认结果再导入。</span></div>
+      </section>
+    </div>
+    <footer class="v10-dialog-foot"><button type="button" class="btn-ghost" onclick="closeDialog('importDialog')">取消</button><button id="previewImportBtn" type="button" class="btn-ghost" onclick="runImport(true)">预检查</button><button id="applyImportBtn" type="button" class="primary" onclick="runImport(false)">确认导入</button></footer>
+  </div>
+</dialog>
