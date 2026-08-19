@@ -1,0 +1,195 @@
+name: ChatGPT Lite2API deployment preview
+
+on:
+  push:
+    branches:
+      - "feat/chatgpt-deploy-preview-20260819"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-lite2api-deploy-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy-and-capture:
+    name: Build, deploy, verify, and capture admin UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact repository state
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Lite2API
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          "$RUNNER_TEMP/lite2api" -version | tee lite2api-version.txt
+          git rev-parse HEAD | tee lite2api-commit.txt
+
+      - name: Start isolated Lite2API service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp config.example.json "$RUNNER_TEMP/lite2api-config.json"
+          nohup env \
+            LITE2API_API_KEYS="ci-preview-gateway-key-20260819" \
+            LITE2API_ADMIN_TOKEN="ci-preview-admin-token-20260819" \
+            LITE2API_ADMIN_AUTO_LOGIN="true" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            ATOMCODE2API_KEY="ci-preview-upstream-key" \
+            "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-config.json" \
+            > lite2api-server.log 2>&1 &
+          echo $! > lite2api-server.pid
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:45679/health > lite2api-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Lite2API did not become healthy" >&2
+            cat lite2api-server.log >&2 || true
+            exit 1
+          fi
+          curl --fail --silent --show-error http://127.0.0.1:45679/admin > /dev/null
+          cat lite2api-health.json
+
+      - name: Capture live admin page in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$CHROME" ]; then
+            echo "No Chrome/Chromium executable found on runner" >&2
+            exit 1
+          fi
+          echo "Using browser: $CHROME"
+
+          mkdir -p "$RUNNER_TEMP/lite2api-browser"
+          cd "$RUNNER_TEMP/lite2api-browser"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --silent playwright-core >/dev/null
+
+          CHROME="$CHROME" OUTPUT_DIR="$GITHUB_WORKSPACE" node <<'NODE'
+          const fs = require('node:fs');
+          const { chromium } = require('playwright-core');
+
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true,
+              executablePath: process.env.CHROME,
+              args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+            });
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'zh-CN',
+            });
+            const page = await context.newPage();
+            const diagnostics = [];
+            page.on('console', (msg) => diagnostics.push(`[console:${msg.type()}] ${msg.text()}`));
+            page.on('pageerror', (err) => diagnostics.push(`[pageerror] ${err.stack || err.message}`));
+            page.on('requestfailed', (req) => diagnostics.push(`[requestfailed] ${req.method()} ${req.url()} ${req.failure()?.errorText || ''}`));
+
+            await page.goto('http://127.0.0.1:45679/admin', { waitUntil: 'domcontentloaded', timeout: 30000 });
+            const login = await page.evaluate(async () => {
+              const response = await fetch('/admin/api/login', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: '' }),
+              });
+              return { status: response.status, body: await response.text() };
+            });
+            diagnostics.push(`[login] ${login.status} ${login.body}`);
+            if (login.status !== 200) throw new Error(`admin login failed: ${login.status} ${login.body}`);
+
+            await page.reload({ waitUntil: 'networkidle', timeout: 30000 });
+            await page.waitForFunction(() => document.body && document.body.innerText.includes('Lite2API'), null, { timeout: 15000 });
+            await page.waitForTimeout(3500);
+
+            const session = await page.evaluate(async () => {
+              const response = await fetch('/admin/api/session', { credentials: 'include' });
+              return { status: response.status, body: await response.text() };
+            });
+            const state = await page.evaluate(async () => {
+              const response = await fetch('/admin/api/state', { credentials: 'include' });
+              return { status: response.status, body: await response.text() };
+            });
+            diagnostics.push(`[session] ${session.status} ${session.body}`);
+            diagnostics.push(`[state] ${state.status} ${state.body.slice(0, 2000)}`);
+            if (session.status !== 200 || state.status !== 200) throw new Error('authenticated admin API verification failed');
+
+            await page.screenshot({
+              path: `${process.env.OUTPUT_DIR}/lite2api-admin-1440.png`,
+              fullPage: false,
+            });
+            fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-admin-page.html`, await page.content());
+            fs.writeFileSync(`${process.env.OUTPUT_DIR}/lite2api-browser-diagnostics.txt`, diagnostics.join('\n') + '\n');
+            await browser.close();
+          })().catch((error) => {
+            console.error(error.stack || error);
+            process.exit(1);
+          });
+          NODE
+
+          file "$GITHUB_WORKSPACE/lite2api-admin-1440.png"
+
+      - name: Write deployment report
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Lite2API isolated deployment report"
+            echo
+            echo "- Repository: lms2004/Lite2API"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Runner: ${RUNNER_OS}/${RUNNER_ARCH}"
+            echo "- Build: go build ./cmd/lite2api"
+            echo "- Service URL: http://127.0.0.1:45679"
+            echo "- Health endpoint: /health"
+            echo "- Admin endpoint: /admin"
+            echo "- Screenshot viewport: 1440 x 1000"
+            echo
+            echo "## Health response"
+            echo '```json'
+            cat lite2api-health.json 2>/dev/null || true
+            echo
+            echo '```'
+            echo
+            echo "## Server log tail"
+            echo '```text'
+            tail -n 120 lite2api-server.log 2>/dev/null || true
+            echo '```'
+          } > lite2api-deployment-report.md
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-deploy-preview
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            lite2api-admin-1440.png
+            lite2api-admin-page.html
+            lite2api-browser-diagnostics.txt
+            lite2api-deployment-report.md
+            lite2api-health.json
+            lite2api-server.log
+            lite2api-version.txt
+            lite2api-commit.txt
