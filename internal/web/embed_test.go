@@ -14,6 +14,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`window.Lite2APINativeV5`,
 		`window.Lite2APINativeV6`,
 		`window.Lite2APINativeV7`,
+		`window.Lite2APINativeV10`,
 		`v7ModelDialog`,
 		`v7-model-trigger`,
 		`v7-effort-control`,
@@ -24,12 +25,14 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="view-keys"`,
 		`id="view-prompt-test"`,
 		`id="view-adapters"`,
-		`id="healthVerdict"`,
-		`id="monitorMetrics"`,
-		`class="v9-command-center"`,
-		`class="v9-ops-grid"`,
-		`id="routeHealthSummary"`,
-		`id="incidentFeed"`,
+		`id="v10CallCount"`,
+		`id="v10SuccessRate"`,
+		`id="v10P95Latency"`,
+		`id="v10FailoverCount"`,
+		`id="v10QuotaBoard"`,
+		`id="v10QualityRows"`,
+		`id="v10TestAllChannels"`,
+		`id="v10ChannelUsageRows"`,
 		`id="requestSearch"`,
 		`id="requestChart"`,
 		`id="latencyChart"`,
@@ -44,9 +47,18 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="oauthAccountStatus"`,
 		`id="v5SourceAccounts"`,
 		`id="v5SourceConnections"`,
-		`class="v9-source-studio"`,
+		`class="v10-account-workspace"`,
 		`id="selectAllAccounts"`,
 		`<tbody id="accounts">`,
+		`id="v10ProviderGrid"`,
+		`id="v10MethodGrid"`,
+		`id="v10OnboardingChecklist"`,
+		`id="v10TestAccountBtn"`,
+		`id="v10AccountTestResult"`,
+		`class="v10-import-body"`,
+		`id="resultOAuthImported"`,
+		`id="resultOAuthSkipped"`,
+		`id="resultOAuthFailed"`,
 		`id="v5KeyDialog"`,
 		`id="quickCreateKeyBtn"`,
 		`data-key-preset="personal"`,
@@ -80,7 +92,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function runExport(`,
 		`function targetOperationalState(`,
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.19-v9'`,
+		`const UI_BUILD='2026.08.19-v10'`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
 		`.key-setting-row`,
@@ -88,10 +100,13 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`--v8-caret`,
 		`Native v9`,
 		`--v9-radius`,
-		`.v9-command-center`,
 		`.v9-route-studio`,
-		`.v9-source-studio`,
-		`id="resultOAuthImported"`,
+		`Native v10`,
+		`.v10-kpi-strip`,
+		`.v10-onboarding-body`,
+		`.v10-import-body`,
+		`v10TestAccountConnection`,
+		`v10TestAllChannels`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -111,7 +126,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
-			t.Errorf("obsolete or unsafe UI surface leaked into native v9: %q", value)
+			t.Errorf("obsolete or unsafe UI surface leaked into native v10: %q", value)
 		}
 	}
 
@@ -120,7 +135,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		t.Error("all styles must remain inside the document head")
 	}
 	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("native v9 must expose one final style element")
+		t.Error("native v10 must expose one final style element")
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
@@ -136,7 +151,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 }
 
-func TestNativeLayoutIsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
+func TestNativeLayoutIsCompileTimeMarkup(t *testing.T) {
 	page := string(IndexHTML)
 	master := strings.Index(page, `id="v5RouteList"`)
 	detail := strings.Index(page, `id="routeRows"`)
@@ -144,19 +159,16 @@ func TestNativeLayoutIsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
 		t.Fatal("route master list must exist before the route detail in final HTML")
 	}
 	if !strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics">`) {
-		t.Fatal("upstream capacity metrics must be visible in the primary source layout")
-	}
-	if strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics" hidden>`) {
-		t.Fatal("native v9 must not hide upstream capacity metrics")
+		t.Fatal("account quota metrics must remain visible in the primary account layout")
 	}
 	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
-		t.Fatal("key creation must be progressive disclosure, not a permanent dashboard block")
-	}
-	if strings.Contains(page, `<section id="clientSetup" class="client-setup" hidden>`) {
-		t.Fatal("client setup commands must remain available before a new key is created")
+		t.Fatal("key creation must remain progressive disclosure")
 	}
 	if !strings.Contains(page, `id="v6KeyList"`) || !strings.Contains(page, `id="v6ClientBaseURL"`) {
-		t.Fatal("client page must expose the useful endpoint and settings-like key list")
+		t.Fatal("client page must expose the endpoint and settings-like key list")
+	}
+	if !strings.Contains(page, `id="v10ProviderGrid"`) || !strings.Contains(page, `id="v10TestAccountBtn"`) {
+		t.Fatal("account onboarding must expose provider selection and pre-save testing")
 	}
 }
 
