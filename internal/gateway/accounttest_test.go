@@ -1,10 +1,12 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lms2004/lite2api/internal/config"
@@ -46,7 +48,7 @@ func TestProbeAccountModelsUsesConfiguredAuthentication(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeAccountModels(t.Context(), config.Account{
+	result, err := probeAccountModels(context.Background(), config.Account{
 		ID:         "preview",
 		Name:       "Preview",
 		Type:       "openai",
@@ -78,7 +80,7 @@ func TestProbeAccountModelsReportsUpstreamStatusWithoutSecrets(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeAccountModels(t.Context(), config.Account{
+	result, err := probeAccountModels(context.Background(), config.Account{
 		ID:         "preview",
 		Name:       "Preview",
 		Type:       "openai",
@@ -97,19 +99,7 @@ func TestProbeAccountModelsReportsUpstreamStatusWithoutSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) == "" || containsSecret(string(encoded), "never-return-this") {
+	if strings.Contains(string(encoded), "never-return-this") {
 		t.Fatalf("test result leaked a credential: %s", encoded)
 	}
-}
-
-func containsSecret(value, secret string) bool {
-	if secret == "" {
-		return false
-	}
-	for index := 0; index+len(secret) <= len(value); index++ {
-		if value[index:index+len(secret)] == secret {
-			return true
-		}
-	}
-	return false
 }
