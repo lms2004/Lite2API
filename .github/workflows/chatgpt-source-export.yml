@@ -1,0 +1,30 @@
+name: Temporary source export for canonical refactor
+
+on:
+  push:
+    branches:
+      - "feat/admin-canonical-usage-console-20260819"
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > SOURCE_COMMIT.txt
+          tar --exclude=.git -czf lite2api-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lite2api-canonical-source
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            lite2api-source.tar.gz
+            SOURCE_COMMIT.txt
