@@ -1,33 +1,47 @@
-<section id="view-accounts" class="view native-view native-accounts">
-  <div class="page-head native-page-head">
-    <div><h1>上游</h1><p>账号、额度和真正参与路由的连接。</p></div>
+<section id="view-accounts" class="view native-view v9-page v9-accounts">
+  <header class="v9-page-head">
+    <div class="v9-page-copy">
+      <span class="v9-kicker">Upstream inventory</span>
+      <h1>上游来源</h1>
+      <p>把认证账号、额度与真正参与路由的 API 连接放在同一套来源模型里。</p>
+    </div>
     <div class="actions account-actions">
-      <details class="more-menu"><summary aria-label="更多上游操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></summary><div class="more-popover"><button onclick="openImport();this.closest('details').removeAttribute('open')">导入</button><button id="openExportBtn" onclick="openExport();this.closest('details').removeAttribute('open')">导出</button></div></details>
-      <button class="primary" onclick="openQuickAdd()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>添加</button>
+      <details class="more-menu"><summary aria-label="更多上游操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></summary><div class="more-popover"><button onclick="openImport();this.closest('details').removeAttribute('open')">导入来源</button><button id="openExportBtn" onclick="openExport();this.closest('details').removeAttribute('open')">导出来源</button></div></details>
+      <button class="primary" onclick="openQuickAdd()"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>接入上游</button>
     </div>
-  </div>
+  </header>
 
-  <div id="metrics" class="metric-grid upstream-metrics" hidden></div>
-  <div class="source-segment" role="tablist" aria-label="上游视图">
-    <button type="button" class="active" data-source-tab="accounts" role="tab" aria-selected="true">账号</button>
-    <button type="button" data-source-tab="connections" role="tab" aria-selected="false">连接</button>
-  </div>
+  <div id="metrics" class="metric-grid upstream-metrics"></div>
 
-  <section id="v5SourceAccounts" class="source-pane" role="tabpanel">
-    <div class="source-tools">
-      <div id="oauthChannelRail" class="channel-rail" role="tablist" aria-label="按渠道筛选账号"></div>
-      <div class="toolbar"><div class="search"><input id="oauthAccountSearch" aria-label="搜索渠道账号" placeholder="搜索账号"></div><select id="oauthAccountStatus" aria-label="账号状态筛选"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
+  <section class="v9-source-studio" aria-label="上游来源管理">
+    <aside class="v9-source-rail">
+      <div class="v9-master-title"><div><span class="v9-kicker">Source type</span><strong>来源视图</strong></div></div>
+      <div class="source-segment" role="tablist" aria-label="上游视图">
+        <button type="button" class="active" data-source-tab="accounts" role="tab" aria-selected="true"><span>认证账号</span><small>订阅、OAuth 与额度</small></button>
+        <button type="button" data-source-tab="connections" role="tab" aria-selected="false"><span>路由连接</span><small>Base URL、模型与并发</small></button>
+      </div>
+      <div class="v9-source-help"><strong>如何理解？</strong><span>账号是可轮换的真实凭据；连接是路由指向的稳定入口。多个账号通常共用一个连接。</span></div>
+    </aside>
+
+    <div class="v9-source-content">
+      <section id="v5SourceAccounts" class="source-pane" role="tabpanel">
+        <div class="v9-pane-head">
+          <div><span class="v9-kicker">Credential pool</span><h2>认证账号与额度</h2><p>额度来自真实上游响应；未知不会伪装成 0%。</p></div>
+          <div class="toolbar"><div class="search"><input id="oauthAccountSearch" aria-label="搜索渠道账号" placeholder="搜索账号、套餐或渠道"></div><select id="oauthAccountStatus" aria-label="账号状态筛选"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
+        </div>
+        <div id="oauthChannelRail" class="channel-rail" role="tablist" aria-label="按渠道筛选账号"></div>
+        <div id="oauthAccounts" class="channel-groups"><div class="empty">正在读取认证账号</div></div>
+        <div class="pagination-note"><span id="oauthAccountCount"></span></div>
+      </section>
+
+      <section id="v5SourceConnections" class="source-pane" role="tabpanel" hidden>
+        <div class="v9-pane-head">
+          <div><span class="v9-kicker">Route connections</span><h2>API 与适配器连接</h2><p id="accountHealthNote">路由真正使用的 Base URL、协议、模型和并发入口。</p></div>
+          <div class="toolbar"><div class="search"><input id="accountSearch" aria-label="搜索路由连接" placeholder="搜索名称、ID 或地址"></div><select id="accountType" aria-label="协议筛选"><option value="">全部协议</option><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select><select id="accountStatus" aria-label="状态筛选"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select></div>
+        </div>
+        <div class="table-wrap"><table class="data-table account-table"><thead><tr><th class="check-col"><input id="selectAllAccounts" type="checkbox" aria-label="选择全部当前路由连接" onchange="toggleAllAccounts(this.checked)"></th><th>连接</th><th>提供方 / 地址</th><th>状态</th><th>模型</th><th>并发</th><th>请求 / 失败</th><th>延迟</th><th aria-label="操作"></th></tr></thead><tbody id="accounts"><tr><td colspan="9" class="empty">正在读取连接</td></tr></tbody></table></div>
+        <div id="accountCount" class="pagination-note">0 个连接</div>
+      </section>
     </div>
-    <div id="oauthAccounts" class="channel-groups"><div class="empty">正在读取账号</div></div>
-    <div class="pagination-note"><span id="oauthAccountCount"></span></div>
-  </section>
-
-  <section id="v5SourceConnections" class="source-pane" role="tabpanel" hidden>
-    <div class="source-tools">
-      <div><strong>API 与适配器连接</strong><span id="accountHealthNote" class="muted">路由实际使用的接入来源</span></div>
-      <div class="toolbar"><div class="search"><input id="accountSearch" aria-label="搜索路由连接" placeholder="搜索连接"></div><select id="accountType" aria-label="协议筛选"><option value="">全部协议</option><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select><select id="accountStatus" aria-label="状态筛选"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select></div>
-    </div>
-    <div class="table-wrap"><table class="data-table account-table"><thead><tr><th class="check-col"><input id="selectAllAccounts" type="checkbox" aria-label="选择全部当前路由连接" onchange="toggleAllAccounts(this.checked)"></th><th>连接</th><th>提供方 / 地址</th><th>状态</th><th>模型</th><th>并发</th><th>请求 / 失败</th><th>延迟</th><th aria-label="操作"></th></tr></thead><tbody id="accounts"><tr><td colspan="9" class="empty">正在读取连接</td></tr></tbody></table></div>
-    <div id="accountCount" class="pagination-note">0 个连接</div>
   </section>
 </section>
