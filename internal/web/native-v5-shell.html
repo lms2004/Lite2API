@@ -5,9 +5,9 @@
     <div class="brand-copy"><strong>Lite2API</strong></div>
   </div>
   <nav class="nav" aria-label="核心导航">
-    <button class="active" data-view="monitor" onclick="showView('monitor')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span><span>总览</span></button>
+    <button class="active" data-view="monitor" onclick="showView('monitor')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span><span>用量</span></button>
     <button data-view="routes" onclick="showView('routes')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-routes"></use></svg></span><span>路由</span></button>
-    <button data-view="accounts" onclick="showView('accounts')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-accounts"></use></svg></span><span>上游</span></button>
+    <button data-view="accounts" onclick="showView('accounts')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-accounts"></use></svg></span><span>账号</span></button>
     <button data-view="keys" onclick="showView('keys')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><span>客户端</span></button>
   </nav>
   <details class="diagnostics-nav">
@@ -15,11 +15,11 @@
     <button data-view="prompt-test" onclick="showView('prompt-test')"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg><span>注入检测</span></button>
     <button data-view="adapters" onclick="showView('adapters')"><svg class="icon" aria-hidden="true"><use href="#i-adapters"></use></svg><span>适配器</span></button>
   </details>
-  <div class="sidebar-foot sr-only"><span id="uiBuild">UI build 2026.08.18-v6</span></div>
+  <div class="sidebar-foot sr-only"><span id="uiBuild">UI build 2026.08.19-v10</span></div>
 </aside>
 <main class="main">
   <header class="topbar">
-    <div class="topbar-title sr-only"><strong id="viewTitle">总览</strong><span id="viewSubtitle">运行状态</span></div>
+    <div class="topbar-title sr-only"><strong id="viewTitle">用量与额度</strong><span id="viewSubtitle">额度、调用量、速度与渠道质量</span></div>
     <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>已连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
   </header>
   <div id="notice" class="notice" role="status" aria-live="polite"></div>
