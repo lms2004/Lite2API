@@ -26,6 +26,9 @@ var nativeV9CSS []byte
 //go:embed native-v9-refine.css
 var nativeV9RefineCSS []byte
 
+//go:embed native-v10.css
+var nativeV10CSS []byte
+
 //go:embed native-v5.js
 var nativeV5JS []byte
 
@@ -37,6 +40,9 @@ var nativeV7JS []byte
 
 //go:embed native-v9.js
 var nativeV9JS []byte
+
+//go:embed native-v10.js
+var nativeV10JS []byte
 
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
@@ -53,14 +59,14 @@ var nativeV5Accounts []byte
 //go:embed native-v5-keys.html
 var nativeV5Keys []byte
 
+//go:embed native-v10-account-dialogs.html
+var nativeV10AccountDialogs []byte
+
 // IndexHTML is the complete self-contained admin page served by Lite2API.
-//
-// The legacy document remains the source of stable business functions and
-// low-frequency dialogs. Native markup replaces the shell and four core views
-// before embedding. Native v6 refines content hierarchy; v7 adds the
-// capability-aware model and reasoning controls without changing route APIs;
-// v8 standardizes interaction polish; v9 reconstructs the overview, route, and
-// upstream information architecture around operational decisions.
+// Stable gateway handlers remain in the legacy document. Compile-time native
+// markup replaces the task surfaces before embedding. Native v10 makes quota,
+// call volume, speed, channel quality, and provider-specific account onboarding
+// the primary product workflows.
 var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
 
 func buildNativeIndexHTML(base []byte) []byte {
@@ -71,12 +77,13 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-keys"`), []byte(`<section id="view-routes"`), bytes.TrimSpace(nativeV5Keys))
 	page = replaceRange(page, []byte(`<section id="view-routes"`), []byte(`<section id="view-monitor"`), bytes.TrimSpace(nativeV5Routes))
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
+	page = replaceRange(page, []byte(`<dialog id="quickAuthDialog"`), []byte(`<dialog id="exportDialog"`), bytes.TrimSpace(nativeV10AccountDialogs))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v9'`), 1)
-	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f3f3f5">`), 1)
+	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v10'`), 1)
+	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f4f4f6">`), 1)
 
-	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS}, []byte("\n"))
+	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 
@@ -99,8 +106,7 @@ func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {
 }
 
 // buildIndexHTML keeps the final document self-contained: one canonical style
-// element and one enhancement script inserted before </body>. It is also kept
-// as a small generic helper for focused embedding tests.
+// element and one enhancement script inserted before </body>.
 func buildIndexHTML(base, css, js []byte) []byte {
 	page := append([]byte(nil), base...)
 
