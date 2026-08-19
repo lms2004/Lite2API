@@ -4,12 +4,21 @@ on:
   push:
     branches:
       - "feat/admin-v9-core-redesign-20260819"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/admin-v9-refine-patch.yml"
+      - ".github/workflows/admin-v9-visual-qa.yml"
+      - ".github/workflows/ui-quality.yml"
+      - "internal/web/**"
 
 permissions:
   contents: write
 
 jobs:
   patch-and-remove-self:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout redesign branch
