@@ -1,14 +1,17 @@
 package gateway
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const requestLogQueueSize = 256
@@ -200,6 +203,65 @@ func (l *requestLogWriter) Status() RequestLogStatus {
 		Queued:         len(l.queue),
 		Dropped:        l.dropped.Load(),
 	}
+}
+
+// loadRequestRecords restores valid records from the persistent request log
+// and its rotation backups. The records are sorted so Stats can rebuild both
+// the recent list and the minute trend in chronological order.
+func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {
+	records := make([]RequestRecord, 0)
+	for index := 0; index <= backups; index++ {
+		candidate := path
+		if index > 0 {
+			candidate += "." + strconv.Itoa(index)
+		}
+		file, err := os.Open(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("open request log backup: %w", err)
+		}
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 2<<20)
+		for scanner.Scan() {
+			var record RequestRecord
+			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+				continue
+			}
+			if _, err := time.Parse(time.RFC3339Nano, record.Time); err != nil {
+				continue
+			}
+			records = append(records, record)
+		}
+		scanErr := scanner.Err()
+		closeErr := file.Close()
+		if scanErr != nil {
+			return nil, fmt.Errorf("read request log backup: %w", scanErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close request log backup: %w", closeErr)
+		}
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		left, _ := time.Parse(time.RFC3339Nano, records[i].Time)
+		right, _ := time.Parse(time.RFC3339Nano, records[j].Time)
+		return left.Before(right)
+	})
+	return records, nil
+}
+
+// loadLatestRequestRecord restores only the newest valid record from the
+// persistent request log. Operations health intentionally has a single real
+// observation, so a restart must not turn an otherwise verified route into an
+// unknown route just because the in-memory ring was recreated.
+func loadLatestRequestRecord(path string, backups int) (*RequestRecord, error) {
+	records, err := loadRequestRecords(path, backups)
+	if err != nil || len(records) == 0 {
+		return nil, err
+	}
+	latest := records[len(records)-1]
+	return &latest, nil
 }
 
 func resolveRequestLogPath(configPath, configured string) string {

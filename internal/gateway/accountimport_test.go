@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestAccountImportPreviewAndApply(t *testing.T) {
 		}}),
 		DryRun: true,
 	}
-	preview, err := g.ImportAccounts(request)
+	preview, err := g.ImportAccounts(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func TestAccountImportPreviewAndApply(t *testing.T) {
 	}
 
 	request.DryRun = false
-	result, err := g.ImportAccounts(request)
+	result, err := g.ImportAccounts(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,7 @@ func TestAccountImportPreviewAndApply(t *testing.T) {
 		t.Fatalf("result=%+v accounts=%d", result, len(g.Config().Accounts))
 	}
 
-	skipped, err := g.ImportAccounts(request)
+	skipped, err := g.ImportAccounts(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,14 +50,14 @@ func TestAccountImportUpsertPreservesCredential(t *testing.T) {
 		ID: "api", Name: "Before", Type: "openai", BaseURL: "https://api.example.com/v1",
 		APIKey: "secret", Models: []string{"m"}, Enabled: &enabled,
 	}})}
-	if _, err := g.ImportAccounts(create); err != nil {
+	if _, err := g.ImportAccounts(context.Background(), create); err != nil {
 		t.Fatal(err)
 	}
 	update := AccountImportRequest{Mode: "upsert", Data: newAccountImportData([]AccountImportItem{{
 		ID: "api", Name: "After", Type: "openai", BaseURL: "https://api.example.com/v1",
 		Models: []string{"m2"}, Enabled: &enabled,
 	}})}
-	result, err := g.ImportAccounts(update)
+	result, err := g.ImportAccounts(context.Background(), update)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,18 +70,21 @@ func TestAccountImportUpsertPreservesCredential(t *testing.T) {
 func TestAccountImportPartialSuccess(t *testing.T) {
 	g := newTestGateway(t, nil, nil)
 	enabled := true
+	// The OAuth account is now routed to the CLIProxy pool rather than rejected;
+	// without a configured management channel the upload fails and is reported as
+	// an OAuth failure while the API-key channel still applies.
 	request := AccountImportRequest{Data: newAccountImportData([]AccountImportItem{
 		{ID: "good", BaseURL: "http://127.0.0.1:45678/v1", AuthHeader: "none", Enabled: &enabled},
 		{ID: "bad", Name: "OAuth without adapter", Platform: "claude", Type: "oauth", Credentials: map[string]any{"refresh_token": "not-an-api-key"}, Enabled: &enabled},
 	})}
-	result, err := g.ImportAccounts(request)
+	result, err := g.ImportAccounts(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.AccountCreated != 1 || result.AccountFailed != 1 || !result.Applied {
+	if result.AccountCreated != 1 || result.OAuthFailed != 1 || !result.Applied {
 		t.Fatalf("result=%+v", result)
 	}
-	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Message, "external adapter") {
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Message, "OAuth adapter") {
 		t.Fatalf("errors=%+v", result.Errors)
 	}
 	if len(g.Config().Accounts) != 1 || g.Config().Accounts[0].ID != "good" {
@@ -107,7 +111,7 @@ func TestSub2APIDataSubsetMapsAPIKeyAndProxy(t *testing.T) {
 			ProxyKey: &proxyKey, Concurrency: 3,
 		}},
 	}}
-	result, err := g.ImportAccounts(request)
+	result, err := g.ImportAccounts(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +129,7 @@ func TestSub2APIDataSubsetMapsAPIKeyAndProxy(t *testing.T) {
 
 func TestAccountImportRejectsUnsupportedHeader(t *testing.T) {
 	g := newTestGateway(t, nil, nil)
-	_, err := g.ImportAccounts(AccountImportRequest{Data: AccountImportData{
+	_, err := g.ImportAccounts(context.Background(), AccountImportRequest{Data: AccountImportData{
 		Type: "unknown-export", Version: 1, Accounts: []AccountImportItem{{ID: "a"}},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported import type") {
@@ -133,23 +137,26 @@ func TestAccountImportRejectsUnsupportedHeader(t *testing.T) {
 	}
 }
 
-func TestAccountImportOAuthWithBaseURLStillRequiresAdapterCredential(t *testing.T) {
+func TestAccountImportOAuthUnknownPlatformIsSkipped(t *testing.T) {
 	g := newTestGateway(t, nil, nil)
-	result, err := g.ImportAccounts(AccountImportRequest{Data: newAccountImportData([]AccountImportItem{{
+	// An OAuth account whose platform CLIProxy does not pool (here: unset) is
+	// skipped with guidance to use the offline auth-files migration, never
+	// guessed into an upstream API key.
+	result, err := g.ImportAccounts(context.Background(), AccountImportRequest{Data: newAccountImportData([]AccountImportItem{{
 		Name: "OAuth export", Type: "oauth", BaseURL: "https://adapter.example.com/v1",
 		Credentials: map[string]any{"refresh_token": "not-an-api-key"},
 	}})})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.AccountFailed != 1 || len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Message, "external adapter") {
+	if result.OAuthSkipped != 1 || result.AccountFailed != 0 || len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Message, "offline auth-files migration") {
 		t.Fatalf("result=%+v", result)
 	}
 }
 
 func TestAccountImportLimit(t *testing.T) {
 	accounts := make([]AccountImportItem, accountImportLimit+1)
-	_, err := newTestGateway(t, nil, nil).ImportAccounts(AccountImportRequest{Data: newAccountImportData(accounts)})
+	_, err := newTestGateway(t, nil, nil).ImportAccounts(context.Background(), AccountImportRequest{Data: newAccountImportData(accounts)})
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("err=%v", err)
 	}

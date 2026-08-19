@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestExportAccountsSelectedAndProxyRoundTrip(t *testing.T) {
 	}
 
 	g := newTestGateway(t, nil, nil)
-	result, err := g.ImportAccounts(AccountImportRequest{Data: data})
+	result, err := g.ImportAccounts(context.Background(), AccountImportRequest{Data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestExportAccountsOmitsProxyUnlessRequested(t *testing.T) {
 
 func TestImportRejectsMissingProxyReference(t *testing.T) {
 	key := "missing"
-	result, err := newTestGateway(t, nil, nil).ImportAccounts(AccountImportRequest{Data: AccountImportData{Type: "sub2api-data", Version: 1, Accounts: []AccountImportItem{{Name: "Gemini API", Platform: "gemini", Type: "apikey", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: "secret", ProxyKey: &key}}}})
+	result, err := newTestGateway(t, nil, nil).ImportAccounts(context.Background(), AccountImportRequest{Data: AccountImportData{Type: "sub2api-data", Version: 1, Accounts: []AccountImportItem{{Name: "Gemini API", Platform: "gemini", Type: "apikey", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: "secret", ProxyKey: &key}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +106,18 @@ func TestImportRejectsMissingProxyReference(t *testing.T) {
 	}
 }
 
-func TestImportReportsInvalidProxyAndAdapterSuggestion(t *testing.T) {
-	result, err := newTestGateway(t, nil, nil).ImportAccounts(AccountImportRequest{Data: AccountImportData{Type: "sub2api-data", Version: 1, Proxies: []AccountImportProxy{{ProxyKey: "bad", Protocol: "ftp", Host: "127.0.0.1", Port: 21}}, Accounts: []AccountImportItem{{Name: "Claude old", Platform: "anthropic", Type: "setup-token", Credentials: map[string]any{"access_token": "secret"}}}}})
+func TestImportReportsInvalidProxyAndRoutesOAuthToPool(t *testing.T) {
+	// The invalid proxy is still reported. The Claude OAuth account is now routed
+	// to the CLIProxy pool (not rejected); with no management channel configured
+	// in the test the upload fails and is reported as an OAuth failure.
+	result, err := newTestGateway(t, nil, nil).ImportAccounts(context.Background(), AccountImportRequest{Data: AccountImportData{Type: "sub2api-data", Version: 1, Proxies: []AccountImportProxy{{ProxyKey: "bad", Protocol: "ftp", Host: "127.0.0.1", Port: 21}}, Accounts: []AccountImportItem{{Name: "Claude old", Platform: "anthropic", Type: "setup-token", Credentials: map[string]any{"access_token": "secret"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ProxyFailed != 1 || result.AccountFailed != 1 || result.Errors[1].AdapterID != "cli-proxy-api" {
+	if result.ProxyFailed != 1 || result.OAuthFailed != 1 || result.AccountFailed != 0 {
 		t.Fatalf("result=%+v", result)
+	}
+	if len(result.Errors) != 2 || result.Errors[1].Kind != "oauth" || !strings.Contains(result.Errors[1].Message, "OAuth adapter") {
+		t.Fatalf("errors=%+v", result.Errors)
 	}
 }

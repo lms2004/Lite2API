@@ -51,7 +51,7 @@
 #routeSaveBtn:disabled{visibility:hidden}
 .route-workspace{min-height:0;grid-template-columns:218px minmax(0,1fr);border-radius:16px}
 .route-master{grid-template-rows:auto auto auto}
-.route-master-list{padding:8px;overflow:visible}
+.route-master-list{min-width:0;padding:8px;overflow:auto}
 .route-master-item{min-height:54px}
 .route-master-foot{min-height:38px;padding:9px 14px}
 .route-chain-list,.route-card{min-height:0}
@@ -126,11 +126,18 @@
   .channel-account>summary{grid-template-columns:minmax(200px,1fr) minmax(220px,1fr) 78px 16px}
   .key-setting-row{grid-template-columns:34px minmax(0,1fr) auto 28px}.key-setting-scope{display:none}
 }
+@media(max-width:820px){
+  .route-workspace{display:block}
+  .route-master{max-height:none;border-right:0;border-bottom:1px solid var(--line)}
+  .route-master-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;overflow:visible}
+  .route-master-item{min-width:0}
+  .route-master-foot{display:none}
+}
 @media(max-width:700px){
   .main{padding-inline:16px}.topbar{margin-inline:-16px;padding-inline:16px}
   .grouped-surface,.grouped-section,.key-list-panel,.channel-group{border-radius:13px}
   .overview-hero{padding:16px}.monitor-metrics{grid-template-columns:1fr 1fr}.metric-card:nth-child(2){border-right:0}.metric-card:nth-child(n+3){padding-top:14px;border-top:1px solid var(--line)}
-  .route-workspace{display:block}.route-master{border-right:0;border-bottom:1px solid var(--line)}.route-master-list{display:flex;gap:5px;overflow:auto}.route-master-item{min-width:150px}.route-master-foot{display:none}
+  .route-workspace{display:block}.route-master{border-right:0;border-bottom:1px solid var(--line)}.route-master-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;overflow:visible}.route-master-item{min-width:0}.route-master-foot{display:none}
   .route-intent{grid-template-columns:1fr}.route-target{grid-template-columns:32px minmax(0,1fr) 56px 26px}.target-upstream{grid-column:2}.target-compat{grid-column:3;grid-row:1/3}.route-target>.icon-btn{grid-column:4;grid-row:1/3}
   .channel-account>summary{grid-template-columns:minmax(0,1fr) 16px}.quota-strip,.channel-account-status{grid-column:1/-1}.channel-account-caret{grid-column:2;grid-row:1}.channel-account-detail{grid-template-columns:1fr 1fr}
   .key-setting-row{grid-template-columns:32px minmax(0,1fr) auto 26px;padding-inline:12px}.key-setting-state{font-size:10px}

@@ -5,7 +5,15 @@
   "use strict";
 
   const BUILD = "Native 7.2 · 2026.08.18";
-  const picker = { activeSelect: null, query: "", group: "all", scheduled: false };
+  const picker = {
+    activeSelect: null,
+    activeRoute: "",
+    query: "",
+    group: "all",
+    scheduled: false,
+    pressedResult: null,
+    pointerChosen: null
+  };
   const $ = id => document.getElementById(id);
   const all = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const later = fn => requestAnimationFrame(() => requestAnimationFrame(fn));
@@ -147,7 +155,11 @@
       <div id="v7ModelResults" class="v7-model-results"></div>
       <div class="v7-model-dialog-foot">模型目录由上游自动同步；推理强度和 Fast 模式在模型之外单独选择。</div>`;
     document.body.append(dialog);
-    dialog.querySelector("[data-v7-close]").addEventListener("click", () => dialog.close());
+    dialog.querySelector("[data-v7-close]").addEventListener("click", () => {
+      picker.pressedResult = null;
+      picker.pointerChosen = null;
+      dialog.close();
+    });
     dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
     $("v7ModelSearch").addEventListener("input", event => {
       picker.query = event.target.value || "";
@@ -158,6 +170,7 @@
 
   function openDialog(select) {
     picker.activeSelect = select;
+    picker.activeRoute = select.closest(".route-card")?.querySelector(".route-alias")?.value?.trim() || "";
     picker.query = "";
     picker.group = "all";
     const dialog = ensureDialog();
@@ -179,6 +192,7 @@
       button.type = "button";
       button.className = "v7-model-group";
       button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "v7ModelResults");
       button.setAttribute("aria-selected", String(picker.group === group));
       button.textContent = group === "all" ? `全部 ${entries.length}` : groupLabel(group);
       button.addEventListener("click", () => { picker.group = group; renderDialog(); });
@@ -197,7 +211,7 @@
       return;
     }
 
-    const currentBase = modelProfile(picker.activeSelect?.value).base;
+    const currentBase = modelProfile(activeModelSelect()?.value).base;
     const fragment = document.createDocumentFragment();
     let lastGroup = "";
     for (const entry of filtered) {
@@ -211,6 +225,8 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "v7-model-result";
+      button.dataset.model = entry.model;
+      button.setAttribute("aria-label", `选择模型 ${entry.model}`);
       button.setAttribute("aria-current", String(currentBase === entry.model));
       button.innerHTML = `<span class="v7-model-result-main"><strong></strong><small></small></span><span class="v7-model-result-meta"></span>`;
       button.querySelector("strong").textContent = friendlyModelName(entry.model);
@@ -238,7 +254,33 @@
         chip.textContent = `${efforts.length} 档推理`;
         meta.append(chip);
       }
-      button.addEventListener("click", () => chooseBaseModel(entry));
+      button.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.button !== 0) return;
+        picker.pressedResult = { model: entry.model, x: event.clientX, y: event.clientY };
+      });
+      button.addEventListener("pointercancel", () => { picker.pressedResult = null; });
+      button.addEventListener("pointerup", event => {
+        if (!event.isPrimary || event.button !== 0) return;
+        const pressed = picker.pressedResult;
+        picker.pressedResult = null;
+        if (!pressed || pressed.model !== entry.model || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 12) return;
+        picker.pointerChosen = { model: entry.model, at: performance.now() };
+        event.preventDefault();
+        event.stopPropagation();
+        chooseBaseModel(entry);
+      });
+      button.addEventListener("click", event => {
+        const pointerChosen = picker.pointerChosen;
+        if (pointerChosen && pointerChosen.model === entry.model && performance.now() - pointerChosen.at < 500) {
+          picker.pointerChosen = null;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        chooseBaseModel(entry);
+      });
       fragment.append(button);
     }
     resultNode.replaceChildren(fragment);
@@ -250,8 +292,16 @@
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  function activeModelSelect() {
+    if (picker.activeSelect?.isConnected) return picker.activeSelect;
+    if (!picker.activeRoute) return null;
+    const card = all("#routeRows > .route-card").find(candidate =>
+      candidate.querySelector(".route-alias")?.value?.trim() === picker.activeRoute);
+    return card?.querySelector(".route-intent select") || null;
+  }
+
   function chooseBaseModel(entry) {
-    const select = picker.activeSelect;
+    const select = activeModelSelect();
     if (!select) return;
     const wasFast = modelProfile(select.value).fast;
     const target = wasFast && entry.fastAvailable ? `${entry.model}@fast` : entry.model;

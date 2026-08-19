@@ -21,15 +21,33 @@ func TestOperationsNoSamplesRemainUnknown(t *testing.T) {
 	}
 }
 
-func TestOperationsRejectsStaleWindowData(t *testing.T) {
+func TestOperationsUsesLatestRealDataRegardlessOfAge(t *testing.T) {
 	now := time.Now().UTC()
-	record := RequestRecord{Time: now.Add(-6 * time.Minute).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
+	record := RequestRecord{Time: now.Add(-72 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
 	cfg := config.Defaults()
 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}})
-	if snapshot.Window.Samples != 0 || snapshot.Routes[0].Window.Samples != 0 || snapshot.State != HealthUnknown {
-		t.Fatalf("stale data must not enter five-minute health: %+v", snapshot)
+	if snapshot.Window.Samples != 1 || snapshot.Routes[0].Window.Samples != 1 || snapshot.State != HealthReady {
+		t.Fatalf("latest real data must remain valid regardless of age: %+v", snapshot)
+	}
+	if snapshot.Window.ObservedAt != record.Time || snapshot.Window.SuccessRate == nil || *snapshot.Window.SuccessRate != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 12 {
+		t.Fatalf("latest real data must drive metrics: %+v", snapshot.Window)
+	}
+}
+
+func TestOperationsMetricsUseOnlyLatestRecord(t *testing.T) {
+	now := time.Now().UTC()
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
+	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
+	records := []RequestRecord{
+		{Time: now.Add(-48 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 503, LatencyMS: 9000},
+		{Time: now.Add(-24 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 42},
+	}
+	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: records})
+	if snapshot.Window.Samples != 1 || snapshot.Window.Successful != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 42 || snapshot.State != HealthReady {
+		t.Fatalf("only latest record should drive health metrics: %+v", snapshot)
 	}
 }
 

@@ -22,6 +22,13 @@ type discoveredCapabilityUpdate struct {
 	Catalog   []config.DiscoveredModel
 }
 
+type discoveredCapabilityMigration struct {
+	AccountID string
+	From      string
+	To        string
+	Legacy    config.ChannelCapability
+}
+
 func (g *Gateway) runCapabilityDiscovery(ctx context.Context) {
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -66,37 +73,186 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		updates = append(updates, discoveredCapabilityUpdate{AccountID: account.ID, Catalog: catalog})
 	}
 
+	cfg := cloneConfig(state.cfg)
 	changedAccounts := 0
+	migrations := make([]discoveredCapabilityMigration, 0)
 	for _, update := range updates {
-		current, ok := findConfiguredAccount(g.Config().Accounts, update.AccountID)
-		if !ok {
+		index := accountIndex(cfg.Accounts, update.AccountID)
+		if index < 0 {
 			continue
 		}
+		current := cfg.Accounts[index]
 		updated := current
 		discoveredIDs := discoveredModelIDs(update.Catalog)
 		inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
 		if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
+			var accountMigrations []discoveredCapabilityMigration
+			updated.Capabilities, accountMigrations = reconcileDiscoveredCapabilities(current.Capabilities, inferred)
+			for migrationIndex := range accountMigrations {
+				accountMigrations[migrationIndex].AccountID = update.AccountID
+			}
+			migrations = append(migrations, accountMigrations...)
 			updated.Models = discoveredIDs
-			updated.Capabilities = inferred
 		} else {
 			updated.Models = appendUniqueModels(current.Models, discoveredIDs)
 			updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
 		}
+		// A retained capability may refer to a model that temporarily vanished
+		// from a shared /models response. Keep that upstream ID advertised so a
+		// valid existing route cannot be made invalid by an incomplete catalog.
+		updated.Models = appendUniqueModels(updated.Models, capabilityUpstreamModels(updated.Capabilities))
 		if sameModels(current.Models, updated.Models) && sameChannelCapabilities(current.Capabilities, updated.Capabilities) {
 			continue
 		}
-		if err := g.UpsertAccount(updated); err != nil {
-			return fmt.Errorf("update discovered capabilities for %s: %w", update.AccountID, err)
-		}
+		cfg.Accounts[index] = updated
 		changedAccounts++
 	}
 	if changedAccounts > 0 {
+		applyDiscoveredCapabilityMigrations(&cfg, migrations)
+		if err := g.saveAndReload(cfg); err != nil {
+			return fmt.Errorf("update discovered capabilities: %w", err)
+		}
 		slog.Info("upstream capabilities synchronized", "accounts", changedAccounts)
 	}
 	if len(updates) == 0 && len(failures) > 0 {
 		return fmt.Errorf("no model catalogs could be refreshed (%d endpoints unavailable)", len(failures))
 	}
 	return nil
+}
+
+func reconcileDiscoveredCapabilities(existing, inferred []config.ChannelCapability) ([]config.ChannelCapability, []discoveredCapabilityMigration) {
+	result := append([]config.ChannelCapability(nil), existing...)
+	matched := make([]bool, len(result))
+	byModel := make(map[string][]int, len(result))
+	byUpstream := make(map[string][]int, len(result))
+	for index, capability := range result {
+		if capability.Model != "" {
+			byModel[capability.Model] = append(byModel[capability.Model], index)
+		}
+		if capability.UpstreamModel != "" {
+			byUpstream[capability.UpstreamModel] = append(byUpstream[capability.UpstreamModel], index)
+		}
+	}
+	migrations := make([]discoveredCapabilityMigration, 0)
+	for _, capability := range inferred {
+		index := firstUnmatchedCapability(byModel[capability.Model], matched)
+		if index < 0 {
+			index = firstUnmatchedCapability(byUpstream[capability.UpstreamModel], matched)
+		}
+		if index < 0 {
+			result = append(result, capability)
+			matched = append(matched, true)
+			continue
+		}
+		previous := result[index]
+		capability.ReasoningEfforts = mergeOrderedStrings(previous.ReasoningEfforts, capability.ReasoningEfforts)
+		result[index] = capability
+		matched[index] = true
+		if previous.Model != capability.Model && previous.UpstreamModel == capability.UpstreamModel {
+			migrations = append(migrations, discoveredCapabilityMigration{From: previous.Model, To: capability.Model, Legacy: previous})
+		}
+	}
+	return result, migrations
+}
+
+func firstUnmatchedCapability(indices []int, matched []bool) int {
+	for _, index := range indices {
+		if index >= 0 && index < len(matched) && !matched[index] {
+			return index
+		}
+	}
+	return -1
+}
+
+func capabilityUpstreamModels(capabilities []config.ChannelCapability) []string {
+	models := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if model := strings.TrimSpace(capability.UpstreamModel); model != "" {
+			models = append(models, model)
+		}
+	}
+	return models
+}
+
+func applyDiscoveredCapabilityMigrations(cfg *config.Config, migrations []discoveredCapabilityMigration) {
+	for _, migration := range migrations {
+		if migration.From == "" || migration.To == "" || migration.From == migration.To {
+			continue
+		}
+		migrated := false
+		for alias, route := range cfg.Routes {
+			base, fast := config.ParseRouteModelProfile(route.Model)
+			if base != migration.From || !routeTargetsAccount(route, migration.AccountID) {
+				continue
+			}
+			nextModel := migration.To
+			if fast {
+				nextModel = config.FastProfileModel(nextModel)
+			}
+			if !routeSupportsModel(*cfg, route, nextModel) {
+				continue
+			}
+			route.Model = nextModel
+			cfg.Routes[alias] = route
+			migrated = true
+		}
+		if migrated {
+			continue
+		}
+		// If another fallback target still depends on the old logical name,
+		// retain it as a compatibility alias instead of breaking that route.
+		index := accountIndex(cfg.Accounts, migration.AccountID)
+		if index < 0 || !routeReferencesModel(cfg.Routes, migration.From, migration.AccountID) {
+			continue
+		}
+		if !hasCapability(cfg.Accounts[index].Capabilities, migration.Legacy.Model) {
+			cfg.Accounts[index].Capabilities = append(cfg.Accounts[index].Capabilities, migration.Legacy)
+		}
+		cfg.Accounts[index].Models = appendUniqueModels(cfg.Accounts[index].Models, []string{migration.Legacy.UpstreamModel})
+	}
+}
+
+func routeTargetsAccount(route config.Route, accountID string) bool {
+	for _, target := range route.Targets {
+		if target.Account == accountID {
+			return true
+		}
+	}
+	return false
+}
+
+func routeReferencesModel(routes map[string]config.Route, model, accountID string) bool {
+	for _, route := range routes {
+		base, _ := config.ParseRouteModelProfile(route.Model)
+		if base == model && routeTargetsAccount(route, accountID) {
+			return true
+		}
+	}
+	return false
+}
+
+func routeSupportsModel(cfg config.Config, route config.Route, model string) bool {
+	candidate := route
+	candidate.Model = model
+	for _, target := range candidate.Targets {
+		account, ok := findConfiguredAccount(cfg.Accounts, target.Account)
+		if !ok {
+			return false
+		}
+		if _, _, ok := config.ResolveRouteTarget(account, candidate, target); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasCapability(capabilities []config.ChannelCapability, model string) bool {
+	for _, capability := range capabilities {
+		if capability.Model == model {
+			return true
+		}
+	}
+	return false
 }
 
 func discoverModelsForAccount(ctx context.Context, client *http.Client, account config.Account) ([]config.DiscoveredModel, error) {

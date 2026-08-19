@@ -131,6 +131,8 @@ html[data-ui="native-v7"] .route-intent-note{
   padding:3px 8px 8px;
   overflow:auto;
   border-top:1px solid var(--line);
+  pointer-events:auto;
+  touch-action:pan-y;
 }
 .v7-model-group-heading{
   padding:13px 10px 5px;
@@ -151,9 +153,13 @@ html[data-ui="native-v7"] .route-intent-note{
   border-radius:10px;
   background:transparent;
   text-align:left;
+  cursor:pointer;
+  pointer-events:auto;
+  touch-action:manipulation;
 }
 .v7-model-result:hover{background:var(--surface-2)}
 .v7-model-result[aria-current="true"]{background:var(--blue-soft)}
+.v7-model-result:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .v7-model-result-main{min-width:0}
 .v7-model-result-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:12px;font-weight:620}
 .v7-model-result-main small{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:9px}

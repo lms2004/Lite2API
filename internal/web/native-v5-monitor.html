@@ -3,10 +3,22 @@
     <div><h1>总览</h1><p>先看现在能不能用，再看哪里值得处理。</p></div>
   </div>
 
+  <details class="native-trends grouped-section" open>
+    <summary><span>运行趋势</span><span id="chartRetention" class="muted">滚动保留 7 天</span></summary>
+    <div class="chart-toolbar">
+      <span id="chartWindowLabel" class="muted">全部本地数据 · 缺失时留空</span>
+      <label class="chart-range">范围<select id="chartRange" aria-label="趋势图时间范围"><option value="all" selected>全部本地数据</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option></select></label>
+    </div>
+    <div class="chart-grid">
+      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>请求</strong><span>请求量与失败</span></div><div class="chart-legend"><span class="legend-item"><i class="legend-dot blue"></i>请求</span><span class="legend-item"><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="历史请求与失败趋势图"></canvas></div></section>
+      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>延迟</strong><span id="chartWindow">全部本地数据</span></div></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="历史 P95 延迟趋势图"></canvas></div></section>
+    </div>
+  </details>
+
   <section class="overview-hero grouped-surface" aria-label="当前运行状态">
     <div id="healthVerdict" class="health-verdict">
       <span class="health-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span>
-      <div class="health-copy"><strong>正在检查</strong><span>等待最近请求与上游状态</span></div>
+      <div class="health-copy"><strong>正在检查</strong><span>等待最近一次真实请求与上游状态</span></div>
     </div>
     <div id="monitorMetrics" class="monitor-metrics"></div>
   </section>
@@ -36,16 +48,5 @@
     <div id="requestCount" class="pagination-note">0 条请求</div>
   </section>
 
-  <details class="native-trends grouped-section">
-    <summary><span>运行趋势</span><span id="chartRetention" class="muted">滚动保留 7 天</span></summary>
-    <div class="chart-toolbar">
-      <span id="chartWindowLabel" class="muted">最近 24 小时 · 缺失时留空</span>
-      <label class="chart-range">范围<select id="chartRange" aria-label="趋势图时间范围"><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h" selected>24 小时</option><option value="3d">3 天</option><option value="7d">7 天</option></select></label>
-    </div>
-    <div class="chart-grid">
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>请求</strong><span>请求量与失败</span></div><div class="chart-legend"><span class="legend-item"><i class="legend-dot blue"></i>请求</span><span class="legend-item"><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="历史请求与失败趋势图"></canvas></div></section>
-      <section class="chart-panel"><div class="chart-head"><div class="chart-title"><strong>延迟</strong><span id="chartWindow">最近 24 小时</span></div></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="历史 P95 延迟趋势图"></canvas></div></section>
-    </div>
-  </details>
   <p id="chartSummary" class="sr-only" aria-live="polite"></p>
 </section>

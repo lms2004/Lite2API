@@ -119,7 +119,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		if err := decodeAdminJSON(w, r, &input); err != nil {
 			return
 		}
-		result, err := g.ImportAccounts(input)
+		result, err := g.ImportAccounts(r.Context(), input)
 		if err != nil {
 			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_account_import")
 			return
@@ -173,8 +173,11 @@ func parseTrendRange(value string) (time.Duration, error) {
 		return 3 * 24 * time.Hour, nil
 	case "7d":
 		return trendRetention, nil
+	case "all":
+		// The frontend tightens this range to the actual retained points.
+		return trendRetention, nil
 	default:
-		return 0, errors.New("range must be one of 1h, 6h, 24h, 3d or 7d")
+		return 0, errors.New("range must be one of 1h, 6h, 24h, 3d, 7d or all")
 	}
 }
 

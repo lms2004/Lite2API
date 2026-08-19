@@ -5,6 +5,8 @@ import "testing"
 func TestFilterDiscoveredModelsScopesSharedCLIProxy(t *testing.T) {
 	models := []string{
 		"gpt-5.6-sol",
+		"gpt-5.3-codex-spark",
+		"gpt-oss-120b-medium",
 		"claude-code/claude-opus-4-6",
 		"antigravity/claude-opus-4-6-thinking",
 		"gemini-3.6-flash",
@@ -16,7 +18,7 @@ func TestFilterDiscoveredModelsScopesSharedCLIProxy(t *testing.T) {
 	}
 	codex := Account{ID: "cliproxy-codex", AdapterID: "cli-proxy-api"}
 	got = FilterDiscoveredModels(codex, models)
-	if len(got) != 1 || got[0] != "gpt-5.6-sol" {
+	if len(got) != 2 || got[0] != "gpt-5.6-sol" || got[1] != "gpt-5.3-codex-spark" {
 		t.Fatalf("codex scope=%v", got)
 	}
 	aggregate := Account{ID: "cliproxy-oauth", AdapterID: "cli-proxy-api"}
@@ -47,6 +49,29 @@ func TestInferDiscoveredCapabilitiesUnifiesProviderSpecificModels(t *testing.T) 
 	}
 	if got := byModel["gemini-3.6-flash"]; got.Model == "" || !containsString(got.ReasoningEfforts, "high") {
 		t.Fatalf("Gemini thinking capability=%+v", got)
+	}
+}
+
+func TestInferAntigravityReasoningSuffixesAsLogicalModelProfiles(t *testing.T) {
+	account := Account{ID: "cliproxy-antigravity", AdapterID: "cli-proxy-api"}
+	caps := InferDiscoveredCapabilities(account, []string{
+		"antigravity/gemini-3.6-flash-high",
+		"antigravity/gpt-oss-120b-medium",
+		"antigravity/gemini-3.5-flash-extra-low",
+	})
+	byModel := make(map[string]ChannelCapability, len(caps))
+	for _, capability := range caps {
+		byModel[capability.Model] = capability
+	}
+	for model, effort := range map[string]string{
+		"gemini-3.6-flash": "high",
+		"gpt-oss-120b":     "medium",
+		"gemini-3.5-flash": "low",
+	} {
+		capability, ok := byModel[model]
+		if !ok || !containsString(capability.ReasoningEfforts, effort) {
+			t.Fatalf("model %q was not normalized with effort %q: %+v", model, effort, capability)
+		}
 	}
 }
 

@@ -146,7 +146,11 @@ func modelMatchesDiscoveryScope(scope, model string) bool {
 	case "gemini":
 		return strings.Contains(normalized, "gemini") && !strings.HasPrefix(normalized, "antigravity/")
 	case "codex":
-		return isCodexModelID(normalized)
+		// CLIProxy's shared /models endpoint can include Antigravity's
+		// unqualified gpt-oss entry alongside the real Codex catalog. It is
+		// not safe to let a Codex-scoped account claim that model: doing so
+		// merges two different upstreams into one picker entry.
+		return !strings.HasPrefix(normalized, "gpt-oss-") && isCodexModelID(normalized)
 	default:
 		return true
 	}
@@ -168,18 +172,40 @@ func inferGenericDiscoveredCapability(_ Account, upstreamModel string) (string, 
 		logicalModel = strings.TrimSpace(upstreamModel[len("claude-code/"):])
 	case strings.HasPrefix(normalized, "antigravity/"):
 		logicalModel = strings.TrimSpace(upstreamModel[len("antigravity/"):])
-		if strings.HasSuffix(strings.ToLower(logicalModel), "-thinking") {
-			logicalModel = logicalModel[:len(logicalModel)-len("-thinking")]
-			efforts = []string{"high"}
-		}
 	case strings.Contains(normalized, "gemini") && strings.HasSuffix(normalized, "-thinking"):
 		logicalModel = upstreamModel[:len(upstreamModel)-len("-thinking")]
 		efforts = []string{"high"}
+	}
+	if base, effort, ok := stripReasoningSuffix(logicalModel); ok {
+		logicalModel = base
+		efforts = []string{effort}
 	}
 	if logicalModel == "" {
 		return "", nil
 	}
 	return logicalModel, efforts
+}
+
+func stripReasoningSuffix(model string) (string, string, bool) {
+	value := strings.TrimSpace(model)
+	normalized := strings.ToLower(value)
+	for _, item := range []struct{ suffix, effort string }{
+		{suffix: "-extra-low", effort: "low"},
+		{suffix: "-minimal", effort: "minimal"},
+		{suffix: "-medium", effort: "medium"},
+		{suffix: "-thinking", effort: "high"},
+		{suffix: "-high", effort: "high"},
+		{suffix: "-xhigh", effort: "xhigh"},
+		{suffix: "-ultra", effort: "ultra"},
+		{suffix: "-max", effort: "max"},
+		{suffix: "-low", effort: "low"},
+		{suffix: "-none", effort: "none"},
+	} {
+		if strings.HasSuffix(normalized, item.suffix) && len(value) > len(item.suffix) {
+			return value[:len(value)-len(item.suffix)], item.effort, true
+		}
+	}
+	return value, "", false
 }
 
 func normalizeDiscoveredReasoning(values []string) []string {

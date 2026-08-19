@@ -76,6 +76,34 @@ func TestRequestLogRotatesWithinBound(t *testing.T) {
 	}
 }
 
+func TestLoadLatestRequestRecordAcrossBackups(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "request.log")
+	older := RequestRecord{Time: "2026-08-15T10:00:00Z", RequestID: "older", Status: 200}
+	newer := RequestRecord{Time: "2026-08-17T10:00:00Z", RequestID: "newer", Status: 503}
+	olderJSON, err := json.Marshal(older)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerJSON, err := json.Marshal(newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(append([]byte("not-json\n"), olderJSON...), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".1", append(newerJSON, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadLatestRequestRecord(path, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.RequestID != newer.RequestID {
+		t.Fatalf("latest=%+v want %q", got, newer.RequestID)
+	}
+}
+
 type ioNopReadCloser struct{ *strings.Reader }
 
 func (ioNopReadCloser) Close() error { return nil }

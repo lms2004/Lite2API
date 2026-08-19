@@ -143,7 +143,12 @@
     const setup = $("clientSetup");
     if (!card || !setup) return;
     const visible = !card.hidden && Boolean(secret);
-    setup.hidden = !visible;
+    // Keep the command generator available on the keys page. Existing keys
+    // are intentionally shown with a placeholder because their plaintext is
+    // never recoverable; a newly-created key is injected automatically.
+    setup.hidden = false;
+    setup.classList.toggle("has-secret", visible);
+    if (typeof window.renderClientSetup === "function") window.renderClientSetup();
     if (visible && !state.createdSecretVisible) {
       state.createdSecretVisible = true;
       closeKeyDialog();

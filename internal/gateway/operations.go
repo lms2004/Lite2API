@@ -7,8 +7,6 @@ import (
 	"github.com/lms2004/lite2api/internal/config"
 )
 
-const operationsWindow = 5 * time.Minute
-
 type HealthState string
 
 const (
@@ -24,6 +22,7 @@ type WindowSnapshot struct {
 	Successful      int      `json:"successful"`
 	SuccessRate     *float64 `json:"success_rate"`
 	P95LatencyMS    *int64   `json:"p95_latency_ms"`
+	ObservedAt      string   `json:"observed_at,omitempty"`
 }
 
 type CapacitySnapshot struct {
@@ -60,16 +59,19 @@ func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []Accoun
 		accountByID[account.ID] = account
 	}
 
-	windowRows := recentWithin(stats.Recent, now, operationsWindow)
+	// Health metrics intentionally use the latest real request retained by the
+	// gateway, regardless of its age. A quiet installation should not become
+	// unknown merely because the last verified request was days ago.
+	requestRows := validOperationRecords(stats.Recent, now)
 	routes := make([]RouteHealthSnapshot, 0, len(cfg.Routes))
 	for alias, route := range cfg.Routes {
-		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, windowRows))
+		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, requestRows))
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Alias < routes[j].Alias })
 
 	result := OperationsSnapshot{
 		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
-		Window:      summarizeWindow(windowRows),
+		Window:      summarizeLatest(requestRows),
 		Capacity:    summarizeCapacity(accounts, stats.Active),
 		Routes:      routes,
 	}
@@ -77,12 +79,11 @@ func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []Accoun
 	return result
 }
 
-func recentWithin(records []RequestRecord, now time.Time, duration time.Duration) []RequestRecord {
-	cutoff := now.Add(-duration)
+func validOperationRecords(records []RequestRecord, now time.Time) []RequestRecord {
 	result := make([]RequestRecord, 0, len(records))
 	for _, record := range records {
 		observed, err := time.Parse(time.RFC3339Nano, record.Time)
-		if err != nil || observed.Before(cutoff) || observed.After(now.Add(time.Minute)) {
+		if err != nil || observed.After(now.Add(time.Minute)) {
 			continue
 		}
 		result = append(result, record)
@@ -90,12 +91,33 @@ func recentWithin(records []RequestRecord, now time.Time, duration time.Duration
 	return result
 }
 
-func summarizeWindow(records []RequestRecord) WindowSnapshot {
-	result := WindowSnapshot{DurationSeconds: int64(operationsWindow.Seconds()), Samples: len(records)}
+func latestOperationRecords(records []RequestRecord) []RequestRecord {
+	var latest RequestRecord
+	var latestAt time.Time
+	found := false
+	for _, record := range records {
+		observed, err := time.Parse(time.RFC3339Nano, record.Time)
+		if err != nil {
+			continue
+		}
+		if !found || observed.After(latestAt) {
+			latest, latestAt, found = record, observed, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return []RequestRecord{latest}
+}
+
+func summarizeLatest(records []RequestRecord) WindowSnapshot {
+	records = latestOperationRecords(records)
+	result := WindowSnapshot{Samples: len(records)}
 	if len(records) == 0 {
 		return result
 	}
-	latencies := make([]int64, 0, len(records))
+	result.ObservedAt = records[0].Time
+	latencies := make([]int64, 0, 1)
 	for _, record := range records {
 		if record.Status >= 200 && record.Status < 400 {
 			result.Successful++
@@ -150,19 +172,19 @@ func routeHealthSnapshot(alias string, route config.Route, configured []config.A
 		if !routeTargetCompatible(route, configuredAccount, id) || !account.Enabled || account.CircuitOpenUntil != "" {
 			continue
 		}
-		accountRows := filterRecords(records, alias, id)
+		accountRows := latestOperationRecords(filterRecords(records, alias, id))
 		if len(accountRows) == 0 {
 			result.UnknownTargets++
 			continue
 		}
-		accountWindow := summarizeWindow(accountRows)
+		accountWindow := summarizeLatest(accountRows)
 		if accountWindow.Successful == accountWindow.Samples {
 			result.ReadyTargets++
 		} else {
 			result.DegradedTargets++
 		}
 	}
-	result.Window = summarizeWindow(filterRecords(records, alias, ""))
+	result.Window = summarizeLatest(filterRecords(records, alias, ""))
 	unavailableTargets := result.Targets - result.ReadyTargets - result.DegradedTargets - result.UnknownTargets
 	switch {
 	case result.Targets == 0:
@@ -172,17 +194,17 @@ func routeHealthSnapshot(alias string, route config.Route, configured []config.A
 	case result.ReadyTargets == 0 && result.DegradedTargets == 0 && result.UnknownTargets == 0:
 		result.State, result.Reason = HealthUnavailable, "没有可用目标"
 	case result.DegradedTargets > 0:
-		result.State, result.Reason = HealthDegraded, "最近请求存在失败"
+		result.State, result.Reason = HealthDegraded, "最近真实请求存在失败"
 	case result.ReadyTargets > 0 && unavailableTargets > 0:
 		result.State, result.Reason = HealthDegraded, "部分目标不可用"
 	case result.ReadyTargets > 0 && result.Window.Samples > 0 && result.Window.Successful < result.Window.Samples:
-		result.State, result.Reason = HealthDegraded, "窗口内存在失败请求"
+		result.State, result.Reason = HealthDegraded, "最近真实请求失败"
 	case result.ReadyTargets > 0:
-		result.State, result.Reason = HealthReady, "最近请求已验证"
+		result.State, result.Reason = HealthReady, "最近真实请求已验证"
 	case unavailableTargets > 0:
 		result.State, result.Reason = HealthDegraded, "可用性未知且部分目标不可用"
 	default:
-		result.State, result.Reason = HealthUnknown, "尚无最近请求样本"
+		result.State, result.Reason = HealthUnknown, "尚无真实请求样本"
 	}
 	return result
 }
@@ -250,7 +272,7 @@ func overallHealth(routes []RouteHealthSnapshot) (HealthState, string) {
 		return HealthDegraded, "至少一条模型路由降级"
 	}
 	if unknown {
-		return HealthUnknown, "路由已配置，等待最近请求验证"
+		return HealthUnknown, "路由已配置，等待最近真实请求验证"
 	}
-	return HealthReady, "所有模型路由均已由最近请求验证"
+	return HealthReady, "所有模型路由均已由最近真实请求验证"
 }

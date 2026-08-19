@@ -274,6 +274,25 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 	return credentials, nil
 }
 
+// uploadOAuthAuthFile pushes a raw credential bundle to the CLIProxy pool over
+// the loopback management channel. CLIProxy stores it as name (which must end in
+// .json); a bundle for an existing file name overwrites it, so uploads are
+// idempotent. The bundle is JSON-encoded as the request body and CLIProxy takes
+// the non-multipart branch of POST /v0/management/auth-files.
+func uploadOAuthAuthFile(ctx context.Context, name string, bundle any) error {
+	var ack struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := callOAuthAdapter(ctx, http.MethodPost, "auth-files", url.Values{"name": []string{name}}, bundle, &ack); err != nil {
+		return err
+	}
+	if ack.Error != "" {
+		return fmt.Errorf("OAuth adapter rejected auth-file %q: %s", name, ack.Error)
+	}
+	return nil
+}
+
 func normalizeOAuthProvider(value string) string {
 	switch value = strings.ToLower(strings.TrimSpace(value)); value {
 	case "claude":

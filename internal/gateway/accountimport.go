@@ -1,10 +1,12 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +82,9 @@ type AccountImportResult struct {
 	AccountUpdated int                  `json:"account_updated"`
 	AccountSkipped int                  `json:"account_skipped"`
 	AccountFailed  int                  `json:"account_failed"`
+	OAuthImported  int                  `json:"oauth_imported"`
+	OAuthSkipped   int                  `json:"oauth_skipped"`
+	OAuthFailed    int                  `json:"oauth_failed"`
 	Applied        bool                 `json:"applied"`
 	SourceFormat   string               `json:"source_format"`
 	Errors         []AccountImportError `json:"errors,omitempty"`
@@ -94,7 +99,7 @@ type AccountImportError struct {
 	Message   string `json:"message"`
 }
 
-func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportResult, error) {
+func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportRequest) (AccountImportResult, error) {
 	result := AccountImportResult{SourceFormat: normalizedImportType(request.Data.Type)}
 	if err := validateAccountImportHeader(request.Data); err != nil {
 		return result, err
@@ -110,7 +115,14 @@ func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportRes
 	proxyURLs := validateImportProxies(request.Data.Proxies, &result)
 	candidate := cloneConfig(g.state.Load().cfg)
 	seen := make(map[string]struct{}, len(request.Data.Accounts))
+	oauthProviders := make(map[string]struct{})
 	for index, item := range request.Data.Accounts {
+		// OAuth/cookie exports never become upstream API-key channels; their raw
+		// token bundle goes to the isolated CLIProxy pool instead.
+		if item.isOAuthImportItem() {
+			g.importOAuthItem(ctx, index, item, request.DryRun, &result, oauthProviders)
+			continue
+		}
 		account, err := item.toAccount(index, proxyURLs)
 		if err != nil {
 			result.addError(index, item.ID, item.Name, err)
@@ -149,14 +161,61 @@ func (g *Gateway) ImportAccounts(request AccountImportRequest) (AccountImportRes
 			result.AccountCreated++
 		}
 	}
-	if request.DryRun || result.AccountCreated+result.AccountUpdated == 0 {
+	if request.DryRun {
 		return result, nil
 	}
-	if err := g.saveAndReload(candidate); err != nil {
-		return result, fmt.Errorf("apply account import: %w", err)
+	if result.AccountCreated+result.AccountUpdated > 0 {
+		if err := g.saveAndReload(candidate); err != nil {
+			return result, fmt.Errorf("apply account import: %w", err)
+		}
+		result.Applied = true
 	}
-	result.Applied = true
+	// Guarantee the shared CLIProxy OAuth pool account exists for every provider
+	// whose credentials were just uploaded. This is best-effort: the auth-files
+	// are already stored, so a pool-account error is surfaced without failing the
+	// whole import. Sorted for deterministic behaviour across runs.
+	if len(oauthProviders) > 0 {
+		providers := make([]string, 0, len(oauthProviders))
+		for provider := range oauthProviders {
+			providers = append(providers, provider)
+		}
+		sort.Strings(providers)
+		for _, provider := range providers {
+			if _, err := g.ensureOAuthPoolAccount(ctx, provider); err != nil {
+				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: err.Error()})
+				continue
+			}
+			result.Applied = true
+		}
+	}
 	return result, nil
+}
+
+// importOAuthItem maps a Sub2API OAuth account to a CLIProxy auth-file and, on a
+// live run, uploads it over the loopback management channel. Successful uploads
+// record their provider so the shared pool account can be ensured afterwards.
+func (g *Gateway) importOAuthItem(ctx context.Context, index int, item AccountImportItem, dryRun bool, result *AccountImportResult, providers map[string]struct{}) {
+	provider, name, bundle, err := item.buildOAuthAuthFile(index)
+	if err != nil {
+		if errors.Is(err, errOAuthPlatformNotPooled) {
+			result.OAuthSkipped++
+		} else {
+			result.OAuthFailed++
+		}
+		result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Index: index, ID: item.ID, Name: item.Name, Message: err.Error()})
+		return
+	}
+	if dryRun {
+		result.OAuthImported++
+		return
+	}
+	if err := uploadOAuthAuthFile(ctx, name, bundle); err != nil {
+		result.OAuthFailed++
+		result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Index: index, ID: item.ID, Name: item.Name, Message: err.Error()})
+		return
+	}
+	result.OAuthImported++
+	providers[provider] = struct{}{}
 }
 
 func (r *AccountImportResult) addError(index int, id, name string, err error) {

@@ -83,6 +83,10 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
 		`.key-setting-row`,
+		`Native v8`,
+		`--v8-caret`,
+		`appearance:none!important`,
+		`id="resultOAuthImported"`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -139,6 +143,9 @@ func TestNativeLayoutIsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
 	}
 	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
 		t.Fatal("key creation must be progressive disclosure, not a permanent dashboard block")
+	}
+	if strings.Contains(page, `<section id="clientSetup" class="client-setup" hidden>`) {
+		t.Fatal("client setup commands must remain available before a new key is created")
 	}
 	if !strings.Contains(page, `id="v6KeyList"`) || !strings.Contains(page, `id="v6ClientBaseURL"`) {
 		t.Fatal("client page must expose the useful endpoint and settings-like key list")

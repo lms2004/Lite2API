@@ -56,6 +56,16 @@ func New(configPath string) (*Gateway, error) {
 		return nil, err
 	}
 	state := g.state.Load()
+	if records, err := loadRequestRecords(resolveRequestLogPath(configPath, state.cfg.Server.RequestLogPath), state.cfg.Server.RequestLogBackups); err != nil {
+		slog.Warn("latest request baseline unavailable", "error", err)
+	} else {
+		// Restore request observations for health/readiness and historical trend
+		// rendering. Cumulative counters intentionally start at this process
+		// lifetime and are not reconstructed from the log.
+		for _, record := range records {
+			g.stats.Record(record)
+		}
+	}
 	keyPath := ResolveClientKeysPath(configPath, state.cfg.Server.ClientKeysPath)
 	clientKeys, err := NewClientKeyStore(keyPath)
 	if err != nil {

@@ -67,6 +67,7 @@ func TestParseTrendRange(t *testing.T) {
 		{"24h", 24 * time.Hour},
 		{"3d", 3 * 24 * time.Hour},
 		{"7d", 7 * 24 * time.Hour},
+		{"all", 7 * 24 * time.Hour},
 	} {
 		got, err := parseTrendRange(test.value)
 		if err != nil || got != test.want {

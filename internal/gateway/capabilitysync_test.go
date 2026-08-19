@@ -126,3 +126,50 @@ func TestMergeSyncedCapabilitiesEnrichesExistingReasoning(t *testing.T) {
 		}
 	}
 }
+
+func TestReconcileDiscoveredCapabilitiesMigratesStaleLogicalName(t *testing.T) {
+	existing := []config.ChannelCapability{{
+		Model: "gpt-oss-120b", UpstreamModel: "gpt-5.3-codex-spark", ReasoningEfforts: []string{"auto", "medium"},
+	}}
+	inferred := []config.ChannelCapability{{
+		Model: "gpt-5.3-codex-spark", UpstreamModel: "gpt-5.3-codex-spark", ReasoningEfforts: []string{"auto"},
+	}}
+	got, migrations := reconcileDiscoveredCapabilities(existing, inferred)
+	if len(got) != 1 || got[0].Model != "gpt-5.3-codex-spark" || got[0].UpstreamModel != "gpt-5.3-codex-spark" {
+		t.Fatalf("reconciled capabilities=%+v", got)
+	}
+	if !containsGatewayCapabilityEffort(got[0].ReasoningEfforts, "medium") {
+		t.Fatalf("reconciliation dropped existing reasoning levels: %+v", got[0].ReasoningEfforts)
+	}
+	if len(migrations) != 1 || migrations[0].From != "gpt-oss-120b" || migrations[0].To != "gpt-5.3-codex-spark" {
+		t.Fatalf("migrations=%+v", migrations)
+	}
+}
+
+func TestApplyDiscoveredCapabilityMigrationsKeepsRouteAlias(t *testing.T) {
+	cfg := config.Config{
+		Accounts: []config.Account{{
+			ID: "cliproxy-codex", Capabilities: []config.ChannelCapability{{
+				Model: "gpt-5.3-codex-spark", UpstreamModel: "gpt-5.3-codex-spark", ReasoningEfforts: []string{"auto", "medium"},
+			}}, Models: []string{"gpt-5.3-codex-spark"},
+		}},
+		Routes: map[string]config.Route{
+			"gpt": {Model: "gpt-oss-120b", ReasoningEffort: "medium", Targets: []config.RouteTarget{{Account: "cliproxy-codex"}}},
+		},
+	}
+	applyDiscoveredCapabilityMigrations(&cfg, []discoveredCapabilityMigration{{
+		AccountID: "cliproxy-codex", From: "gpt-oss-120b", To: "gpt-5.3-codex-spark",
+	}})
+	if got := cfg.Routes["gpt"].Model; got != "gpt-5.3-codex-spark" {
+		t.Fatalf("route model=%q", got)
+	}
+}
+
+func containsGatewayCapabilityEffort(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
