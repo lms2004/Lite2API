@@ -1,0 +1,48 @@
+/* Native v10 dialog cascade repair.
+   Native v5 declared `dialog:not(.v5-key-dialog)` with higher specificity, so
+   the v10 class-only width silently collapsed every three-column workflow to
+   820px. Keep the old low-frequency dialogs untouched and explicitly size the
+   v10 product flows. */
+
+dialog.v10-onboarding-dialog,
+dialog.v10-manual-account-dialog,
+dialog.v10-import-dialog{
+  width:min(1240px,calc(100vw - 64px))!important;
+  max-width:1240px!important;
+  min-width:min(1040px,calc(100vw - 64px));
+}
+
+dialog.v10-web-dialog{
+  width:min(760px,calc(100vw - 64px))!important;
+  max-width:760px!important;
+}
+
+.v10-onboarding-body{
+  grid-template-columns:270px minmax(430px,1fr) 240px;
+}
+.v10-manual-body{
+  grid-template-columns:245px minmax(470px,1fr) 255px;
+}
+.v10-import-body{
+  grid-template-columns:minmax(330px,1.2fr) 255px minmax(330px,1fr);
+}
+
+@media(max-width:1160px){
+  dialog.v10-onboarding-dialog,
+  dialog.v10-manual-account-dialog,
+  dialog.v10-import-dialog{
+    width:calc(100vw - 32px)!important;
+    min-width:0;
+  }
+}
+
+@media(max-width:700px){
+  dialog.v10-onboarding-dialog,
+  dialog.v10-manual-account-dialog,
+  dialog.v10-import-dialog,
+  dialog.v10-web-dialog{
+    width:100vw!important;
+    max-width:none!important;
+    min-width:0;
+  }
+}
