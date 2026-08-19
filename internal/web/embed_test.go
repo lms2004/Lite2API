@@ -26,15 +26,15 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="view-adapters"`,
 		`id="healthVerdict"`,
 		`id="monitorMetrics"`,
-		`class="overview-hero grouped-surface"`,
-		`class="native-section grouped-section route-summary-section"`,
+		`class="v9-command-center"`,
+		`class="v9-ops-grid"`,
 		`id="routeHealthSummary"`,
 		`id="incidentFeed"`,
 		`id="requestSearch"`,
 		`id="requestChart"`,
 		`id="latencyChart"`,
 		`id="v5RouteList"`,
-		`class="route-workspace"`,
+		`class="v9-route-studio"`,
 		`id="routeRows"`,
 		`id="routeSaveBtn"`,
 		`id="routeChangeSummary"`,
@@ -44,6 +44,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="oauthAccountStatus"`,
 		`id="v5SourceAccounts"`,
 		`id="v5SourceConnections"`,
+		`class="v9-source-studio"`,
 		`id="selectAllAccounts"`,
 		`<tbody id="accounts">`,
 		`id="v5KeyDialog"`,
@@ -79,13 +80,17 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function runExport(`,
 		`function targetOperationalState(`,
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.18-v7'`,
+		`const UI_BUILD='2026.08.19-v9'`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
 		`.key-setting-row`,
 		`Native v8`,
 		`--v8-caret`,
-		`appearance:none!important`,
+		`Native v9`,
+		`--v9-radius`,
+		`.v9-command-center`,
+		`.v9-route-studio`,
+		`.v9-source-studio`,
 		`id="resultOAuthImported"`,
 	}
 	for _, value := range required {
@@ -106,7 +111,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
-			t.Errorf("obsolete or unsafe UI surface leaked into native v7: %q", value)
+			t.Errorf("obsolete or unsafe UI surface leaked into native v9: %q", value)
 		}
 	}
 
@@ -115,7 +120,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		t.Error("all styles must remain inside the document head")
 	}
 	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("native v7 must expose one final style element")
+		t.Error("native v9 must expose one final style element")
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
@@ -138,8 +143,11 @@ func TestNativeLayoutIsCompileTimeMarkupNotRuntimeDashboardMove(t *testing.T) {
 	if master < 0 || detail < 0 || master > detail {
 		t.Fatal("route master list must exist before the route detail in final HTML")
 	}
-	if !strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics" hidden>`) {
-		t.Fatal("upstream dashboard metrics must remain available to business rendering but hidden from the primary layout")
+	if !strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics">`) {
+		t.Fatal("upstream capacity metrics must be visible in the primary source layout")
+	}
+	if strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics" hidden>`) {
+		t.Fatal("native v9 must not hide upstream capacity metrics")
 	}
 	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
 		t.Fatal("key creation must be progressive disclosure, not a permanent dashboard block")
