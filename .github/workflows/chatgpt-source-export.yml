@@ -23,13 +23,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rev-parse HEAD > SOURCE_COMMIT.txt
-          tar --exclude=.git -czf lite2api-source.tar.gz .
+          git rev-parse HEAD > "$RUNNER_TEMP/SOURCE_COMMIT.txt"
+          tar --exclude=.git -czf "$RUNNER_TEMP/lite2api-source.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: lite2api-canonical-source
           retention-days: 1
           if-no-files-found: error
           path: |
-            lite2api-source.tar.gz
-            SOURCE_COMMIT.txt
+            ${{ runner.temp }}/lite2api-source.tar.gz
+            ${{ runner.temp }}/SOURCE_COMMIT.txt
