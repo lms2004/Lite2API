@@ -44,6 +44,9 @@ var nativeV9JS []byte
 //go:embed native-v10.js
 var nativeV10JS []byte
 
+//go:embed native-v10-quota.js
+var nativeV10QuotaJS []byte
+
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
 
@@ -83,7 +86,7 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f4f4f6">`), 1)
 
 	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 
