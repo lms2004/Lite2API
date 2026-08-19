@@ -1,0 +1,25 @@
+2026-08-19T02:41:35.017Z [phase] login through BrowserContext request API
+2026-08-19T02:41:35.029Z [login] 200 {"csrf":"JIGA6EmuDoeb876clJIoVYyJGe972Wf_","expires_in":1800,"ok":true}
+
+2026-08-19T02:41:35.030Z [phase] open live admin page
+2026-08-19T02:41:35.066Z [console:error] Refused to load the image 'data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%238a8a8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E' because it violates the following Content Security Policy directive: "default-src 'self'". Note that 'img-src' was not explicitly set, so 'default-src' is used as a fallback.
+
+2026-08-19T02:41:35.067Z [console:error] Refused to load the image 'data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%238a8a8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E' because it violates the following Content Security Policy directive: "default-src 'self'". Note that 'img-src' was not explicitly set, so 'default-src' is used as a fallback.
+
+2026-08-19T02:41:35.135Z [response] 200 http://127.0.0.1:45679/admin/api/session
+2026-08-19T02:41:35.137Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:41:35.177Z [response] 200 http://127.0.0.1:45679/admin/api/trends?range=all
+2026-08-19T02:41:40.150Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:41:45.156Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:41:50.163Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:41:55.168Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:42:00.175Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:42:05.180Z [response] 200 http://127.0.0.1:45679/admin/api/state
+2026-08-19T02:42:05.184Z [response] 200 http://127.0.0.1:45679/admin/api/trends?range=all
+2026-08-19T02:42:05.209Z [fatal] page.waitForFunction: Timeout 30000ms exceeded.
+    at /home/runner/work/_temp/lite2api-browser/capture.js:51:16
+2026-08-19T02:42:05.229Z [console:error] Refused to load the image 'data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%238a8a8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E' because it violates the following Content Security Policy directive: "default-src 'self'". Note that 'img-src' was not explicitly set, so 'default-src' is used as a fallback.
+
+2026-08-19T02:42:05.230Z [console:error] Refused to load the image 'data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%238a8a8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.25 4.75 6 7.5l2.75-2.75'/%3E%3C/svg%3E' because it violates the following Content Security Policy directive: "default-src 'self'". Note that 'img-src' was not explicitly set, so 'default-src' is used as a fallback.
+
+2026-08-19T02:42:05.337Z [result] failure screenshot captured

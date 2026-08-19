@@ -1,0 +1,4 @@
+?   	github.com/lms2004/lite2api/cmd/lite2api	[no test files]
+ok  	github.com/lms2004/lite2api/internal/config	0.155s
+ok  	github.com/lms2004/lite2api/internal/gateway	0.309s
+ok  	github.com/lms2004/lite2api/internal/web	0.006s

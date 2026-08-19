@@ -1,0 +1,1 @@
+{"id": "chatcmpl-lite2api-preview", "object": "chat.completion", "created": 1787106923, "model": "deepseek-v4-flash", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Lite2API GitHub Runner deployment verified."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}}
