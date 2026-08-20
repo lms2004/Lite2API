@@ -29,12 +29,15 @@ function trendFixture() {
   };
 }
 
+let browser;
+
 (async () => {
-  const browser = await chromium.launch({
+  browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROME,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
   });
+  try {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     deviceScaleFactor: 1,
@@ -172,9 +175,11 @@ function trendFixture() {
 
   fs.writeFileSync(path.join(output, 'rendered-admin.html'), await page.content());
   record('[result] every Native v10 product workflow passed');
-  await browser.close();
+  } finally {
+    await browser?.close();
+  }
 })().catch(error => {
   record(`[fatal] ${error.stack || error.message || error}`);
   console.error(error.stack || error);
-  process.exit(1);
+  process.exitCode = 1;
 });

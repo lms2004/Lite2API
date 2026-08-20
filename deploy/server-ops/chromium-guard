@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly REAL_CHROMIUM=/snap/bin/chromium
+readonly LOCK_FILE=/run/lock/chromium-headless.lock
+readonly LOCK_WAIT_SECONDS=15
+readonly RUNTIME_LIMIT_SECONDS=180
+
+if [[ ! -x "$REAL_CHROMIUM" ]]; then
+  echo "chromium-guard: real Chromium is unavailable at $REAL_CHROMIUM" >&2
+  exit 127
+fi
+
+headless=false
+for argument in "$@"; do
+  case "$argument" in
+    --headless|--headless=*)
+      headless=true
+      break
+      ;;
+  esac
+done
+
+if [[ "$headless" != true ]]; then
+  exec "$REAL_CHROMIUM" "$@"
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock --exclusive --timeout "$LOCK_WAIT_SECONDS" 9; then
+  logger -p user.warning -t chromium-guard \
+    "rejected concurrent headless launch pid=$$ after ${LOCK_WAIT_SECONDS}s"
+  echo "chromium-guard: another headless browser is active; concurrent launch rejected" >&2
+  exit 75
+fi
+
+logger -p user.notice -t chromium-guard \
+  "admitted headless launch pid=$$ timeout=${RUNTIME_LIMIT_SECONDS}s nice=10 ionice=idle"
+
+set +e
+systemd-run --user --scope --quiet --collect --slice=app.slice \
+  timeout --signal=TERM --kill-after=10s "$RUNTIME_LIMIT_SECONDS" \
+  nice -n 10 ionice --class idle "$REAL_CHROMIUM" "$@"
+status=$?
+set -e
+
+if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
+  logger -p user.warning -t chromium-guard \
+    "terminated headless launch pid=$$ status=$status after ${RUNTIME_LIMIT_SECONDS}s"
+  echo "chromium-guard: headless browser exceeded ${RUNTIME_LIMIT_SECONDS}s and was terminated" >&2
+fi
+
+exit "$status"

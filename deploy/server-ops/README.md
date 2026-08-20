@@ -111,6 +111,30 @@ back automatically if the service does not start.
 - Congestion control is `bbr` with the `fq` queue discipline.
 - A 1 GiB `/swapfile` is enabled and listed in `/etc/fstab`.
 
+## Browser workload guard
+
+This small production host must not run concurrent Chromium process trees.
+`/usr/local/bin/chromium` and `/usr/local/bin/chromium-browser` are installed
+from `chromium-guard`: non-headless use passes through, while headless runs are
+serialized, wait at most 15 seconds for the lock, and have a 180-second hard
+runtime limit.
+
+Snap Chromium scopes run under the root user manager's `app.slice`. The
+`app-slice-resource-guard.conf` drop-in limits that slice to one CPU, 384 MiB
+memory, 128 MiB swap, and 256 tasks. The command wrapper also runs Chromium at
+`nice=10` and idle I/O priority. Production services remain in `system.slice`
+and are not charged to these limits.
+
+Verify the guard with:
+
+```bash
+command -v chromium
+systemctl --user show app.slice \
+  -p CPUQuotaPerSecUSec -p MemoryHigh -p MemoryMax -p MemorySwapMax \
+  -p TasksMax
+journalctl -t chromium-guard --since today
+```
+
 ## Known application state
 
 Lite2API has three enabled logical routing profiles backed by the local

@@ -1,7 +1,7 @@
 GO ?= go
 GO_ENV := GOTOOLCHAIN=local
 
-.PHONY: build test test-docker toolchain run
+.PHONY: build test test-docker toolchain run capture-admin
 
 toolchain:
 	@$(GO_ENV) $(GO) version
@@ -18,3 +18,6 @@ test-docker:
 
 run:
 	$(GO_ENV) $(GO) run ./cmd/lite2api -config data/config.json
+
+capture-admin:
+	./tools/capture-admin-screenshots.sh
