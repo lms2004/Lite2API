@@ -21,15 +21,16 @@
 
   function storedMode() {
     try {
-      return normalize(localStorage.getItem(STORAGE_KEY));
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored === null ? 'dark' : normalize(stored);
     } catch (_) {
-      return 'system';
+      return 'dark';
     }
   }
 
   function updateThemeColor(resolved) {
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', resolved === 'dark' ? '#171719' : '#f4f4f6');
+    if (meta) meta.setAttribute('content', resolved === 'dark' ? '#071421' : '#f4f7fa');
   }
 
   function applyTheme(mode, persist) {

@@ -2,24 +2,21 @@
 <aside class="sidebar" aria-label="Lite2API 主导航">
   <div class="brand" title="Lite2API">
     <div class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-logo"></use></svg></div>
-    <div class="brand-copy"><strong>Lite2API</strong></div>
+    <div class="brand-copy"><strong>Lite2API</strong><small>个人模型网关</small></div>
   </div>
   <nav class="nav" aria-label="核心导航">
-    <button class="active" data-view="monitor" onclick="showView('monitor')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span><span>用量</span></button>
-    <button data-view="routes" onclick="showView('routes')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-routes"></use></svg></span><span>路由</span></button>
-    <button data-view="accounts" onclick="showView('accounts')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-accounts"></use></svg></span><span>账号</span></button>
-    <button data-view="keys" onclick="showView('keys')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><span>客户端</span></button>
+    <button class="active" data-view="monitor" onclick="showView('monitor')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg></span><span>运行总览</span></button>
+    <button data-view="accounts" onclick="showView('accounts')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-accounts"></use></svg></span><span>账号管理</span></button>
+    <button data-view="keys" onclick="showView('keys')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span><span>API 密钥</span></button>
+    <button data-view="adapters" onclick="showView('adapters')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-adapters"></use></svg></span><span>适配器</span></button>
+    <button data-view="routes" onclick="showView('routes')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-routes"></use></svg></span><span>模型路由</span></button>
+    <button data-view="prompt-test" onclick="showView('prompt-test')"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg></span><span>注入检测</span></button>
   </nav>
-  <details class="diagnostics-nav">
-    <summary>更多</summary>
-    <button data-view="prompt-test" onclick="showView('prompt-test')"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg><span>注入检测</span></button>
-    <button data-view="adapters" onclick="showView('adapters')"><svg class="icon" aria-hidden="true"><use href="#i-adapters"></use></svg><span>适配器</span></button>
-  </details>
-  <div class="sidebar-foot sr-only"><span id="uiBuild">UI build 2026.08.19-v11</span></div>
+  <div class="sidebar-foot"><span>本机管理控制台</span><small id="uiBuild">UI build 2026.08.20-v12</small></div>
 </aside>
 <main class="main">
   <header class="topbar">
-    <div class="topbar-title sr-only"><strong id="viewTitle">用量与额度</strong><span id="viewSubtitle">额度、调用量、速度与渠道质量</span></div>
+    <div class="topbar-title sr-only"><strong id="viewTitle">运行总览</strong><span id="viewSubtitle">额度、调用量、速度与渠道质量</span></div>
     <div class="topbar-tools">
       <div class="theme-control">
         <label class="theme-control-label" for="themeMode">主题</label>

@@ -1,27 +1,68 @@
 <section id="view-monitor" class="view active native-view v10-page v10-usage">
   <header class="v10-page-head">
     <div>
-      <span class="v10-eyebrow">Usage & quota</span>
-      <h1>用量与额度</h1>
-      <p>只看四件事：额度用了多少、调用了多少次、现在有多快、各渠道是否真的可用。</p>
+      <span class="v10-eyebrow">Operations overview</span>
+      <h1>运行总览</h1>
+      <p>先看限制、调用与速度，再处理需要关注的账号和渠道。</p>
     </div>
-    <label class="v10-range">统计范围
-      <select id="chartRange" aria-label="统计与趋势范围">
-        <option value="1h">最近 1 小时</option>
-        <option value="6h">最近 6 小时</option>
-        <option value="24h" selected>最近 24 小时</option>
-        <option value="3d">最近 3 天</option>
-        <option value="7d">最近 7 天</option>
-      </select>
-    </label>
+    <div class="v12-overview-actions">
+      <label class="v10-range">统计范围
+        <select id="chartRange" aria-label="统计与趋势范围">
+          <option value="1h">最近 1 小时</option>
+          <option value="6h">最近 6 小时</option>
+          <option value="24h" selected>最近 24 小时</option>
+          <option value="3d">最近 3 天</option>
+          <option value="7d">最近 7 天</option>
+        </select>
+      </label>
+      <button id="v10TestAllChannels" class="primary" type="button" onclick="v10TestAllChannels()">测试全部渠道</button>
+    </div>
   </header>
 
+  <div class="v12-overview-summary" role="status">
+    <i></i><span id="v12OverviewSummary">正在读取额度和请求趋势…</span>
+  </div>
+
   <section class="v10-kpi-strip" aria-label="所选时间范围的关键指标">
+    <article><span>最紧张额度</span><strong id="v12QuotaUsed">—</strong><small id="v12QuotaContext">正在读取账号额度</small><em id="v12QuotaRemaining"></em></article>
     <article><span>调用次数</span><strong id="v10CallCount">—</strong><small id="v10CallContext">正在读取趋势</small></article>
-    <article><span>成功率</span><strong id="v10SuccessRate">—</strong><small id="v10FailureContext">失败次数尚未计算</small></article>
+    <article><span>成功率</span><strong id="v10SuccessRate">—</strong><small id="v10FailureContext">失败次数尚未计算</small><em id="v12FailoverContext"></em></article>
     <article><span>P95 响应速度</span><strong id="v10P95Latency">—</strong><small id="v10LatencyContext">越低越快</small></article>
-    <article><span>故障切换</span><strong id="v10FailoverCount">—</strong><small>累计自动切换次数</small></article>
   </section>
+
+  <div class="v12-overview-grid">
+    <section class="v10-surface v12-main-trend">
+      <div class="v10-surface-head">
+        <div><span class="v10-eyebrow">Trend</span><h2 id="v12TrendTitle">调用次数</h2><p id="chartWindowLabel">正在读取真实调用趋势</p></div>
+        <div class="v12-metric-tabs" role="tablist" aria-label="趋势指标">
+          <button class="active" type="button" role="tab" aria-selected="true" data-overview-metric="calls">调用</button>
+          <button type="button" role="tab" aria-selected="false" data-overview-metric="latency">P95</button>
+        </div>
+      </div>
+      <div class="v12-chart-stage">
+        <div class="v12-chart-pane active" data-overview-chart="calls">
+          <div class="v12-chart-legend"><span><i class="blue"></i>请求</span><span><i class="bad"></i>失败</span></div>
+          <canvas id="requestChart" role="img" aria-label="调用次数与失败趋势"></canvas>
+        </div>
+        <div class="v12-chart-pane" data-overview-chart="latency" hidden>
+          <div class="v12-chart-legend"><span><i class="blue"></i>P95 响应速度</span><span id="chartWindow">毫秒</span></div>
+          <canvas id="latencyChart" role="img" aria-label="P95 响应速度趋势"></canvas>
+        </div>
+      </div>
+      <div class="v12-chart-foot" id="chartRetention">本地滚动保留 7 天</div>
+    </section>
+
+    <aside class="v10-surface v12-insight-panel" aria-labelledby="v12InsightTitle">
+      <div class="v12-insight-summary">
+        <span class="v10-eyebrow" id="v12InsightRange">所选时间范围</span>
+        <h2 id="v12InsightTitle">正在分析运行状态…</h2>
+        <p>无需先阅读全部请求日志，优先处理下面几项。</p>
+      </div>
+      <div id="v12InsightList" class="v12-insight-list">
+        <div class="v12-insight-empty">正在读取真实账号与请求数据…</div>
+      </div>
+    </aside>
+  </div>
 
   <div class="v10-primary-grid">
     <section class="v10-surface v10-quota-panel">
@@ -35,24 +76,13 @@
     <section class="v10-surface v10-quality-panel">
       <div class="v10-surface-head">
         <div><span class="v10-eyebrow">Quality test</span><h2>渠道质量</h2><p>直连指定账号连续测试 3 次，不经过 fallback。</p></div>
-        <button id="v10TestAllChannels" class="primary" type="button" onclick="v10TestAllChannels()">测试全部</button>
+        <span class="muted">探针会产生极少量真实用量</span>
       </div>
       <div class="v10-quality-head"><span>渠道</span><span>可用性</span><span>速度</span><span>输出</span><span>结论</span><span></span></div>
       <div id="v10QualityRows" class="v10-quality-rows"><div class="v10-empty">正在读取可测试渠道…</div></div>
       <p class="v10-quality-note">质量测试会产生极少量真实模型用量；每个渠道发送 3 次最短回复请求。</p>
     </section>
   </div>
-
-  <section class="v10-surface v10-trend-panel">
-    <div class="v10-surface-head">
-      <div><span class="v10-eyebrow">Trend</span><h2>调用量与速度变化</h2><p id="chartRetention">本地滚动保留 7 天</p></div>
-      <div class="v10-chart-summary"><span id="chartWindowLabel">最近 24 小时</span><span id="chartWindow">P95 延迟</span></div>
-    </div>
-    <div class="v10-chart-grid">
-      <section><div class="chart-head"><strong>调用次数</strong><div class="chart-legend"><span><i class="legend-dot blue"></i>请求</span><span><i class="legend-dot bad"></i>失败</span></div></div><div class="chart-wrap"><canvas id="requestChart" role="img" aria-label="调用次数与失败趋势"></canvas></div></section>
-      <section><div class="chart-head"><strong>P95 响应速度</strong><span class="muted">毫秒</span></div><div class="chart-wrap"><canvas id="latencyChart" role="img" aria-label="P95 响应速度趋势"></canvas></div></section>
-    </div>
-  </section>
 
   <section class="v10-surface v10-channel-usage">
     <div class="v10-surface-head">
@@ -77,5 +107,6 @@
   <div id="monitorMetrics" hidden></div>
   <div id="routeHealthSummary" hidden></div>
   <div id="incidentFeed" hidden></div>
+  <span id="v10FailoverCount" hidden>—</span>
   <p id="chartSummary" class="sr-only" aria-live="polite"></p>
 </section>

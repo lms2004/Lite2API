@@ -35,6 +35,9 @@ var nativeV10DialogPolishCSS []byte
 //go:embed native-theme.css
 var nativeThemeCSS []byte
 
+//go:embed native-v12.css
+var nativeV12CSS []byte
+
 //go:embed native-v5.js
 var nativeV5JS []byte
 
@@ -62,6 +65,9 @@ var nativeV10ProviderMethodsJS []byte
 //go:embed native-theme.js
 var nativeThemeJS []byte
 
+//go:embed native-v12-motion.js
+var nativeV12MotionJS []byte
+
 //go:embed native-account-status.js
 var nativeAccountStatusJS []byte
 
@@ -85,9 +91,9 @@ var nativeV10AccountDialogs []byte
 
 // IndexHTML is the complete self-contained admin page served by Lite2API.
 // Stable gateway handlers remain in the legacy document. Compile-time native
-// markup replaces the task surfaces before embedding. Native v10 makes quota,
+// markup replaces the task surfaces before embedding. Native v12 keeps quota,
 // call volume, speed, channel quality, and provider-specific account onboarding
-// the primary product workflows.
+// the primary product workflows and applies one coherent console design.
 var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
 
 func buildNativeIndexHTML(base []byte) []byte {
@@ -100,11 +106,11 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
 	page = replaceRange(page, []byte(`<dialog id="quickAuthDialog"`), []byte(`<dialog id="exportDialog"`), bytes.TrimSpace(nativeV10AccountDialogs))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.19-v11'`), 1)
-	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#f4f4f6">`), 1)
+	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.20-v12'`), 1)
+	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`), 1)
 
-	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeAccountStatusJS}, []byte("\n"))
+	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS, nativeV12CSS}, []byte("\n"))
+	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeV12MotionJS, nativeAccountStatusJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 

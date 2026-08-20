@@ -77,6 +77,7 @@ jobs:
             internal/web/native-v9-refine.css \
             internal/web/native-v9.js \
             internal/web/native-v10.css \
+            internal/web/native-v12.css \
             internal/web/native-v10.js \
             internal/web/native-v10-account-dialogs.html \
             internal/web/native-v5-shell.html \
@@ -93,6 +94,7 @@ jobs:
           grep -Fq -- 'Native v8' internal/web/native-v8.css
           grep -Fq -- 'Native v9' internal/web/native-v9.css
           grep -Fq -- 'Native v10' internal/web/native-v10.css
+          grep -Fq -- 'Native v12' internal/web/native-v12.css
           grep -Fq -- '.v10-kpi-strip' internal/web/native-v10.css
           grep -Fq -- '.v10-onboarding-body' internal/web/native-v10.css
           grep -Fq -- 'window.Lite2APINativeV10' internal/web/native-v10.js
@@ -113,3 +115,4 @@ jobs:
           node --check internal/web/native-v7.js
           node --check internal/web/native-v9.js
           node --check internal/web/native-v10.js
+          node --check internal/web/native-theme.js

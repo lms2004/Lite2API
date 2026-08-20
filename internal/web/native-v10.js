@@ -138,6 +138,7 @@
     if ($('v10CallContext')) $('v10CallContext').textContent = `${rangeLabel} · ${points.length || recent.length} 个有效样本`;
     if ($('v10SuccessRate')) $('v10SuccessRate').textContent = successRate === null ? '—' : `${successRate.toFixed(2)}%`;
     if ($('v10FailureContext')) $('v10FailureContext').textContent = `${number(sampleFailed)} 次失败`;
+    if ($('v12FailoverContext')) $('v12FailoverContext').textContent = fallbackCalls ? `${number(fallbackCalls)} 次自动切换` : '';
     if ($('v10P95Latency')) $('v10P95Latency').textContent = p95 === null ? '—' : `${number(Math.round(p95))} ms`;
     if ($('v10LatencyContext')) {
       const average = latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null;
@@ -178,6 +179,84 @@
     if (minutes < 60) return `${minutes} 分钟后重置`;
     if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分后重置`;
     return `${Math.floor(minutes / 1440)} 天后重置`;
+  }
+
+  function tightestQuota() {
+    let tightest = null;
+    for (const account of state?.oauth_accounts || []) {
+      for (const window of quotaWindows(account)) {
+        const used = Number(window.used_percentage);
+        if (!Number.isFinite(used)) continue;
+        if (!tightest || used > tightest.used) tightest = { account, window, used };
+      }
+    }
+    return tightest;
+  }
+
+  function overviewChannelGroups() {
+    const groups = new Map();
+    for (const record of recentInRange()) {
+      const id = record.account_id || 'unknown';
+      if (!groups.has(id)) groups.set(id, { id, count: 0, success: 0, latencies: [], models: new Set() });
+      const group = groups.get(id);
+      group.count += 1;
+      if (Number(record.status) >= 200 && Number(record.status) < 400) group.success += 1;
+      const latency = Number(record.latency_ms);
+      if (Number.isFinite(latency)) group.latencies.push(latency);
+      if (record.upstream_model || record.model) group.models.add(record.upstream_model || record.model);
+    }
+    return [...groups.values()].map(group => {
+      const configured = (state?.config?.accounts || []).find(account => account.id === group.id);
+      return {
+        ...group,
+        name: configured?.name || group.id,
+        p95: percentile(group.latencies, .95),
+        rate: group.count ? (group.success / group.count) * 100 : null,
+      };
+    });
+  }
+
+  function syncOverviewStory() {
+    const quota = tightestQuota();
+    const groups = overviewChannelGroups();
+    const total = groups.reduce((sum, group) => sum + group.count, 0);
+    const primary = [...groups].sort((a, b) => b.count - a.count)[0] || null;
+    const slowest = [...groups].filter(group => Number.isFinite(group.p95)).sort((a, b) => b.p95 - a.p95)[0] || null;
+    const rangeLabel = $('chartRange')?.selectedOptions?.[0]?.textContent || '最近 24 小时';
+
+    if ($('v12InsightRange')) $('v12InsightRange').textContent = rangeLabel;
+    if ($('v12QuotaUsed')) $('v12QuotaUsed').textContent = quota ? `${quota.used.toFixed(quota.used % 1 ? 1 : 0)}%` : '—';
+    if ($('v12QuotaContext')) {
+      const meta = quota ? providerMeta(quota.account.provider) : null;
+      const label = quota?.window?.model || quota?.window?.label || quota?.window?.kind || '额度窗口';
+      $('v12QuotaContext').textContent = quota ? `${meta.label} · ${label} · ${quotaReset(quota.window)}` : '暂无可量化额度';
+    }
+    if ($('v12QuotaRemaining')) $('v12QuotaRemaining').textContent = quota ? `剩余 ${Math.max(0, 100 - quota.used).toFixed(0)}%` : '';
+
+    let headline = '当前运行平稳，继续观察调用与速度。';
+    if (quota?.used >= 80 && slowest?.p95 >= 3000) headline = '额度承压，同时有渠道响应偏慢。';
+    else if (quota?.used >= 80) headline = '当前主要限制来自账号额度。';
+    else if (slowest?.p95 >= 3000) headline = '调用可用，但慢请求集中在个别渠道。';
+    else if (total) headline = '调用与速度整体稳定。';
+    if ($('v12InsightTitle')) $('v12InsightTitle').textContent = headline;
+    if ($('v12OverviewSummary')) {
+      const fragments = [];
+      if (quota) fragments.push(`<strong>${escapeHTML(providerMeta(quota.account.provider).label)} 最紧张额度已用 ${quota.used.toFixed(0)}%</strong>`);
+      if (total) fragments.push(`${rangeLabel}共 ${number(total)} 次保留请求`);
+      if (slowest?.p95 != null) fragments.push(`${escapeHTML(slowest.name)} P95 为 ${number(Math.round(slowest.p95))} ms`);
+      $('v12OverviewSummary').innerHTML = fragments.length ? `${fragments.join('；')}。` : '尚无足够的额度或请求样本，页面会在真实数据到达后自动更新。';
+    }
+
+    const insights = [];
+    if (quota) {
+      const meta = providerMeta(quota.account.provider);
+      insights.push({ tone: quota.used >= 95 ? 'bad' : quota.used >= 80 ? 'warn' : 'good', title: `${meta.label} 额度${quota.used >= 80 ? '需要关注' : '仍有余量'}`, detail: `已用 ${quota.used.toFixed(1)}%，${quotaReset(quota.window)}。`, action: '查看账号', click: "showView('accounts')" });
+    }
+    if (slowest) insights.push({ tone: slowest.p95 >= 3000 ? 'bad' : slowest.p95 >= 1500 ? 'warn' : 'good', title: `${slowest.name} ${slowest.p95 >= 1500 ? '响应偏慢' : '速度正常'}`, detail: `P95 ${number(Math.round(slowest.p95))} ms，成功率 ${slowest.rate?.toFixed(1) ?? '—'}%。`, action: '查看质量', click: "document.querySelector('.v10-quality-panel')?.scrollIntoView({behavior:'smooth',block:'start'})" });
+    if (primary) insights.push({ tone: primary.rate != null && primary.rate < 95 ? 'warn' : 'good', title: `${primary.name} 承担 ${total ? Math.round(primary.count / total * 100) : 0}% 调用`, detail: `${number(primary.count)} 次请求，成功率 ${primary.rate?.toFixed(1) ?? '—'}%。`, action: '查看路由', click: "showView('routes')" });
+    if ($('v12InsightList')) $('v12InsightList').innerHTML = insights.length
+      ? insights.slice(0, 3).map(item => `<div class="v12-insight-row ${item.tone}"><i></i><div><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.detail)}</span></div><button type="button" onclick="${item.click}">${item.action}</button></div>`).join('')
+      : '<div class="v12-insight-empty">暂无可分析的真实样本。发起请求或接入可读取额度的 OAuth 账号后，这里会给出处理建议。</div>';
   }
 
   function quotaWindowHTML(window) {
@@ -442,6 +521,7 @@
     syncScheduled = false;
     if (!document.querySelector('.v10-usage')) return;
     syncUsageMetrics();
+    syncOverviewStory();
     syncQuotaBoard();
     syncChannelUsage();
     syncQualityRows();
@@ -482,10 +562,29 @@
     const importResult = $('importResult');
     if (importResult) new MutationObserver(syncImportState).observe(importResult, { attributes: true, childList: true, subtree: true });
     $('chartRange')?.addEventListener('change', scheduleSync);
+    all('[data-overview-metric]').forEach(button => button.addEventListener('click', () => {
+      const metric = button.dataset.overviewMetric;
+      all('[data-overview-metric]').forEach(item => {
+        const active = item === button;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-selected', String(active));
+      });
+      all('[data-overview-chart]').forEach(pane => {
+        const active = pane.dataset.overviewChart === metric;
+        pane.classList.toggle('active', active);
+        pane.hidden = !active;
+      });
+      if ($('v12TrendTitle')) $('v12TrendTitle').textContent = metric === 'latency' ? 'P95 响应速度' : '调用次数';
+      requestAnimationFrame(() => window.drawRequestChart?.());
+    }));
   }
 
   function init() {
     ensureAdditionalTemplates();
+    if ($('chartRange') && typeof chartRange !== 'undefined') {
+      chartRange = $('chartRange').value;
+      if (typeof trendLoadedRange !== 'undefined') trendLoadedRange = '';
+    }
     installWrappers();
     installObservers();
     selectOnboardingProvider('codex');

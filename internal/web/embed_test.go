@@ -97,7 +97,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function runExport(`,
 		`function targetOperationalState(`,
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.19-v11'`,
+		`const UI_BUILD='2026.08.20-v12'`,
 		`window.Lite2APIAccountStatus`,
 		`account-toggle`,
 		`/oauth/accounts/status`,
@@ -111,8 +111,21 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`.v9-route-studio`,
 		`Native v10`,
 		`.v10-kpi-strip`,
+		`id="v12QuotaUsed"`,
+		`id="v12OverviewSummary"`,
+		`id="v12InsightList"`,
+		`data-overview-metric="calls"`,
+		`data-overview-metric="latency"`,
 		`.v10-onboarding-body`,
 		`.v10-import-body`,
+		`Native v12`,
+		`--v12-sidebar-w`,
+		`window.Lite2APINativeV12Motion`,
+		`function monotonePath(`,
+		`prefers-reduced-motion: reduce`,
+		`const requestedView=location.hash.slice(1)`,
+		`data-view="adapters"`,
+		`data-view="prompt-test"`,
 		`v10TestAccountConnection`,
 		`v10TestAllChannels`,
 	}
@@ -131,6 +144,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`class="route-chain-explain"`,
 		`id="token"`,
 		`placeholder="管理员 Token"`,
+		`seenBuild===UI_BUILD&&`,
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
