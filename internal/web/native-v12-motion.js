@@ -10,6 +10,26 @@
   const cssColor = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   const easeOut = value => 1 - Math.pow(1 - value, 3);
 
+  function smoothCountSeries(values) {
+    if (!values.some(finite)) return values;
+    const weights = [1, 2, 3, 2, 1], radius = 2;
+    const smoothed = values.map((_, index) => {
+      let weighted = 0, weightTotal = 0;
+      for (let offset = -radius; offset <= radius; offset++) {
+        const value = values[index + offset];
+        if (!finite(value)) continue;
+        const weight = weights[offset + radius];
+        weighted += Number(value) * weight; weightTotal += weight;
+      }
+      return weightTotal ? weighted / weightTotal : null;
+    });
+    const rawTotal = values.filter(finite).reduce((sum, value) => sum + Number(value), 0);
+    const smoothTotal = smoothed.filter(finite).reduce((sum, value) => sum + Number(value), 0);
+    if (!rawTotal || !smoothTotal) return smoothed;
+    const scale = rawTotal / smoothTotal;
+    return smoothed.map(value => finite(value) ? Number(value) * scale : null);
+  }
+
   function splitRuns(points) {
     const runs = [];
     let run = [];
@@ -101,7 +121,7 @@
     const width = Math.max(260, Math.round(box.width)), height = Math.max(150, Math.round(box.height));
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
     const ctx = canvas.getContext('2d');
-    const values = series.flatMap(item => item.values.filter(finite).map(Number));
+    const values = series.flatMap(item => (item.displayValues || item.values).filter(finite).map(Number));
     const count = series[0]?.values.length || 0;
     const pad = { left: 46, right: 14, top: 18, bottom: 31 };
     const plotW = width - pad.left - pad.right, plotH = height - pad.top - pad.bottom;
@@ -112,10 +132,10 @@
     const label = cssColor('--muted', '#8290a2');
     const surface = cssColor('--surface', '#0c1b2a');
     const tooltip = chartTooltip(canvas);
-    const pointsFor = item => item.values.map((value, index) => finite(value) ? ({
+    const pointsFor = item => (item.displayValues || item.values).map((value, index) => finite(value) ? ({
       x: pad.left + plotW * index / Math.max(1, count - 1),
       y: pad.top + plotH * (1 - Math.max(0, Math.min(1, Number(value) / maxValue))),
-      value: Number(value), index
+      value: Number(value), rawValue: finite(item.values[index]) ? Number(item.values[index]) : null, index
     }) : null);
     const plotted = series.map(item => ({ ...item, points: pointsFor(item) }));
 
@@ -178,7 +198,7 @@
             if (!point) return;
             ctx.beginPath(); ctx.arc(point.x, point.y, 4, 0, Math.PI * 2); ctx.fillStyle = surface; ctx.fill();
             ctx.lineWidth = 2; ctx.strokeStyle = item.color; ctx.stroke();
-            rows.push(`<span><i style="background:${item.color}"></i>${item.label}<strong>${formatNumber(point.value)}${item.unit || ''}</strong></span>`);
+            rows.push(`<span><i style="background:${item.color}"></i>${item.label}<strong>${formatNumber(point.rawValue ?? point.value)}${item.unit || ''}</strong></span>`);
           });
           if (tooltip && rows.length) {
             const observed = new Date(timing.start + (index + .5) * timing.bucketMS);
@@ -230,7 +250,10 @@
     }
     const plotRangeMS = Math.max(bucketMS * 2, plotEnd - plotStart);
     const widthHint = Math.max(260, Math.round(quality.getBoundingClientRect().width || 0));
-    const maxBuckets = Math.max(80, Math.floor(widthHint / 2));
+    // Keep enough horizontal distance for the spline to describe a real curve.
+    // A two-pixel bucket turns sparse request traffic into dots and tiny slashes;
+    // roughly twelve pixels per bucket remains readable on desktop and mobile.
+    const maxBuckets = Math.max(48, Math.min(160, Math.floor(widthHint / 12)));
     const displayBucketMS = Math.max(bucketMS, Math.ceil(plotRangeMS / (maxBuckets * bucketMS)) * bucketMS);
     const buckets = Math.max(2, Math.ceil(plotRangeMS / displayBucketMS));
     const groups = Array.from({ length: buckets }, () => null);
@@ -241,8 +264,12 @@
       groups[index].requests += Number(point.requests) || 0; groups[index].failed += Number(point.failed) || 0;
       if (finite(point.p95_latency_ms)) groups[index].p95.push(Number(point.p95_latency_ms));
     });
-    const requests = groups.map(group => group ? group.requests : null);
-    const failures = groups.map(group => group ? group.failed : null);
+    // Trend storage only materializes minutes that saw traffic. For count
+    // metrics an absent bucket therefore means zero requests, not unknown data.
+    // Filling only count series produces one truthful continuous curve; latency
+    // stays null because a P95 value cannot exist when no request was observed.
+    const requests = points.length ? groups.map(group => group?.requests || 0) : groups.map(() => null);
+    const failures = points.length ? groups.map(group => group?.failed || 0) : groups.map(() => null);
     const p95 = groups.map(group => group?.p95.length ? Math.round(group.p95.reduce((sum, value) => sum + value, 0) / group.p95.length) : null);
     const rangeLabel = chartRangeLabel(chartRange);
     const sampleCount = points.reduce((sum, point) => sum + (Number(point.requests) || 0), 0);
@@ -252,15 +279,15 @@
     const displayBucketLabel = durationLabel(displayBucketSeconds);
     const timing = { start: plotStart, end: plotEnd, rangeMS: plotRangeMS, bucketMS: displayBucketMS };
     drawChart(quality, [
-      { values: requests, color: cssColor('--blue', '#5a9dff'), label: '请求' },
-      { values: failures, color: cssColor('--red', '#ff7185'), label: '失败' }
+      { values: requests, displayValues: smoothCountSeries(requests), color: cssColor('--blue', '#5a9dff'), label: '请求' },
+      { values: failures, displayValues: smoothCountSeries(failures), color: cssColor('--red', '#ff7185'), label: '失败' }
     ], `${rangeLabel}没有请求数据点`, timing);
     drawChart(latencyCanvas, [{ values: p95, color: cssColor('--blue', '#5a9dff'), label: 'P95', unit: ' ms' }], `${rangeLabel}没有延迟数据点`, timing);
     const dataLabel = sampleCount ? `${formatNumber(sampleCount)} 次真实请求 · ${formatNumber(points.length)} 个原始点` : '没有真实请求';
     $('chartWindowLabel').textContent = `${rangeLabel} · ${dataLabel}`;
     $('chartWindow').textContent = points.length ? `${formatNumber(points.length)} 个原始点 · 按 ${displayBucketLabel} 聚合` : '无数据点';
-    $('chartRetention').textContent = `本地趋势保留 ${chartDurationLabel(retentionSeconds)} · 原始 ${durationLabel(bucketSeconds)} · 显示 ${displayBucketLabel} · 曲线平滑不改变原始值`;
-    $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，图表按 ${displayBucketLabel} 聚合展示，其中 ${failedCount} 次失败；曲线使用不越过原始值的单调平滑，空白时段保持断开。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
+    $('chartRetention').textContent = `本地趋势保留 ${chartDurationLabel(retentionSeconds)} · 原始 ${durationLabel(bucketSeconds)} · 显示 ${displayBucketLabel} · 加权平滑，总量与悬停值保持真实`;
+    $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，图表按 ${displayBucketLabel} 聚合展示，其中 ${failedCount} 次失败；调用曲线经过总量归一的视觉平滑，悬停值保持原始聚合值，P95 缺失时保持断开。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
   }
 
   window.drawRequestChart = drawSmoothRequestChart;
