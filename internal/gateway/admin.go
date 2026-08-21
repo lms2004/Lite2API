@@ -103,6 +103,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveOAuthStatus(w, r)
 	case path == "/oauth/accounts" && r.Method == http.MethodGet:
 		g.serveOAuthAccounts(w, r)
+	case path == "/oauth/accounts" && r.Method == http.MethodDelete:
+		g.serveOAuthAccountDelete(w, r)
 	case path == "/oauth/accounts/status" && r.Method == http.MethodPost:
 		g.serveOAuthAccountStatus(w, r)
 	case path == "/accounts/test" && r.Method == http.MethodPost:

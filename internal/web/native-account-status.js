@@ -1,7 +1,7 @@
 /* Native account status controls.
    The stable account renderer keeps credentials redacted and uses the existing
    account PUT endpoint. This layer adds direct, reversible enable/disable
-   actions for both Lite2API route connections and OAuth pool credentials. */
+   actions for both Lite2API route connections and OAuth pool credentials, plus OAuth credential deletion. */
 (() => {
   'use strict';
 
@@ -60,6 +60,31 @@
     }
   }
 
+  async function deleteOAuthAccount(id, button) {
+    const account = (state.oauth_accounts || []).find(item => item.id === id);
+    if (!account) {
+      say('未找到该认证账号，请刷新后重试', true);
+      return;
+    }
+    const label = account.identity || id;
+    if (!confirm(`确认删除认证账号“${label}”？\n\n删除后 OAuth 凭据将从认证池移除，无法恢复。`)) return;
+    const card = button?.closest('.channel-account');
+    const controls = card ? card.querySelectorAll('button') : [];
+    controls.forEach(control => { control.disabled = true; });
+    try {
+      await api('/oauth/accounts', {
+        method: 'DELETE',
+        body: JSON.stringify({ id })
+      });
+      say(`${label} 已删除，认证池立即生效`);
+      await load();
+    } catch (error) {
+      say(error.message || '认证账号删除失败', true);
+    } finally {
+      controls.forEach(control => { control.disabled = false; });
+    }
+  }
+
   function routeAccountID(row) {
     const input = row.querySelector('input[type="checkbox"][onchange*="toggleAccount("]');
     const match = input?.getAttribute('onchange')?.match(/toggleAccount\('([^']+)'/);
@@ -113,7 +138,7 @@
     const status = card.querySelector('.channel-account-status');
     if (!account || !status) return;
 
-    let button = status.querySelector('.account-toggle');
+    let button = status.querySelector('.account-toggle:not(.account-delete)');
     if (!button) {
       button = document.createElement('button');
       button.type = 'button';
@@ -130,10 +155,41 @@
     button.title = account.disabled ? '启用此认证账号' : '停用此认证账号';
     button.setAttribute('aria-label', `${button.title}：${account.identity || id}`);
     button.setAttribute('aria-pressed', String(!account.disabled));
+
+    let deleteButton = status.querySelector('.account-delete');
+    if (!deleteButton) {
+      deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'text-action account-delete';
+      deleteButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteOAuthAccount(id, deleteButton);
+      });
+      status.append(deleteButton);
+    }
+    deleteButton.textContent = '删除';
+    deleteButton.title = '删除此认证账号及其 OAuth 凭据';
+    deleteButton.setAttribute('aria-label', `${deleteButton.title}：${account.identity || id}`);
   }
 
   function syncOAuthControls() {
     byId('oauthAccounts')?.querySelectorAll('.channel-account').forEach(addOAuthControl);
+  }
+
+  function installOAuthObserver() {
+    const list = byId('oauthAccounts');
+    if (!list || list.dataset.accountStatusObserved === '1') return;
+    list.dataset.accountStatusObserved = '1';
+    let scheduled = false;
+    new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      later(() => {
+        scheduled = false;
+        syncOAuthControls();
+      });
+    }).observe(list, { childList: true, subtree: true });
   }
 
   function wrap(name, after) {
@@ -152,6 +208,7 @@
   function init() {
     wrap('renderAccounts', syncRouteControls);
     wrap('renderOAuthAccounts', syncOAuthControls);
+    installOAuthObserver();
     syncRouteControls();
     syncOAuthControls();
   }

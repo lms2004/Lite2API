@@ -100,6 +100,9 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`const UI_BUILD='2026.08.20-v12'`,
 		`window.Lite2APIAccountStatus`,
 		`account-toggle`,
+		`account-toggle:not(.account-delete)`,
+		`account-delete`,
+		`method: 'DELETE'`,
 		`/oauth/accounts/status`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
@@ -116,10 +119,15 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="v12InsightList"`,
 		`data-overview-metric="calls"`,
 		`data-overview-metric="latency"`,
+		`aria-keyshortcuts="ArrowLeft ArrowRight Home End Escape"`,
+		`data-v12-insight-target`,
+		`v12-chart-announcer`,
 		`.v10-onboarding-body`,
 		`.v10-import-body`,
 		`Native v12`,
 		`--v12-sidebar-w`,
+		`scroll-snap-type:x proximity`,
+		`flex:0 0 64px`,
 		`window.Lite2APINativeV12Motion`,
 		`function monotonePath(`,
 		`prefers-reduced-motion: reduce`,
@@ -128,6 +136,12 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`data-view="prompt-test"`,
 		`v10TestAccountConnection`,
 		`v10TestAllChannels`,
+		`const reasoningOrder=['auto','none','minimal','low','medium','high','max','xhigh','ultra']`,
+		`ultra:'Ultra'`,
+		`来自趋势桶`,
+		`进程累计 `,
+		`请求明细来自当前保留样本`,
+		`有成功记录`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -145,6 +159,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="token"`,
 		`placeholder="管理员 Token"`,
 		`seenBuild===UI_BUILD&&`,
+		`account-toggle account-delete`,
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {

@@ -130,6 +130,8 @@ Docker Compose 与 systemd 两种部署方式均受支持。systemd 服务器可
 
 导出接口为 `POST /admin/api/accounts/export`，可指定账号 ID，并可选择是否包含代理定义。导出文件包含可恢复的账号凭据，管理页会明确警告，文件应按密钥材料保管。两个写接口都要求登录会话和 CSRF；管理页面不会通过不安全的 GET 暴露凭据。
 
+路由连接可通过 `DELETE /admin/api/accounts/:id` 删除，服务端会同步移除模型路由中对该连接的引用。OAuth 认证账号可通过 `DELETE /admin/api/oauth/accounts` 删除，请求体为 `{"id":"auth_index"}`；该操作会从隔离 OAuth 适配器中移除对应凭据，并要求管理会话与 CSRF。
+
 Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refresh token 等凭据不会被误当作 API Key；Codex、Claude、Gemini CLI、Antigravity 和 Kimi 可在“添加账号”中重新快捷认证，其他类型仍需先通过外部适配器暴露兼容 `base_url`。工作流参考来源见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
 
 ## 安全边界

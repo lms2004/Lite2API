@@ -110,7 +110,9 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`), 1)
 
 	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS, nativeV12CSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeV12MotionJS, nativeAccountStatusJS}, []byte("\n"))
+	// Account controls load first so they remain available even if a later
+	// visual enhancement is unavailable in an older browser.
+	js := bytes.Join([][]byte{nativeAccountStatusJS, nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeV12MotionJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
 }
 

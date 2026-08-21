@@ -135,17 +135,19 @@
     const rangeLabel = $('chartRange')?.selectedOptions?.[0]?.textContent || '最近 24 小时';
 
     if ($('v10CallCount')) $('v10CallCount').textContent = sampleCalls ? number(sampleCalls) : '0';
-    if ($('v10CallContext')) $('v10CallContext').textContent = `${rangeLabel} · ${points.length || recent.length} 个有效样本`;
+    const callSource = calls ? `${points.length} 个趋势点` : `${recent.length} 条保留明细`;
+    if ($('v10CallContext')) $('v10CallContext').textContent = `${rangeLabel} · ${callSource}`;
     if ($('v10SuccessRate')) $('v10SuccessRate').textContent = successRate === null ? '—' : `${successRate.toFixed(2)}%`;
-    if ($('v10FailureContext')) $('v10FailureContext').textContent = `${number(sampleFailed)} 次失败`;
-    if ($('v12FailoverContext')) $('v12FailoverContext').textContent = fallbackCalls ? `${number(fallbackCalls)} 次自动切换` : '';
+    if ($('v10FailureContext')) $('v10FailureContext').textContent = `${number(sampleFailed)} 次失败 · ${calls ? '来自趋势桶' : '来自保留明细'}`;
+    if ($('v12FailoverContext')) $('v12FailoverContext').textContent = fallbackCalls ? `进程累计 ${number(fallbackCalls)} 次自动切换` : '';
     if ($('v10P95Latency')) $('v10P95Latency').textContent = p95 === null ? '—' : `${number(Math.round(p95))} ms`;
     if ($('v10LatencyContext')) {
       const average = latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null;
-      $('v10LatencyContext').textContent = average === null ? '暂无速度样本' : `平均 ${number(average)} ms`;
+      $('v10LatencyContext').textContent = average === null ? '暂无速度明细样本' : `保留明细平均 ${number(average)} ms`;
     }
     if ($('v10FailoverCount')) $('v10FailoverCount').textContent = number(fallbackCalls);
     if ($('v10ChannelUsageScope')) $('v10ChannelUsageScope').textContent = `${rangeLabel}内保留的 ${recent.length} 条明细`;
+    if ($('chartRetention')) $('chartRetention').textContent = '本地趋势最多保留 7 天；请求明细来自当前保留样本';
   }
 
   function providerMeta(provider) {
@@ -250,12 +252,12 @@
     const insights = [];
     if (quota) {
       const meta = providerMeta(quota.account.provider);
-      insights.push({ tone: quota.used >= 95 ? 'bad' : quota.used >= 80 ? 'warn' : 'good', title: `${meta.label} 额度${quota.used >= 80 ? '需要关注' : '仍有余量'}`, detail: `已用 ${quota.used.toFixed(1)}%，${quotaReset(quota.window)}。`, action: '查看账号', click: "showView('accounts')" });
+      insights.push({ tone: quota.used >= 95 ? 'bad' : quota.used >= 80 ? 'warn' : 'good', title: `${meta.label} 额度${quota.used >= 80 ? '需要关注' : '仍有余量'}`, detail: `已用 ${quota.used.toFixed(1)}%，${quotaReset(quota.window)}。`, action: '查看账号', target: 'accounts' });
     }
-    if (slowest) insights.push({ tone: slowest.p95 >= 3000 ? 'bad' : slowest.p95 >= 1500 ? 'warn' : 'good', title: `${slowest.name} ${slowest.p95 >= 1500 ? '响应偏慢' : '速度正常'}`, detail: `P95 ${number(Math.round(slowest.p95))} ms，成功率 ${slowest.rate?.toFixed(1) ?? '—'}%。`, action: '查看质量', click: "document.querySelector('.v10-quality-panel')?.scrollIntoView({behavior:'smooth',block:'start'})" });
-    if (primary) insights.push({ tone: primary.rate != null && primary.rate < 95 ? 'warn' : 'good', title: `${primary.name} 承担 ${total ? Math.round(primary.count / total * 100) : 0}% 调用`, detail: `${number(primary.count)} 次请求，成功率 ${primary.rate?.toFixed(1) ?? '—'}%。`, action: '查看路由', click: "showView('routes')" });
+    if (slowest) insights.push({ tone: slowest.p95 >= 3000 ? 'bad' : slowest.p95 >= 1500 ? 'warn' : 'good', title: `${slowest.name} ${slowest.p95 >= 1500 ? '响应偏慢' : '速度正常'}`, detail: `P95 ${number(Math.round(slowest.p95))} ms，成功率 ${slowest.rate?.toFixed(1) ?? '—'}%。`, action: '查看质量', target: 'quality' });
+    if (primary) insights.push({ tone: primary.rate != null && primary.rate < 95 ? 'warn' : 'good', title: `${primary.name} 承担 ${total ? Math.round(primary.count / total * 100) : 0}% 调用`, detail: `${number(primary.count)} 次请求，成功率 ${primary.rate?.toFixed(1) ?? '—'}%。`, action: '查看路由', target: 'routes' });
     if ($('v12InsightList')) $('v12InsightList').innerHTML = insights.length
-      ? insights.slice(0, 3).map(item => `<div class="v12-insight-row ${item.tone}"><i></i><div><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.detail)}</span></div><button type="button" onclick="${item.click}">${item.action}</button></div>`).join('')
+      ? insights.slice(0, 3).map(item => `<div class="v12-insight-row ${item.tone}"><i></i><div><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.detail)}</span></div><button type="button" data-v12-insight-target="${escapeHTML(item.target)}">${escapeHTML(item.action)}</button></div>`).join('')
       : '<div class="v12-insight-empty">暂无可分析的真实样本。发起请求或接入可读取额度的 OAuth 账号后，这里会给出处理建议。</div>';
   }
 
@@ -562,21 +564,55 @@
     const importResult = $('importResult');
     if (importResult) new MutationObserver(syncImportState).observe(importResult, { attributes: true, childList: true, subtree: true });
     $('chartRange')?.addEventListener('change', scheduleSync);
-    all('[data-overview-metric]').forEach(button => button.addEventListener('click', () => {
+    const metricButtons = all('[data-overview-metric]');
+    const selectMetric = (button, moveFocus = false) => {
       const metric = button.dataset.overviewMetric;
-      all('[data-overview-metric]').forEach(item => {
+      metricButtons.forEach(item => {
         const active = item === button;
         item.classList.toggle('active', active);
         item.setAttribute('aria-selected', String(active));
+        item.tabIndex = active ? 0 : -1;
       });
       all('[data-overview-chart]').forEach(pane => {
         const active = pane.dataset.overviewChart === metric;
         pane.classList.toggle('active', active);
-        pane.hidden = !active;
+        pane.setAttribute('aria-hidden', String(!active));
+        pane.toggleAttribute('inert', !active);
       });
       if ($('v12TrendTitle')) $('v12TrendTitle').textContent = metric === 'latency' ? 'P95 响应速度' : '调用次数';
+      if (moveFocus) button.focus();
       requestAnimationFrame(() => window.drawRequestChart?.());
-    }));
+    };
+    metricButtons.forEach(button => {
+      button.addEventListener('click', () => selectMetric(button));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const current = metricButtons.indexOf(button);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? metricButtons.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + metricButtons.length) % metricButtons.length;
+        selectMetric(metricButtons[next], true);
+      });
+    });
+    $('v12InsightList')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-v12-insight-target]');
+      if (!button) return;
+      const target = button.dataset.v12InsightTarget;
+      if (target === 'accounts' || target === 'routes') {
+        showView(target);
+        return;
+      }
+      if (target === 'quality') {
+        const panel = document.querySelector('.v10-quality-panel');
+        if (!panel) return;
+        const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        panel.scrollIntoView({ behavior, block: 'start' });
+        const heading = panel.querySelector('h2');
+        if (heading) {
+          heading.tabIndex = -1;
+          heading.focus({ preventScroll: true });
+        }
+      }
+    });
   }
 
   function init() {
