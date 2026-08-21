@@ -28,6 +28,7 @@ type runtimeState struct {
 	cfg             config.Config
 	scheduler       *Scheduler
 	clients         map[string]*http.Client
+	models          []string
 	legacyKeyHashes map[[sha256.Size]byte]struct{}
 	adminToken      string
 	adminAllowed    []*net.IPNet
@@ -147,6 +148,7 @@ func (g *Gateway) buildState(cfg config.Config) (*runtimeState, error) {
 		}
 		state.clients[account.ID] = client
 	}
+	state.models = state.scheduler.Models()
 	return state, nil
 }
 
@@ -331,7 +333,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		record.AccountID = selection.Account.Config.ID
 		record.UpstreamModel = selection.Model
 		record.ReasoningEffort = selection.ReasoningEffort
-		attemptBody, err := rewriteRequest(envelope, selection.Model, selection.ReasoningEffort)
+		attemptBody, err := rewriteRequestBody(body, envelope, model, selection.Model, selection.ReasoningEffort)
 		if err != nil {
 			selection.Release()
 			writeAPIError(w, http.StatusInternalServerError, "failed to rewrite request", "gateway_error")
@@ -453,9 +455,8 @@ func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *
 
 func (g *Gateway) serveModels(w http.ResponseWriter, state *runtimeState, lease *KeyLease) {
 	now := time.Now().Unix()
-	models := state.scheduler.Models()
-	data := make([]map[string]any, 0, len(models))
-	for _, model := range models {
+	data := make([]map[string]any, 0, len(state.models))
+	for _, model := range state.models {
 		if !lease.AllowsModel(model) {
 			continue
 		}
@@ -494,6 +495,13 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, erro
 }
 
 func rewriteRequest(envelope map[string]json.RawMessage, model, reasoningEffort string) ([]byte, error) {
+	return rewriteRequestBody(nil, envelope, "", model, reasoningEffort)
+}
+
+func rewriteRequestBody(original []byte, envelope map[string]json.RawMessage, requestedModel, model, reasoningEffort string) ([]byte, error) {
+	if len(original) > 0 && model == requestedModel && (reasoningEffort == "" || reasoningEffort == "auto") {
+		return original, nil
+	}
 	copyEnvelope := make(map[string]json.RawMessage, len(envelope))
 	for key, value := range envelope {
 		copyEnvelope[key] = value

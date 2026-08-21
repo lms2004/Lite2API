@@ -338,6 +338,14 @@ html[data-theme-resolved="light"] .nav button.active{border-color:rgba(75,225,16
 .adapter-card:hover{border-color:var(--line-strong);background:var(--surface-raised)}
 .adapter-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.adapter-card h3{margin:0;font-size:13px}.adapter-card .provider-icon{width:34px;height:34px}
 .adapter-card p{min-height:34px;margin:11px 0 9px;color:var(--muted);font-size:10px;line-height:1.5}
+.adapter-state-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 10px}
+.adapter-state-pill{min-width:0;padding:7px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2)}
+.adapter-state-pill span,.adapter-state-pill strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adapter-state-pill span{color:var(--muted);font-size:9px}.adapter-state-pill strong{margin-top:2px;color:var(--text-2);font-size:10px;font-weight:680}
+.adapter-state-pill.good{border-color:rgba(75,225,160,.22);background:var(--green-soft)}.adapter-state-pill.good strong{color:var(--green)}
+.adapter-state-pill.warn{border-color:rgba(255,193,77,.24);background:var(--orange-soft)}.adapter-state-pill.warn strong{color:var(--orange)}
+.adapter-state-pill.bad{border-color:rgba(255,113,133,.24);background:var(--red-soft)}.adapter-state-pill.bad strong{color:var(--red)}
+.adapter-state-pill.blue{border-color:rgba(90,157,255,.24);background:var(--blue-soft)}.adapter-state-pill.blue strong{color:var(--blue)}
 .adapter-facts{display:grid;gap:6px;margin:9px 0}.adapter-fact{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:10px}.adapter-fact strong{max-width:68%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-weight:630;text-align:right}
 .adapter-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);font-size:10px}.adapter-card-foot a{display:inline-flex;align-items:center;gap:5px;text-decoration:none}.adapter-card-foot .icon{width:12px;height:12px}
 
@@ -406,7 +414,7 @@ dialog::backdrop{background:rgba(2,7,12,.72);backdrop-filter:blur(5px)}
     border:0;border-top:1px solid var(--line);background:rgba(7,20,33,.96);z-index:120
   }
   .brand,.sidebar-foot{display:none}
-  .nav{height:56px;display:flex;gap:1px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .nav{height:56px;display:flex;gap:1px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-padding-inline:6px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .nav::-webkit-scrollbar{display:none}
   .nav button{min-width:0;min-height:54px;padding:4px 3px;display:grid;place-items:center;gap:1px;flex:0 0 64px;scroll-snap-align:center}
   .nav button>span:not(.nav-icon){display:block;font-size:9px;line-height:1.12;white-space:normal;text-align:center}

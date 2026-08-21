@@ -521,7 +521,10 @@
 
   function syncAll() {
     syncScheduled = false;
-    if (!document.querySelector('.v10-usage')) return;
+    if (!document.querySelector('.v10-usage.active')) {
+      syncImportState();
+      return;
+    }
     syncUsageMetrics();
     syncOverviewStory();
     syncQuotaBoard();

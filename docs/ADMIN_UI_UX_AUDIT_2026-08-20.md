@@ -126,3 +126,15 @@ Native v12 将这些规则实现为最终设计令牌，并覆盖此前各代样
 ## 数据边界
 
 本轮保证“已实现能力被正确、清晰地展示”，但不会伪造后端没有的数据。额度仍依赖上游适配器返回真实窗口；趋势仍受本地保留期限制；质量测试会产生少量真实调用；适配器的“可承载流量”只有在运行探针和配置均满足时才显示为可用。
+
+## 2026-08-21 增量优化
+
+- 模型路由管理端新增旧式直连兼容层：`capabilities[]` 仍是首选路径，但只有 `models`、`model_map`、`targets[].model` 或旧 `accounts/upstream_model` 的配置不会再被 UI 归一化丢失。
+- 路由保存会按目标能力自动选择新式 capability payload 或旧式 target-level `model/reasoning_effort` payload，保持现有 `/v1/*` 网关转发路径不变。
+- 模型选择弹窗、路由编辑器和客户端配置示例共用同一模型来源：显式路由优先，其次是 capability、账号模型、model_map 与当前直连目标。
+- 适配器目录将“目录/安装”“运行/鉴权”“流量”拆成三格状态，避免把仅收录、已安装、已配置和真正承载流量混为一谈。
+- 新增 `native-route-compat.js`、`native-render-perf.js` 与 `native-adapter-clarity.js` 三个独立增强层，减少继续修改旧 `index.html` 单行脚本的风险。
+- 管理页 HTML 和 `/admin/api/*` JSON 支持 gzip 响应；页面本体在启动时预压缩，避免每次请求重复压缩。
+- 管理端渲染改为只刷新当前视图，隐藏页保留上一次 DOM；Native v10 的监控同步也收敛到运行总览激活时执行。
+- `/state` 复用 runtime 缓存的模型列表，并用手写深拷贝替代 JSON 往返打码，减少轮询时的 CPU 和分配。
+- `/v1/*` 请求体在无需改写模型或推理强度时复用原始 body，保留原协议语义并减少直连请求的 JSON marshal 成本。

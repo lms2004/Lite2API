@@ -334,8 +334,33 @@
     $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，图表按 ${displayBucketLabel} 聚合展示，其中 ${failedCount} 次失败；曲线使用不越过原始值的单调平滑，空白时段保持断开。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
   }
 
+  function syncActiveNav() {
+    const active = document.querySelector('.nav [data-view].active');
+    const nav = active?.closest('.nav');
+    if (!active || !nav || !window.matchMedia('(max-width: 700px)').matches) return;
+    active.scrollIntoView({
+      block: 'nearest',
+      inline: 'center',
+      behavior: reducedMotion.matches ? 'auto' : 'smooth'
+    });
+  }
+
+  function wrapShowView() {
+    const original = window.showView;
+    if (typeof original !== 'function' || original.__v12NavWrapped) return;
+    window.showView = function showViewWithNativeNavSync(...args) {
+      const result = original.apply(this, args);
+      requestAnimationFrame(syncActiveNav);
+      return result;
+    };
+    Object.defineProperty(window.showView, '__v12NavWrapped', { value: true });
+  }
+
   window.drawRequestChart = drawSmoothRequestChart;
-  window.Lite2APINativeV12Motion = Object.freeze({ drawChart, monotonePath, redraw: drawSmoothRequestChart });
+  window.Lite2APINativeV12Motion = Object.freeze({ drawChart, monotonePath, redraw: drawSmoothRequestChart, syncActiveNav });
+  wrapShowView();
+  requestAnimationFrame(syncActiveNav);
+  window.addEventListener('resize', syncActiveNav, { passive: true });
   reducedMotion.addEventListener?.('change', () => requestAnimationFrame(drawSmoothRequestChart));
   new MutationObserver(() => requestAnimationFrame(drawSmoothRequestChart)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme-resolved'] });
 })();

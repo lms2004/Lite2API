@@ -68,7 +68,7 @@ curl http://127.0.0.1:45679/v1/chat/completions \
   -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
 
-模型别名通过 `routes.<alias>` 编排：路由只选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取。
+模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取和保存；管理页会保留这类直连目标，不会强制转换成 `capabilities[]`。
 
 ## 热加载
 
