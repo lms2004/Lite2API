@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -158,6 +160,41 @@ func TestGatewayFailsOver(t *testing.T) {
 	}
 }
 
+func TestGatewayReturnsCachedUpstreamErrorWithoutQueueWait(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "17")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"upstream_quota"}}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
+
+	first := httptest.NewRecorder()
+	g.ServeGateway(first, gatewayRequest(`{"model":"m","messages":[]}`))
+	if first.Code != http.StatusTooManyRequests || !strings.Contains(first.Body.String(), "quota exceeded") {
+		t.Fatalf("first response status=%d body=%s", first.Code, first.Body.String())
+	}
+
+	started := time.Now()
+	second := httptest.NewRecorder()
+	g.ServeGateway(second, gatewayRequest(`{"model":"m","messages":[]}`))
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("second request waited for queue timeout: %v", elapsed)
+	}
+	if second.Code != http.StatusTooManyRequests || second.Body.String() != first.Body.String() {
+		t.Fatalf("second response status=%d body=%s, want cached 429 response %s", second.Code, second.Body.String(), first.Body.String())
+	}
+	if second.Header().Get("Retry-After") != "17" {
+		t.Fatalf("Retry-After=%q, want 17", second.Header().Get("Retry-After"))
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls=%d, want cached response without retry", got)
+	}
+}
+
 func TestRewriteRequestAppliesTargetReasoning(t *testing.T) {
 	envelope := map[string]json.RawMessage{
 		"model":            json.RawMessage(`"alias"`),
@@ -181,6 +218,21 @@ func TestRewriteRequestAppliesTargetReasoning(t *testing.T) {
 	}
 	if strings.Contains(string(body), "reasoning_effort") {
 		t.Fatalf("none should remove reasoning_effort: %s", body)
+	}
+}
+
+func TestRewriteRequestBodyReusesOriginalWhenNoRewriteNeeded(t *testing.T) {
+	original := []byte("{\n  \"messages\": [],\n  \"model\": \"m\",\n  \"reasoning_effort\": \"low\"\n}")
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(original, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	body, err := rewriteRequestBody(original, envelope, "m", "m", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(original) {
+		t.Fatalf("unchanged request should reuse original bytes:\n%s", body)
 	}
 }
 
@@ -218,6 +270,39 @@ func TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel(t *testing.T) {
 	}
 	if g.Stats().Failovers != 1 {
 		t.Fatalf("failovers=%d", g.Stats().Failovers)
+	}
+}
+
+func TestAdminPageUsesPrecompressedHTMLWhenAccepted(t *testing.T) {
+	g := newTestGateway(t, []config.Account{{ID: "a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test", Models: []string{"m"}, Enabled: true, Weight: 1}}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	w := httptest.NewRecorder()
+	g.serveAdminPage(w, req)
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding=%q, want gzip", got)
+	}
+	reader, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Lite2API") {
+		t.Fatalf("decompressed admin page looks wrong: %.80q", data)
+	}
+
+	disabled := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	disabled.RemoteAddr = "127.0.0.1:12345"
+	disabled.Header.Set("Accept-Encoding", "gzip;q=0")
+	plain := httptest.NewRecorder()
+	g.serveAdminPage(plain, disabled)
+	if got := plain.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding=%q, want identity when gzip q=0", got)
 	}
 }
 
@@ -381,6 +466,31 @@ func TestAdminAuthenticationAndRouteUpdate(t *testing.T) {
 	}
 }
 
+func TestAdminAPIUsesGzipWhenAccepted(t *testing.T) {
+	g := newTestGateway(t, []config.Account{{ID: "a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "upstream-secret", Models: []string{"m"}, Enabled: true, Weight: 1}}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/state", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	g.ServeAdminAPI(w, req)
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding=%q, want gzip", got)
+	}
+	reader, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"models"`) || strings.Contains(string(data), "upstream-secret") {
+		t.Fatalf("unexpected compressed admin state: %s", data)
+	}
+}
+
 func TestAdminPromptTestTargetsSelectedAccount(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -507,6 +617,45 @@ func TestAdminAccountUpdatePreservesRedactedSecrets(t *testing.T) {
 	updated := g.Config().Accounts[0]
 	if updated.Name != "After" || updated.APIKey != "upstream-secret" || updated.Headers["X-Private"] != "header-secret" {
 		t.Fatalf("updated account=%+v", updated)
+	}
+}
+
+func TestCloneConfigDeepCopiesMutableFields(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Server.APIKeys = []string{"key"}
+	cfg.Server.AdminAllowedCIDRs = []string{"127.0.0.0/8"}
+	cfg.Accounts = []config.Account{{
+		ID: "a", Type: "openai", BaseURL: "https://api.example.com/v1", APIKey: "secret",
+		Headers: map[string]string{"X-Test": "one"}, HeadersEnv: map[string]string{"X-Env": "ENV"},
+		Models: []string{"m"}, ModelMap: map[string]string{"alias": "real"},
+		Capabilities: []config.ChannelCapability{{Model: "alias", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+		Operations:   []string{config.OperationOpenAIChat}, Enabled: true, Weight: 1,
+	}}
+	cfg.Routes = map[string]config.Route{"alias": {Accounts: []string{"a"}, Targets: []config.RouteTarget{{Account: "a", Model: "real", ReasoningEffort: "auto"}}}}
+
+	cloned := cloneConfig(cfg)
+	cloned.Server.APIKeys[0] = "changed"
+	cloned.Server.AdminAllowedCIDRs[0] = "10.0.0.0/8"
+	cloned.Accounts[0].Headers["X-Test"] = "changed"
+	cloned.Accounts[0].HeadersEnv["X-Env"] = "OTHER"
+	cloned.Accounts[0].Models[0] = "changed"
+	cloned.Accounts[0].ModelMap["alias"] = "changed"
+	cloned.Accounts[0].Capabilities[0].ReasoningEfforts[0] = "high"
+	cloned.Accounts[0].Operations[0] = config.OperationEmbeddings
+	route := cloned.Routes["alias"]
+	route.Accounts[0] = "changed"
+	route.Targets[0].Model = "changed"
+	cloned.Routes["alias"] = route
+
+	if cfg.Server.APIKeys[0] != "key" || cfg.Server.AdminAllowedCIDRs[0] != "127.0.0.0/8" {
+		t.Fatalf("server slices were shared: %+v", cfg.Server)
+	}
+	account := cfg.Accounts[0]
+	if account.Headers["X-Test"] != "one" || account.HeadersEnv["X-Env"] != "ENV" || account.Models[0] != "m" || account.ModelMap["alias"] != "real" || account.Capabilities[0].ReasoningEfforts[0] != "auto" || account.Operations[0] != config.OperationOpenAIChat {
+		t.Fatalf("account mutable fields were shared: %+v", account)
+	}
+	if cfg.Routes["alias"].Accounts[0] != "a" || cfg.Routes["alias"].Targets[0].Model != "real" {
+		t.Fatalf("route mutable fields were shared: %+v", cfg.Routes["alias"])
 	}
 }
 

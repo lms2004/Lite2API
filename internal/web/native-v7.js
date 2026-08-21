@@ -104,6 +104,30 @@
       }
     }
 
+    for (const item of window.Lite2APIRouteCompat?.modelCatalogEntries?.() || []) {
+      const rawModel = String(item.model || "").trim();
+      if (!rawModel) continue;
+      const profile = modelProfile(rawModel);
+      const model = profile.base;
+      let entry = byModel.get(model);
+      if (!entry) {
+        entry = {
+          model,
+          group: modelGroup(model),
+          sources: new Set(),
+          upstreams: new Set(),
+          efforts: new Set(),
+          tags: new Set(),
+          fastAvailable: false
+        };
+        byModel.set(model, entry);
+      }
+      entry.sources.add(item.source || "直连上游");
+      if (item.upstream_model) entry.upstreams.add(item.upstream_model);
+      for (const effort of item.efforts || []) entry.efforts.add(effort);
+      if (item.direct) entry.tags.add("直连");
+    }
+
     // Preserve current routes while discovery is temporarily stale.
     for (const select of modelSelects()) {
       const profile = modelProfile(select.value);

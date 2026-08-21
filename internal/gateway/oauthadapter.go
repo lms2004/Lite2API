@@ -56,6 +56,10 @@ type oauthAccountStatusInput struct {
 	Disabled *bool  `json:"disabled"`
 }
 
+type oauthAccountDeleteInput struct {
+	ID string `json:"id"`
+}
+
 type oauthAdapterResponse struct {
 	Status string `json:"status"`
 	URL    string `json:"url"`
@@ -236,6 +240,25 @@ func (g *Gateway) serveOAuthAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": credentials})
+}
+
+func (g *Gateway) serveOAuthAccountDelete(w http.ResponseWriter, r *http.Request) {
+	var input oauthAccountDeleteInput
+	if decodeAdminJSON(w, r, &input) != nil {
+		return
+	}
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		writeAPIErrorCode(w, http.StatusBadRequest, "OAuth account id is required", "invalid_request_error", "invalid_oauth_account")
+		return
+	}
+
+	name := resolveOAuthAccountName(r.Context(), input.ID)
+	if err := callOAuthAdapter(r.Context(), http.MethodDelete, "auth-files", url.Values{"name": []string{name}}, nil, nil); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (g *Gateway) serveOAuthAccountStatus(w http.ResponseWriter, r *http.Request) {
@@ -435,6 +458,9 @@ func callOAuthAdapter(ctx context.Context, method, endpoint string, query url.Va
 			problem.Error = http.StatusText(resp.StatusCode)
 		}
 		return fmt.Errorf("OAuth adapter rejected the request: %s", problem.Error)
+	}
+	if target == nil || len(bytes.TrimSpace(data)) == 0 {
+		return nil
 	}
 	if err := json.Unmarshal(data, target); err != nil {
 		return fmt.Errorf("decode OAuth adapter response: %w", err)

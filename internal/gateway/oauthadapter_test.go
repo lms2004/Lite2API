@@ -128,6 +128,52 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	}
 }
 
+func TestAdminOAuthAccountDeleteRemovesAuthFile(t *testing.T) {
+	const managementKey = "management-delete-secret"
+	var deleted atomic.Bool
+	var deletedName atomic.Value
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+managementKey {
+			t.Errorf("missing management authorization")
+		}
+		if r.URL.Path != "/v0/management/auth-files" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{{
+				"id": "codex-user@example.com.json", "name": "codex-user@example.com.json", "auth_index": "safe-index", "provider": "codex",
+			}}})
+		case http.MethodDelete:
+			deletedName.Store(r.URL.Query().Get("name"))
+			deleted.Store(true)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer adapter.Close()
+
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", adapter.URL)
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_KEY", managementKey)
+	g := newTestGateway(t, nil, nil)
+	cookie, csrf := loginAdminForTest(t, g)
+	request := adminOAuthRequest(http.MethodDelete, "/admin/api/oauth/accounts", `{"id":"safe-index"}`, cookie, csrf)
+	w := httptest.NewRecorder()
+	g.ServeAdminAPI(w, request)
+
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"ok":true`) {
+		t.Fatalf("delete status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !deleted.Load() {
+		t.Fatal("OAuth adapter did not receive the delete request")
+	}
+	if got := deletedName.Load(); got != "codex-user@example.com.json" {
+		t.Fatalf("deleted auth file=%v", got)
+	}
+}
+
 func TestMaskCredentialIdentity(t *testing.T) {
 	for input, expected := range map[string]string{
 		"a@example.com":     "a***@example.com",

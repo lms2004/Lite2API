@@ -35,18 +35,18 @@
       <div class="v10-surface-head">
         <div><span class="v10-eyebrow">Trend</span><h2 id="v12TrendTitle">调用次数</h2><p id="chartWindowLabel">正在读取真实调用趋势</p></div>
         <div class="v12-metric-tabs" role="tablist" aria-label="趋势指标">
-          <button class="active" type="button" role="tab" aria-selected="true" data-overview-metric="calls">调用</button>
-          <button type="button" role="tab" aria-selected="false" data-overview-metric="latency">P95</button>
+          <button id="v12CallsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="v12CallsPane" data-overview-metric="calls">调用</button>
+          <button id="v12LatencyTab" type="button" role="tab" aria-selected="false" aria-controls="v12LatencyPane" data-overview-metric="latency">P95</button>
         </div>
       </div>
       <div class="v12-chart-stage">
-        <div class="v12-chart-pane active" data-overview-chart="calls">
+        <div id="v12CallsPane" class="v12-chart-pane active" role="tabpanel" aria-labelledby="v12CallsTab" aria-hidden="false" data-overview-chart="calls">
           <div class="v12-chart-legend"><span><i class="blue"></i>请求</span><span><i class="bad"></i>失败</span></div>
-          <canvas id="requestChart" role="img" aria-label="调用次数与失败趋势"></canvas>
+          <canvas id="requestChart" role="img" tabindex="0" aria-describedby="chartSummary" aria-keyshortcuts="ArrowLeft ArrowRight Home End Escape" aria-label="调用次数与失败趋势；使用左右方向键查看数据点"></canvas>
         </div>
-        <div class="v12-chart-pane" data-overview-chart="latency" hidden>
+        <div id="v12LatencyPane" class="v12-chart-pane" role="tabpanel" aria-labelledby="v12LatencyTab" aria-hidden="true" inert data-overview-chart="latency">
           <div class="v12-chart-legend"><span><i class="blue"></i>P95 响应速度</span><span id="chartWindow">毫秒</span></div>
-          <canvas id="latencyChart" role="img" aria-label="P95 响应速度趋势"></canvas>
+          <canvas id="latencyChart" role="img" tabindex="0" aria-describedby="chartSummary" aria-keyshortcuts="ArrowLeft ArrowRight Home End Escape" aria-label="P95 响应速度趋势；使用左右方向键查看数据点"></canvas>
         </div>
       </div>
       <div class="v12-chart-foot" id="chartRetention">本地滚动保留 7 天</div>

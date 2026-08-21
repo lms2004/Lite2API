@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -89,7 +90,7 @@ func (g *Gateway) serveHealth(w http.ResponseWriter, _ *http.Request) {
 		"reason":   operations.Reason,
 		"service":  "lite2api",
 		"accounts": len(state.cfg.Accounts),
-		"models":   len(state.scheduler.Models()),
+		"models":   len(state.models),
 		"routes":   len(operations.Routes),
 	})
 }
@@ -105,7 +106,32 @@ func (g *Gateway) serveAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Accept-Encoding")
+	if acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") && len(webassets.IndexHTMLGzip) > 0 {
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(webassets.IndexHTMLGzip)
+		return
+	}
 	_, _ = w.Write(webassets.IndexHTML)
+}
+
+func acceptsEncoding(header, coding string) bool {
+	coding = strings.ToLower(strings.TrimSpace(coding))
+	for _, part := range strings.Split(header, ",") {
+		fields := strings.Split(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(fields[0]), coding) {
+			continue
+		}
+		for _, param := range fields[1:] {
+			param = strings.ToLower(strings.TrimSpace(param))
+			if strings.HasPrefix(param, "q=") {
+				q := strings.TrimSpace(strings.TrimPrefix(param, "q="))
+				return q != "0" && q != "0.0" && q != "0.00" && q != "0.000"
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func securityHeaders(next http.Handler) http.Handler {

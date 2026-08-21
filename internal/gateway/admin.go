@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +20,13 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Accept-Encoding")
+	if acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") {
+		writer := gzip.NewWriter(w)
+		defer writer.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w = gzipResponseWriter{ResponseWriter: w, Writer: writer}
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/admin/api")
 	if path == "/login" && r.Method == http.MethodPost {
 		g.serveAdminLogin(w, r, state)
@@ -41,7 +50,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
 		stats, accounts := g.Stats(), state.scheduler.Snapshot()
-		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.scheduler.Models(), "config": redactedConfig(state.cfg)})
+		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.models, "config": redactedConfig(state.cfg)})
 	case path == "/trends" && r.Method == http.MethodGet:
 		duration, err := parseTrendRange(r.URL.Query().Get("range"))
 		if err != nil {
@@ -103,6 +112,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveOAuthStatus(w, r)
 	case path == "/oauth/accounts" && r.Method == http.MethodGet:
 		g.serveOAuthAccounts(w, r)
+	case path == "/oauth/accounts" && r.Method == http.MethodDelete:
+		g.serveOAuthAccountDelete(w, r)
 	case path == "/oauth/accounts/status" && r.Method == http.MethodPost:
 		g.serveOAuthAccountStatus(w, r)
 	case path == "/accounts/test" && r.Method == http.MethodPost:
@@ -163,6 +174,15 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAPIError(w, 404, "admin endpoint not found", "not_found")
 	}
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	io.Writer
+}
+
+func (w gzipResponseWriter) Write(data []byte) (int, error) {
+	return w.Writer.Write(data)
 }
 
 func parseTrendRange(value string) (time.Duration, error) {
@@ -313,9 +333,18 @@ func (g *Gateway) saveAndReload(cfg config.Config) error {
 }
 
 func cloneConfig(cfg config.Config) config.Config {
-	data, _ := json.Marshal(cfg)
-	var result config.Config
-	_ = json.Unmarshal(data, &result)
+	result := cfg
+	result.Server.APIKeys = cloneStringSlice(cfg.Server.APIKeys)
+	result.Server.AdminAllowedCIDRs = cloneStringSlice(cfg.Server.AdminAllowedCIDRs)
+	result.Server.TrustedProxyCIDRs = cloneStringSlice(cfg.Server.TrustedProxyCIDRs)
+	result.Accounts = make([]config.Account, len(cfg.Accounts))
+	for i, account := range cfg.Accounts {
+		result.Accounts[i] = cloneAccount(account)
+	}
+	result.Routes = make(map[string]config.Route, len(cfg.Routes))
+	for alias, route := range cfg.Routes {
+		result.Routes[alias] = cloneRoute(route)
+	}
 	return result
 }
 
@@ -332,4 +361,33 @@ func redactedConfig(cfg config.Config) config.Config {
 		}
 	}
 	return result
+}
+
+func cloneAccount(account config.Account) config.Account {
+	result := account
+	result.Headers = cloneStringMap(account.Headers)
+	result.HeadersEnv = cloneStringMap(account.HeadersEnv)
+	result.Models = cloneStringSlice(account.Models)
+	result.ModelMap = cloneStringMap(account.ModelMap)
+	result.Operations = cloneStringSlice(account.Operations)
+	result.Capabilities = make([]config.ChannelCapability, len(account.Capabilities))
+	for i, capability := range account.Capabilities {
+		result.Capabilities[i] = capability
+		result.Capabilities[i].ReasoningEfforts = cloneStringSlice(capability.ReasoningEfforts)
+	}
+	return result
+}
+
+func cloneRoute(route config.Route) config.Route {
+	result := route
+	result.Accounts = cloneStringSlice(route.Accounts)
+	result.Targets = append([]config.RouteTarget(nil), route.Targets...)
+	return result
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
 }

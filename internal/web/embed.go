@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"compress/gzip"
 	_ "embed"
 )
 
@@ -71,6 +72,15 @@ var nativeV12MotionJS []byte
 //go:embed native-account-status.js
 var nativeAccountStatusJS []byte
 
+//go:embed native-route-compat.js
+var nativeRouteCompatJS []byte
+
+//go:embed native-render-perf.js
+var nativeRenderPerfJS []byte
+
+//go:embed native-adapter-clarity.js
+var nativeAdapterClarityJS []byte
+
 //go:embed native-v5-shell.html
 var nativeV5Shell []byte
 
@@ -95,6 +105,7 @@ var nativeV10AccountDialogs []byte
 // call volume, speed, channel quality, and provider-specific account onboarding
 // the primary product workflows and applies one coherent console design.
 var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
+var IndexHTMLGzip = gzipBytes(IndexHTML)
 
 func buildNativeIndexHTML(base []byte) []byte {
 	page := append([]byte(nil), base...)
@@ -110,8 +121,26 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`), 1)
 
 	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS, nativeV12CSS}, []byte("\n"))
-	js := bytes.Join([][]byte{nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeThemeJS, nativeV12MotionJS, nativeAccountStatusJS}, []byte("\n"))
+	// Account controls load first so they remain available even if a later
+	// visual enhancement is unavailable in an older browser.
+	js := bytes.Join([][]byte{nativeAccountStatusJS, nativeRouteCompatJS, nativeRenderPerfJS, nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeAdapterClarityJS, nativeThemeJS, nativeV12MotionJS}, []byte("\n"))
 	return buildIndexHTML(page, css, js)
+}
+
+func gzipBytes(data []byte) []byte {
+	var buffer bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&buffer, gzip.BestCompression)
+	if err != nil {
+		return nil
+	}
+	if _, err := writer.Write(data); err != nil {
+		_ = writer.Close()
+		return nil
+	}
+	if err := writer.Close(); err != nil {
+		return nil
+	}
+	return buffer.Bytes()
 }
 
 func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {

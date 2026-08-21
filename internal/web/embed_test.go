@@ -1,6 +1,9 @@
 package web
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"strings"
 	"testing"
 )
@@ -88,6 +91,8 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function renderRoutes(`,
 		`function renderMonitor(`,
 		`function renderOAuthAccounts(`,
+		`function formatImportBytes(`,
+		`formatImportBytes(f.size)`,
 		`function createQuickKey(`,
 		`function createClientKey(`,
 		`function renderClientSetup(`,
@@ -99,7 +104,22 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`if(!rows.length)return{label:'未知',tone:'unknown'`,
 		`const UI_BUILD='2026.08.20-v12'`,
 		`window.Lite2APIAccountStatus`,
+		`window.Lite2APIRouteCompat`,
+		`window.Lite2APIRenderPerf`,
+		`window.Lite2APIAdapterClarity`,
+		`function directUpstreamModel(`,
+		`const mapped = String(mappings[requested] || "").trim();`,
+		`if (mapped) return mapped;`,
+		`function saveRoutePayload(`,
+		`function setupModelsCompat(`,
+		`function renderActiveView(`,
+		`case "monitor":`,
+		`modelCatalogEntries`,
+		`return [alias, normalizeRouteCompat(route, alias)];`,
 		`account-toggle`,
+		`account-toggle:not(.account-delete)`,
+		`account-delete`,
+		`method: 'DELETE'`,
 		`/oauth/accounts/status`,
 		`.nav{grid-template-columns:repeat(4,1fr)}`,
 		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
@@ -111,16 +131,25 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`.v9-route-studio`,
 		`Native v10`,
 		`.v10-kpi-strip`,
+		`.v10-usage.active`,
 		`id="v12QuotaUsed"`,
 		`id="v12OverviewSummary"`,
 		`id="v12InsightList"`,
 		`data-overview-metric="calls"`,
 		`data-overview-metric="latency"`,
+		`aria-keyshortcuts="ArrowLeft ArrowRight Home End Escape"`,
+		`data-v12-insight-target`,
+		`v12-chart-announcer`,
 		`.v10-onboarding-body`,
 		`.v10-import-body`,
 		`Native v12`,
 		`--v12-sidebar-w`,
+		`.adapter-state-grid`,
+		`scroll-snap-type:x proximity`,
+		`flex:0 0 64px`,
 		`window.Lite2APINativeV12Motion`,
+		`function syncActiveNav(`,
+		`showViewWithNativeNavSync`,
 		`function monotonePath(`,
 		`prefers-reduced-motion: reduce`,
 		`const requestedView=location.hash.slice(1)`,
@@ -128,6 +157,16 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`data-view="prompt-test"`,
 		`v10TestAccountConnection`,
 		`v10TestAllChannels`,
+		`entry.tags.add("直连")`,
+		`目录 / 安装`,
+		`运行 / 鉴权`,
+		`承载流量`,
+		`const reasoningOrder=['auto','none','minimal','low','medium','high','max','xhigh','ultra']`,
+		`ultra:'Ultra'`,
+		`来自趋势桶`,
+		`进程累计 `,
+		`请求明细来自当前保留样本`,
+		`有成功记录`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -145,6 +184,8 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`id="token"`,
 		`placeholder="管理员 Token"`,
 		`seenBuild===UI_BUILD&&`,
+		`account-toggle account-delete`,
+		`function deleteOAuthAccount(encodedID`,
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
@@ -161,6 +202,9 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
 		t.Error("admin page must have exactly one final document closing tag")
+	}
+	if strings.Count(page, `function formatBytes(`) != 1 {
+		t.Error("admin page must avoid duplicate global formatBytes definitions")
 	}
 	if strings.Contains(page, `Promise.all([api('/state'),api('/client-keys'),api('/adapters'),oauthRequest])`) {
 		t.Error("inactive pages must not poll all secondary resources every five seconds")
@@ -191,6 +235,24 @@ func TestNativeLayoutIsCompileTimeMarkup(t *testing.T) {
 	}
 	if !strings.Contains(page, `id="v10ProviderGrid"`) || !strings.Contains(page, `id="v10TestAccountBtn"`) {
 		t.Fatal("account onboarding must expose provider selection and pre-save testing")
+	}
+}
+
+func TestEmbeddedAdminPageGzipMatchesHTML(t *testing.T) {
+	if len(IndexHTMLGzip) == 0 || len(IndexHTMLGzip) >= len(IndexHTML) {
+		t.Fatalf("precompressed admin page size=%d original=%d", len(IndexHTMLGzip), len(IndexHTML))
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(IndexHTMLGzip))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(IndexHTML) {
+		t.Fatal("precompressed admin page must decompress to IndexHTML")
 	}
 }
 

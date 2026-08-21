@@ -68,7 +68,7 @@ curl http://127.0.0.1:45679/v1/chat/completions \
   -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
 
-模型别名通过 `routes.<alias>` 编排：路由只选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取。
+模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取和保存；管理页会保留这类直连目标，不会强制转换成 `capabilities[]`。
 
 ## 热加载
 
@@ -129,6 +129,8 @@ Docker Compose 与 systemd 两种部署方式均受支持。systemd 服务器可
 接口为 `POST /admin/api/accounts/import`，请求使用 `data`、`mode` 和 `dry_run` 字段。`mode` 可选 `skip`（跳过已有 ID）或 `upsert`（更新已有 ID；未提供密钥时保留旧密钥）。导入允许部分成功，并在 `errors` 中返回每一项失败的索引和原因。
 
 导出接口为 `POST /admin/api/accounts/export`，可指定账号 ID，并可选择是否包含代理定义。导出文件包含可恢复的账号凭据，管理页会明确警告，文件应按密钥材料保管。两个写接口都要求登录会话和 CSRF；管理页面不会通过不安全的 GET 暴露凭据。
+
+路由连接可通过 `DELETE /admin/api/accounts/:id` 删除，服务端会同步移除模型路由中对该连接的引用。OAuth 认证账号可通过 `DELETE /admin/api/oauth/accounts` 删除，请求体为 `{"id":"auth_index"}`；该操作会从隔离 OAuth 适配器中移除对应凭据，并要求管理会话与 CSRF。
 
 Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refresh token 等凭据不会被误当作 API Key；Codex、Claude、Gemini CLI、Antigravity 和 Kimi 可在“添加账号”中重新快捷认证，其他类型仍需先通过外部适配器暴露兼容 `base_url`。工作流参考来源见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
 

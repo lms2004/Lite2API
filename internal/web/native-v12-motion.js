@@ -30,6 +30,13 @@
     return smoothed.map(value => finite(value) ? Number(value) * scale : null);
   }
 
+  function stopChartAnimation(canvas) {
+    const current = chartFrames.get(canvas);
+    if (!current) return;
+    cancelAnimationFrame(current.frame);
+    chartFrames.delete(canvas);
+  }
+
   function splitRuns(points) {
     const runs = [];
     let run = [];
@@ -84,26 +91,52 @@
     if (!tooltip && pane) {
       tooltip = document.createElement('div');
       tooltip.className = 'v12-chart-tooltip';
-      tooltip.setAttribute('role', 'status');
+      tooltip.setAttribute('aria-hidden', 'true');
       tooltip.hidden = true;
       pane.appendChild(tooltip);
     }
     return tooltip;
   }
 
+  function chartAnnouncer(canvas) {
+    const pane = canvas.closest('.v12-chart-pane') || canvas.parentElement;
+    let announcer = pane?.querySelector('.v12-chart-announcer');
+    if (!announcer && pane) {
+      announcer = document.createElement('div');
+      announcer.className = 'v12-chart-announcer sr-only';
+      announcer.setAttribute('role', 'status');
+      announcer.setAttribute('aria-live', 'polite');
+      pane.appendChild(announcer);
+    }
+    return announcer;
+  }
+
   function installPointer(canvas) {
     if (canvas.__v12PointerInstalled) return;
     canvas.__v12PointerInstalled = true;
+    const setHover = (index, announce = false) => {
+      const model = canvas.__v12ChartModel;
+      if (!model?.count) return;
+      stopChartAnimation(canvas);
+      model.hover = Math.max(0, Math.min(model.count - 1, index));
+      model.paint(1);
+      if (announce) {
+        const announcer = chartAnnouncer(canvas);
+        if (announcer) announcer.textContent = model.summary(model.hover);
+      }
+    };
     const update = event => {
       const model = canvas.__v12ChartModel;
-      if (!model) return;
+      if (!model?.count) return;
       const bounds = canvas.getBoundingClientRect();
       const x = event.clientX - bounds.left;
-      model.hover = Math.max(0, Math.min(model.count - 1, Math.round((x - model.pad.left) / Math.max(1, model.plotW) * (model.count - 1))));
-      model.paint(1);
+      setHover(Math.round((x - model.pad.left) / Math.max(1, model.plotW) * (model.count - 1)));
     };
     canvas.addEventListener('pointermove', update, { passive: true });
-    canvas.addEventListener('pointerdown', update, { passive: true });
+    canvas.addEventListener('pointerdown', event => {
+      canvas.focus({ preventScroll: true });
+      update(event);
+    }, { passive: true });
     canvas.addEventListener('pointerleave', () => {
       const model = canvas.__v12ChartModel;
       if (!model) return;
@@ -111,6 +144,33 @@
       const tooltip = chartTooltip(canvas);
       if (tooltip) tooltip.hidden = true;
       model.paint(1);
+    });
+    canvas.addEventListener('focus', () => {
+      const model = canvas.__v12ChartModel;
+      if (model?.count && model.hover === null) setHover(0, true);
+    });
+    canvas.addEventListener('blur', () => {
+      const model = canvas.__v12ChartModel;
+      if (!model) return;
+      model.hover = null;
+      const tooltip = chartTooltip(canvas);
+      if (tooltip) tooltip.hidden = true;
+      model.paint(1);
+    });
+    canvas.addEventListener('keydown', event => {
+      const model = canvas.__v12ChartModel;
+      if (!model?.count || !['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === 'Escape') {
+        model.hover = null;
+        const tooltip = chartTooltip(canvas);
+        if (tooltip) tooltip.hidden = true;
+        model.paint(1);
+        return;
+      }
+      const current = model.hover ?? 0;
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? model.count - 1 : current + (event.key === 'ArrowRight' ? 1 : -1);
+      setHover(next, true);
     });
   }
 
@@ -138,13 +198,27 @@
       value: Number(value), rawValue: finite(item.values[index]) ? Number(item.values[index]) : null, index
     }) : null);
     const plotted = series.map(item => ({ ...item, points: pointsFor(item) }));
+    const formatTime = value => timing.rangeMS >= 86400000
+      ? value.toLocaleDateString([], { month: '2-digit', day: '2-digit' }) + ' ' + value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const summaryFor = index => {
+      const observed = new Date(timing.start + (index + .5) * timing.bucketMS);
+      const rows = plotted.flatMap(item => {
+        const point = item.points[index];
+        return point ? [`${item.label} ${formatNumber(point.value)}${item.unit || ''}`] : [];
+      });
+      return `${formatTime(observed)}，${rows.join('，') || '没有数据'}`;
+    };
 
     const model = {
       count, pad, plotW, hover: null,
+      summary: summaryFor,
       paint(progress) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, width, height);
+        if (model.hover === null && tooltip) tooltip.hidden = true;
         if (!values.length) {
+          if (tooltip) tooltip.hidden = true;
           ctx.fillStyle = label; ctx.font = '12px -apple-system, BlinkMacSystemFont, system-ui';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(emptyText, width / 2, height / 2);
@@ -181,9 +255,6 @@
         });
         ctx.restore();
 
-        const formatTime = value => timing.rangeMS >= 86400000
-          ? value.toLocaleDateString([], { month: '2-digit', day: '2-digit' }) + ' ' + value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         ctx.fillStyle = label; ctx.textBaseline = 'bottom'; ctx.textAlign = 'left';
         ctx.fillText(formatTime(new Date(timing.start)), pad.left, height - 2);
         ctx.textAlign = 'right'; ctx.fillText(formatTime(new Date(timing.end)), width - pad.right, height - 2);
@@ -204,7 +275,8 @@
             const observed = new Date(timing.start + (index + .5) * timing.bucketMS);
             tooltip.innerHTML = `<time>${formatTime(observed)}</time>${rows.join('')}`;
             tooltip.hidden = false;
-            tooltip.style.left = `${Math.max(8, Math.min(width - 142, x + (x > width * .68 ? -136 : 12)))}px`;
+            const tooltipWidth = tooltip.offsetWidth || 152;
+            tooltip.style.left = `${Math.max(8, Math.min(width - tooltipWidth - 8, x + (x > width * .68 ? -tooltipWidth - 10 : 12)))}px`;
             tooltip.style.top = `${pad.top + 8}px`;
           } else if (tooltip) tooltip.hidden = true;
         }
@@ -212,13 +284,12 @@
     };
     canvas.__v12ChartModel = model;
     installPointer(canvas);
-    const signature = series.map(item => item.values.join(',')).join('|') + `@${width}x${height}`;
-    const previous = chartFrames.get(canvas);
-    if (previous) cancelAnimationFrame(previous.frame);
-    if (reducedMotion.matches || canvas.dataset.v12ChartSignature === signature) {
-      canvas.dataset.v12ChartSignature = signature; model.paint(1); return;
+    const dataSignature = series.map(item => item.values.join(',')).join('|');
+    stopChartAnimation(canvas);
+    if (reducedMotion.matches || canvas.dataset.v12ChartDataSignature === dataSignature) {
+      canvas.dataset.v12ChartDataSignature = dataSignature; model.paint(1); return;
     }
-    canvas.dataset.v12ChartSignature = signature;
+    canvas.dataset.v12ChartDataSignature = dataSignature;
     const started = performance.now(), duration = 360;
     const animate = now => {
       const progress = easeOut(Math.min(1, (now - started) / duration));
@@ -290,7 +361,33 @@
     $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，图表按 ${displayBucketLabel} 聚合展示，其中 ${failedCount} 次失败；调用曲线经过总量归一的视觉平滑，悬停值保持原始聚合值，P95 缺失时保持断开。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
   }
 
+  function syncActiveNav() {
+    const active = document.querySelector('.nav [data-view].active');
+    const nav = active?.closest('.nav');
+    if (!active || !nav || !window.matchMedia('(max-width: 700px)').matches) return;
+    active.scrollIntoView({
+      block: 'nearest',
+      inline: 'center',
+      behavior: reducedMotion.matches ? 'auto' : 'smooth'
+    });
+  }
+
+  function wrapShowView() {
+    const original = window.showView;
+    if (typeof original !== 'function' || original.__v12NavWrapped) return;
+    window.showView = function showViewWithNativeNavSync(...args) {
+      const result = original.apply(this, args);
+      requestAnimationFrame(syncActiveNav);
+      return result;
+    };
+    Object.defineProperty(window.showView, '__v12NavWrapped', { value: true });
+  }
+
   window.drawRequestChart = drawSmoothRequestChart;
-  window.Lite2APINativeV12Motion = Object.freeze({ drawChart, monotonePath, redraw: drawSmoothRequestChart });
+  window.Lite2APINativeV12Motion = Object.freeze({ drawChart, monotonePath, redraw: drawSmoothRequestChart, syncActiveNav });
+  wrapShowView();
+  requestAnimationFrame(syncActiveNav);
+  window.addEventListener('resize', syncActiveNav, { passive: true });
+  reducedMotion.addEventListener?.('change', () => requestAnimationFrame(drawSmoothRequestChart));
   new MutationObserver(() => requestAnimationFrame(drawSmoothRequestChart)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme-resolved'] });
 })();
