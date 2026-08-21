@@ -29,6 +29,14 @@ type accountRuntimeState struct {
 	latencyNanos atomic.Int64
 	circuitUntil atomic.Int64
 	lastError    atomic.Value
+	lastUpstream atomic.Pointer[cachedUpstreamFailure]
+}
+
+type cachedUpstreamFailure struct {
+	Model     string
+	Operation string
+	AccountID string
+	Response  *bufferedResponse
 }
 
 func newAccountRuntime(account config.Account, state *accountRuntimeState) *AccountRuntime {
@@ -122,15 +130,34 @@ func (a *AccountRuntime) reportSuccess(elapsed time.Duration) {
 	a.state.failures.Store(0)
 	a.state.circuitUntil.Store(0)
 	a.state.lastError.Store("")
+	a.state.lastUpstream.Store(nil)
 }
 
 func (a *AccountRuntime) reportFailure(message string, threshold int, cooldown time.Duration, forceCircuit bool) {
 	a.state.total.Add(1)
 	failures := a.state.failures.Add(1)
 	a.state.lastError.Store(message)
+	a.state.lastUpstream.Store(nil)
 	if failures >= int64(threshold) || forceCircuit {
 		a.state.circuitUntil.Store(time.Now().Add(cooldown).UnixNano())
 	}
+}
+
+func (a *AccountRuntime) rememberUpstreamFailure(model, operation string, response *bufferedResponse) {
+	if response == nil {
+		return
+	}
+	a.state.lastUpstream.Store(&cachedUpstreamFailure{
+		Model: model, Operation: operation, AccountID: a.Config.ID, Response: response,
+	})
+}
+
+func (a *AccountRuntime) cachedUpstreamFailure(model, operation string) *cachedUpstreamFailure {
+	failure := a.state.lastUpstream.Load()
+	if failure == nil || failure.Model != model || failure.Operation != operation {
+		return nil
+	}
+	return failure
 }
 
 func (a *AccountRuntime) Snapshot() AccountSnapshot {
@@ -307,7 +334,7 @@ func (s *Scheduler) AttemptLimit(model string, legacyLimit int) int {
 func (s *Scheduler) Select(ctx context.Context, model, operation, session string, excluded map[string]struct{}, wait time.Duration) (*Selection, error) {
 	deadline := time.Now().Add(wait)
 	for {
-		selection, eligible := s.trySelect(model, operation, session, excluded)
+		selection, eligible, capacityBlocked := s.trySelect(model, operation, session, excluded)
 		if selection != nil {
 			// Claude Code may send or select a reasoning effort while using the
 			// Anthropic Messages endpoint. Lite2API accepts it for compatibility,
@@ -321,6 +348,9 @@ func (s *Scheduler) Select(ctx context.Context, model, operation, session string
 		}
 		if !eligible {
 			return nil, ErrNoEligibleAccount
+		}
+		if !capacityBlocked {
+			return nil, ErrNoCapacity
 		}
 		remaining := time.Until(deadline)
 		if wait <= 0 || remaining <= 0 {
@@ -339,11 +369,12 @@ func (s *Scheduler) Select(ctx context.Context, model, operation, session string
 	}
 }
 
-func (s *Scheduler) trySelect(model, operation, session string, excluded map[string]struct{}) (*Selection, bool) {
+func (s *Scheduler) trySelect(model, operation, session string, excluded map[string]struct{}) (*Selection, bool, bool) {
 	s.mu.RLock()
 	route, routed := s.routes[model]
 	if routed && len(route.Targets) > 0 {
 		eligible := false
+		capacityBlocked := false
 		now := time.Now()
 		skipped := make([]string, 0, len(route.Targets))
 		for index, target := range route.Targets {
@@ -362,7 +393,11 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 				continue
 			}
 			eligible = true
-			if !account.available(now) || !account.tryAcquire() {
+			available := account.available(now)
+			if !available || !account.tryAcquire() {
+				if available {
+					capacityBlocked = true
+				}
 				skipped = append(skipped, key)
 				continue
 			}
@@ -382,10 +417,10 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 					default:
 					}
 				},
-			}, eligible
+			}, eligible, capacityBlocked
 		}
 		s.mu.RUnlock()
-		return nil, eligible
+		return nil, eligible, capacityBlocked
 	}
 	strategy := route.Strategy
 	if strategy == "" {
@@ -421,7 +456,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 	}
 	if len(candidates) == 0 {
 		s.mu.RUnlock()
-		return nil, eligible
+		return nil, eligible, false
 	}
 	orderCandidates(candidates, strategy, model, session, s.counter(model))
 	var selected *AccountRuntime
@@ -433,7 +468,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 	}
 	s.mu.RUnlock()
 	if selected == nil {
-		return nil, eligible
+		return nil, eligible, true
 	}
 	return &Selection{Account: selected, Model: selected.upstreamModel(model, route.UpstreamModel), Key: selected.Config.ID, release: func() {
 		selected.release()
@@ -441,7 +476,73 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		case s.notify <- struct{}{}:
 		default:
 		}
-	}}, eligible
+	}}, eligible, false
+}
+
+// CachedUpstreamFailure returns the most recent matching upstream response for
+// an account that is currently circuit-open. It is used to fail fast instead
+// of converting a known upstream error into a queue timeout followed by a
+// generic 503.
+func (s *Scheduler) CachedUpstreamFailure(model, operation string, excluded map[string]struct{}) *cachedUpstreamFailure {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	route, routed := s.routes[model]
+	now := time.Now()
+	if routed && len(route.Targets) > 0 {
+		for index, target := range route.Targets {
+			key := routeTargetKey(index, target)
+			if _, skip := excluded[key]; skip {
+				continue
+			}
+			account := s.accounts[target.Account]
+			if account == nil || !account.Config.Enabled || !config.AccountSupportsOperation(account.Config, operation) {
+				continue
+			}
+			if _, _, compatible := config.ResolveRouteTarget(account.Config, route, target); !compatible || account.available(now) {
+				continue
+			}
+			if failure := account.cachedUpstreamFailure(model, operation); failure != nil {
+				return failure
+			}
+		}
+		return nil
+	}
+
+	ids := make([]string, 0, len(s.accounts))
+	for id := range s.accounts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if _, skip := excluded[id]; skip {
+			continue
+		}
+		account := s.accounts[id]
+		if !account.Config.Enabled || !config.AccountSupportsOperation(account.Config, operation) {
+			continue
+		}
+		if routed {
+			allowed := false
+			for _, routeID := range route.Accounts {
+				if routeID == id {
+					allowed = true
+					break
+				}
+			}
+			if len(route.Accounts) > 0 && !allowed {
+				continue
+			}
+		} else if !account.supports(model) {
+			continue
+		}
+		if account.available(now) {
+			continue
+		}
+		if failure := account.cachedUpstreamFailure(model, operation); failure != nil {
+			return failure
+		}
+	}
+	return nil
 }
 
 func routeTargetKey(index int, target config.RouteTarget) string {

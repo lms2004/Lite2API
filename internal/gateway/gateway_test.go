@@ -158,6 +158,41 @@ func TestGatewayFailsOver(t *testing.T) {
 	}
 }
 
+func TestGatewayReturnsCachedUpstreamErrorWithoutQueueWait(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "17")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"upstream_quota"}}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
+
+	first := httptest.NewRecorder()
+	g.ServeGateway(first, gatewayRequest(`{"model":"m","messages":[]}`))
+	if first.Code != http.StatusTooManyRequests || !strings.Contains(first.Body.String(), "quota exceeded") {
+		t.Fatalf("first response status=%d body=%s", first.Code, first.Body.String())
+	}
+
+	started := time.Now()
+	second := httptest.NewRecorder()
+	g.ServeGateway(second, gatewayRequest(`{"model":"m","messages":[]}`))
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("second request waited for queue timeout: %v", elapsed)
+	}
+	if second.Code != http.StatusTooManyRequests || second.Body.String() != first.Body.String() {
+		t.Fatalf("second response status=%d body=%s, want cached 429 response %s", second.Code, second.Body.String(), first.Body.String())
+	}
+	if second.Header().Get("Retry-After") != "17" {
+		t.Fatalf("Retry-After=%q, want 17", second.Header().Get("Retry-After"))
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls=%d, want cached response without retry", got)
+	}
+}
+
 func TestRewriteRequestAppliesTargetReasoning(t *testing.T) {
 	envelope := map[string]json.RawMessage{
 		"model":            json.RawMessage(`"alias"`),

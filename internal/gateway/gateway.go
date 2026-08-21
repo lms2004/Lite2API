@@ -293,13 +293,31 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		maxAttempts = 1
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		selection, err := state.scheduler.Select(r.Context(), model, operation, session, excluded, state.cfg.Server.QueueTimeout.Duration)
+		wait := state.cfg.Server.QueueTimeout.Duration
+		if last != nil {
+			// Once an upstream has returned an error response, an optional
+			// failover may use currently-free capacity, but it must never keep
+			// the client queued for another account to recover.
+			wait = 0
+		}
+		selection, err := state.scheduler.Select(r.Context(), model, operation, session, excluded, wait)
 		if err != nil {
 			record.Error = err.Error()
 			if last != nil {
 				last.write(w)
 				record.Status = last.status
 				applyBufferedResponseMetadata(&record, last.header, last.body)
+				if record.OutputType == "" && operation == config.OperationImages {
+					record.OutputType = "image"
+				}
+				return
+			}
+			if cached := state.scheduler.CachedUpstreamFailure(model, operation, excluded); cached != nil && cached.Response != nil {
+				cached.Response.write(w)
+				record.AccountID = cached.AccountID
+				record.Status = cached.Response.status
+				record.Error = "upstream returned " + strconv.Itoa(cached.Response.status)
+				applyBufferedResponseMetadata(&record, cached.Response.header, cached.Response.body)
 				if record.OutputType == "" && operation == config.OperationImages {
 					record.OutputType = "image"
 				}
@@ -348,6 +366,9 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			forceCircuit := resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429
 			if !(selection.Targeted && resp.StatusCode == http.StatusNotFound) {
 				selection.Account.reportFailure("HTTP "+strconv.Itoa(resp.StatusCode), state.cfg.Server.FailureThreshold, cooldown, forceCircuit)
+				if retryableStatus(resp.StatusCode) {
+					selection.Account.rememberUpstreamFailure(model, operation, buffered)
+				}
 			}
 			if attempt+1 < maxAttempts {
 				g.stats.Failover()
