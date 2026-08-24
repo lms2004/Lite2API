@@ -22,8 +22,11 @@ pprof:
 logging-to-file: false
 usage-statistics-enabled: false
 passthrough-headers: false
-request-retry: 2
-max-retry-credentials: 3
+# Distinct credentials are exhausted in one pass; let Lite2API move to the next
+# outer route instead of waiting inside this adapter and hiding the failover.
+request-retry: 0
+# 0 tries every currently eligible credential before returning the error.
+max-retry-credentials: 0
 max-retry-interval: 15
 force-model-prefix: false
 enable-gemini-cli-endpoint: false

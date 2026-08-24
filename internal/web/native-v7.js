@@ -7,7 +7,7 @@
   const BUILD = "Native 7.2 · 2026.08.18";
   const picker = {
     activeSelect: null,
-    activeRoute: "",
+    activeRouteKey: "",
     query: "",
     group: "all",
     scheduled: false,
@@ -194,7 +194,7 @@
 
   function openDialog(select) {
     picker.activeSelect = select;
-    picker.activeRoute = select.closest(".route-card")?.querySelector(".route-alias")?.value?.trim() || "";
+    picker.activeRouteKey = select.closest(".route-card")?.dataset.routeKey || "";
     picker.query = "";
     picker.group = "all";
     const dialog = ensureDialog();
@@ -318,9 +318,9 @@
 
   function activeModelSelect() {
     if (picker.activeSelect?.isConnected) return picker.activeSelect;
-    if (!picker.activeRoute) return null;
+    if (!picker.activeRouteKey) return null;
     const card = all("#routeRows > .route-card").find(candidate =>
-      candidate.querySelector(".route-alias")?.value?.trim() === picker.activeRoute);
+      candidate.dataset.routeKey === picker.activeRouteKey);
     return card?.querySelector(".route-intent select") || null;
   }
 
@@ -424,9 +424,10 @@
 
   function syncRouteMasterLabels() {
     const cards = all("#routeRows > .route-card");
+    const byKey = new Map(cards.map(card => [card.dataset.routeKey, card]));
     const byAlias = new Map(cards.map(card => [card.querySelector(".route-alias")?.value?.trim(), card]));
     all("#v5RouteList .route-master-item").forEach(button => {
-      const card = byAlias.get(button.dataset.route);
+      const card = byKey.get(button.dataset.routeKey) || byAlias.get(button.dataset.route);
       const modelSelect = card?.querySelector(".route-intent select");
       const subtitle = button.querySelector("small");
       if (modelSelect && subtitle) subtitle.textContent = routeDisplayName(modelSelect.value);

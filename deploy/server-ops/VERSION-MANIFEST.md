@@ -1,6 +1,6 @@
 # Deployment Version Manifest
 
-Verified on 2026-08-16 UTC.
+Verified on 2026-08-24 UTC.
 
 | Item | Value |
 |---|---|
@@ -11,16 +11,17 @@ Verified on 2026-08-16 UTC.
 | VLESS transport | WebSocket over TLS 1.2/1.3 |
 | VLESS internal listener | `127.0.0.1:10086` |
 | Lite2API listener | `127.0.0.1:45679` |
-| Lite2API build | `deployed-20260816-5c6c682d2c78` |
-| Lite2API binary SHA-256 | `a9374f5e2149b1b6125c4396d63b51c49af974636abf331417e52d55109812de` |
+| Lite2API build | `deployed-20260824-4f10180cdfd8` |
+| Lite2API binary SHA-256 | `d519123dfbe8c16adad5171f3443b6ae9a55fdb503db16d9e63640c56599257f` |
 | Lite2API deployment | `deploy/install-lite2api-systemd.sh` (Go 1.24.4) |
-| Admin UI | `2026.08.16-r9` (multi-provider quota windows, balances, cooldowns, page-aware refresh) |
-| Lite2API adapter model | operation-aware dispatch + 60-second on-demand probe cache |
+| Admin UI | `2026.08.24-v14` (route strategy controls, account priority, bounded manual refresh, quota windows and cooldowns) |
+| Lite2API adapter model | operation-aware dispatch + strict/priority/least-loaded/round-robin/sticky route selection + full failover chains |
 | CLIProxyAPI listener | `127.0.0.1:45682` |
-| CLIProxyAPI build | `v6.10.9-lite2api.4` / upstream `785b00c3127eea6aa207f1207ead8a2aa93690a3` + `deploy/patches/cliproxyapi-quota-snapshot.patch` |
-| CLIProxyAPI binary SHA-256 | `e92120376e56b015bcff5e90ce8f288090264b73040c69acdcd33b9f2f88ab86` |
+| CLIProxyAPI build | `v6.10.9-lite2api.5` / upstream `785b00c3127eea6aa207f1207ead8a2aa93690a3` + maintained quota, routing-reliability and auth-refresh patches |
+| CLIProxyAPI binary SHA-256 | `84f84974ede18e005eb4df4210055eb7005b26843c166bd8d9028c12125cf0f5` |
 | CLIProxyAPI deployment | `deploy/install-cliproxyapi-systemd.sh` + `cliproxyapi.service` |
-| Account quota snapshot | in-memory only; Claude response windows; Codex + Gemini/Antigravity official quota APIs with 10-minute page-demand TTL; model cooldown fallback |
+| CLIProxyAPI account routing | `round-robin`; higher numeric priority first; same-priority rotation; request-level retry disabled so Lite2API owns retry/failover |
+| Account quota snapshot | in-memory only; Claude response windows; Codex + Gemini/Antigravity official quota APIs with 10-minute page-demand TTL; bounded manual refresh; model cooldown fallback |
 | Nginx | Ubuntu package `1.24.x` |
 | TLS issuer | Let's Encrypt |
 | TLS certificate expiry | `2026-11-14 02:28:59 UTC` |

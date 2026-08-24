@@ -34,6 +34,21 @@ ensure_base64() {
   fi
 }
 
+read_routing_strategy() {
+  file=$1
+  [ -f "$file" ] || return 0
+  awk '
+    $1 == "routing:" { in_routing = 1; next }
+    in_routing && $1 == "strategy:" {
+      value = tolower($2)
+      gsub(/[^a-z-]/, "", value)
+      print value
+      exit
+    }
+    in_routing && $0 ~ /^[^[:space:]#]/ { exit }
+  ' "$file"
+}
+
 ensure_hex GEMINI_WEB2API_KEY 32
 ensure_hex GROK2API_ADMIN_PASSWORD 24
 ensure_hex GROK2API_JWT_SECRET 32
@@ -46,6 +61,12 @@ grok_admin=$(read_env GROK2API_ADMIN_PASSWORD)
 grok_jwt=$(read_env GROK2API_JWT_SECRET)
 grok_credential=$(read_env GROK2API_CREDENTIAL_KEY)
 cliproxy_key=$(read_env CLIPROXYAPI_KEY)
+cliproxy_config="$runtime_dir/cliproxyapi/config.yaml"
+cliproxy_routing_strategy=$(read_routing_strategy "$cliproxy_config")
+case $cliproxy_routing_strategy in
+  round-robin|fill-first) ;;
+  *) cliproxy_routing_strategy=round-robin ;;
+esac
 
 mkdir -p "$runtime_dir/gemini-web2api" "$runtime_dir/grok2api" \
   "$runtime_dir/cliproxyapi/auths"
@@ -63,9 +84,11 @@ sed \
   "$root_dir/channels/grok2api/config.template.yaml" \
   > "$runtime_dir/grok2api/config.yaml"
 
-sed "s|REPLACE_WITH_RANDOM_KEY|$cliproxy_key|g" \
+sed \
+  -e "s|REPLACE_WITH_RANDOM_KEY|$cliproxy_key|g" \
+  -e "s|^  strategy: \"round-robin\"$|  strategy: \"$cliproxy_routing_strategy\"|" \
   "$root_dir/channels/cliproxyapi/config.template.yaml" \
-  > "$runtime_dir/cliproxyapi/config.yaml"
+  > "$cliproxy_config"
 
 chmod 600 "$env_file" "$runtime_dir/gemini-web2api/config.json" \
   "$runtime_dir/grok2api/config.yaml" "$runtime_dir/cliproxyapi/config.yaml"

@@ -7,6 +7,7 @@
   const BUILD = "Native Route Compat 1.0";
   const reasoningOrder = ["auto", "none", "minimal", "low", "medium", "high", "max", "xhigh", "ultra"];
   const directDefaultEfforts = ["auto", "none"];
+  const routeStrategies = new Set(["", "priority", "least_loaded", "round_robin", "sticky"]);
   const $ = id => document.getElementById(id);
 
   function uniq(values) {
@@ -159,7 +160,8 @@
   }
 
   function normalizeRouteCompat(route = {}, alias = "") {
-    let targets = Array.isArray(route.targets) ? route.targets.map(normalizeTargetCompat).filter(target => target.account) : [];
+    const explicitTargets = Array.isArray(route.targets);
+    let targets = explicitTargets ? route.targets.map(normalizeTargetCompat).filter(target => target.account) : [];
     if (!targets.length && Array.isArray(route.accounts)) {
       targets = route.accounts.map(account => ({
         account,
@@ -172,9 +174,14 @@
     if (!intent.model) intent.model = models.find(model => model.includes(alias)) || models[0] || "";
     const efforts = reasoningEffortsForCompat(intent.model);
     if (!efforts.includes(intent.effort)) intent.effort = efforts.includes("auto") ? "auto" : efforts[0] || "auto";
+    const rawStrategy = String(route.strategy || "").trim();
+    const strategy = !explicitTargets && Array.isArray(route.accounts) && !rawStrategy
+      ? "least_loaded"
+      : routeStrategies.has(rawStrategy) ? rawStrategy : "";
     return {
       model: intent.model,
       reasoning_effort: intent.effort,
+      strategy,
       targets: targets.map(target => ({
         account: target.account,
         model: target.model || intent.model,
@@ -218,14 +225,22 @@
       return Boolean(realCapabilityFor(account, route.model, route.reasoning_effort));
     });
     if (allCapabilityTargets) {
-      return {
+      const payload = {
         model: route.model,
         reasoning_effort: route.reasoning_effort,
         targets: route.targets.map(target => ({ account: target.account }))
       };
+      if (route.strategy) payload.strategy = route.strategy;
+      return payload;
     }
 
-    return {
+    const legacy = legacyRouteSource(raw, alias);
+    if (legacy) {
+      const payload = legacyRoutePayload(legacy, route, alias);
+      if (payload) return payload;
+    }
+
+    const payload = {
       targets: route.targets.map((target, index) => {
         const account = configuredAccount(target.account);
         if (!account) throw new Error(`${alias} 的渠道 ${index + 1} 不存在`);
@@ -235,6 +250,37 @@
         return { account: target.account, model: upstream, reasoning_effort: route.reasoning_effort };
       })
     };
+    if (route.strategy) payload.strategy = route.strategy;
+    return payload;
+  }
+
+  function legacyRouteSource(raw, alias) {
+    const persisted = routes()[alias] || {};
+    for (const candidate of [raw, persisted]) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate.targets)) continue;
+      if (Array.isArray(candidate.accounts) || candidate.upstream_model || candidate.strategy) return candidate;
+    }
+    return null;
+  }
+
+  function legacyRoutePayload(source, route, alias) {
+    // Strict order is an explicit-target contract. Converting it back to a
+    // legacy accounts[] route would silently restore least_loaded semantics.
+    if (!route.strategy) return null;
+    const accounts = route.targets.map(target => target.account).filter(Boolean);
+    if (!accounts.length) return null;
+    const upstreams = route.targets.map(target => {
+      const account = configuredAccount(target.account);
+      const resolved = capabilityForCompat(account, route.model, route.reasoning_effort);
+      return resolved?.upstream_model || directUpstreamModel(account, route.model) || target.model || source.upstream_model || "";
+    }).filter(Boolean);
+    const implicitAlias = route.model === alias && !source.upstream_model;
+    const uniformUpstream = upstreams.length > 0 && upstreams.every(model => model === upstreams[0]);
+    if (!implicitAlias && !uniformUpstream) return null;
+    const payload = { accounts };
+    if (source.upstream_model || (!implicitAlias && uniformUpstream)) payload.upstream_model = source.upstream_model || upstreams[0];
+    payload.strategy = route.strategy;
+    return payload;
   }
 
   function setupModelsCompat() {
@@ -251,6 +297,7 @@
 
   async function saveRoutesCompat() {
     try {
+      if (typeof window.flushRouteAliasDrafts === "function") window.flushRouteAliasDrafts();
       const payload = {};
       for (const [alias, raw] of Object.entries(routeDraft || {})) {
         const name = String(alias || "").trim();
@@ -261,9 +308,11 @@
       const changes = routeChangeLines();
       if (changes.length && !confirm(`确认保存并立即影响新请求？\n\n${changes.join("\n")}`)) return;
       await api("/routes", { method: "PUT", body: JSON.stringify(payload) });
+      if (typeof window.invalidateLoads === "function") window.invalidateLoads();
       routeDraft = JSON.parse(JSON.stringify(payload));
       routesDirty = false;
       renderRouteChangeSummary();
+      renderRoutes();
       say("路由已保存并热加载");
       await load();
     } catch (error) {

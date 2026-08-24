@@ -160,6 +160,89 @@ func TestGatewayFailsOver(t *testing.T) {
 	}
 }
 
+func TestGatewayFailsOverOnPaymentRequired(t *testing.T) {
+	var firstCalls, secondCalls atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		http.Error(w, "subscription exhausted", http.StatusPaymentRequired)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer second.Close()
+	accounts := []config.Account{
+		{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Targets: []config.RouteTarget{{Account: "first", Model: "m"}, {Account: "second", Model: "m"}}}})
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[]}`))
+	if w.Code != http.StatusOK || firstCalls.Load() != 1 || secondCalls.Load() != 1 {
+		t.Fatalf("status=%d calls=%d,%d body=%s", w.Code, firstCalls.Load(), secondCalls.Load(), w.Body.String())
+	}
+}
+
+func TestRetryableStatusIncludesProviderOverloadAndRejectsClientErrors(t *testing.T) {
+	for _, code := range []int{http.StatusInternalServerError, http.StatusNotImplemented, 529, 599} {
+		if !retryableStatus(code) {
+			t.Errorf("status %d should allow failover", code)
+		}
+	}
+	for _, code := range []int{http.StatusBadRequest, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		if retryableStatus(code) {
+			t.Errorf("status %d should not allow generic failover", code)
+		}
+	}
+}
+
+func TestGatewayPreservesActionableResponseWhenFinalFailoverTransportFails(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "90")
+		writeAPIError(w, http.StatusTooManyRequests, "all credentials cooling down", "rate_limit_error")
+	}))
+	defer first.Close()
+	accounts := []config.Account{
+		{ID: "limited", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "offline", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Targets: []config.RouteTarget{{Account: "limited", Model: "m"}, {Account: "offline", Model: "m"}}}})
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[]}`))
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "90" || !strings.Contains(w.Body.String(), "all credentials cooling down") {
+		t.Fatalf("status=%d retry-after=%q body=%s", w.Code, w.Header().Get("Retry-After"), w.Body.String())
+	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 || recent[0].AccountID != "limited" || !strings.Contains(recent[0].Error, "final failover failed") {
+		t.Fatalf("recent=%+v", recent)
+	}
+}
+
+func TestCooldownForSupportsRetryAfterDateAndCapsExtremeValues(t *testing.T) {
+	retryAt := time.Now().Add(2 * time.Minute).UTC().Truncate(time.Second)
+	response := &http.Response{Header: http.Header{"Retry-After": []string{retryAt.Format(http.TimeFormat)}}}
+	got := cooldownFor(response, 30*time.Second)
+	if got < 110*time.Second || got > 2*time.Minute {
+		t.Fatalf("HTTP-date Retry-After cooldown=%v", got)
+	}
+
+	response.Header.Set("Retry-After", "999999")
+	if got = cooldownFor(response, 30*time.Second); got != 24*time.Hour {
+		t.Fatalf("extreme Retry-After cooldown=%v, want 24h", got)
+	}
+
+	response.Header.Set("Retry-After", "9223372036854775807")
+	if got = cooldownFor(response, 30*time.Second); got != 24*time.Hour {
+		t.Fatalf("overflow-sized Retry-After cooldown=%v, want 24h", got)
+	}
+
+	response.Header.Set("Retry-After", "invalid")
+	if got = cooldownFor(response, 30*time.Second); got != 30*time.Second {
+		t.Fatalf("invalid Retry-After cooldown=%v, want fallback", got)
+	}
+}
+
 func TestGatewayReturnsCachedUpstreamErrorWithoutQueueWait(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

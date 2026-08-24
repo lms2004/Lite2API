@@ -112,10 +112,18 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveOAuthStatus(w, r)
 	case path == "/oauth/accounts" && r.Method == http.MethodGet:
 		g.serveOAuthAccounts(w, r)
+	case path == "/oauth/accounts/refresh" && r.Method == http.MethodPost:
+		g.serveOAuthAccountRefresh(w, r)
+	case path == "/oauth/accounts/priority" && r.Method == http.MethodPost:
+		g.serveOAuthAccountPriority(w, r)
 	case path == "/oauth/accounts" && r.Method == http.MethodDelete:
 		g.serveOAuthAccountDelete(w, r)
 	case path == "/oauth/accounts/status" && r.Method == http.MethodPost:
 		g.serveOAuthAccountStatus(w, r)
+	case path == "/oauth/routing" && r.Method == http.MethodGet:
+		g.serveOAuthRouting(w, r)
+	case path == "/oauth/routing" && r.Method == http.MethodPut:
+		g.serveOAuthRoutingUpdate(w, r)
 	case path == "/accounts/test" && r.Method == http.MethodPost:
 		g.serveAccountTest(w, r, state)
 	case path == "/accounts/export" && r.Method == http.MethodPost:

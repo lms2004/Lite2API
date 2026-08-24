@@ -289,6 +289,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 
 	excluded := make(map[string]struct{})
 	var last *bufferedResponse
+	var lastAccountID, lastUpstreamModel, lastReasoningEffort string
 	maxAttempts := min(state.cfg.Server.MaxFailoverAttempts, len(state.cfg.Accounts))
 	maxAttempts = state.scheduler.AttemptLimit(model, maxAttempts)
 	if maxAttempts <= 0 {
@@ -307,6 +308,9 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.Error = err.Error()
 			if last != nil {
 				last.write(w)
+				record.AccountID = lastAccountID
+				record.UpstreamModel = lastUpstreamModel
+				record.ReasoningEffort = lastReasoningEffort
 				record.Status = last.status
 				applyBufferedResponseMetadata(&record, last.header, last.body)
 				if record.OutputType == "" && operation == config.OperationImages {
@@ -356,6 +360,19 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 				g.stats.Failover()
 				continue
 			}
+			if last != nil {
+				last.write(w)
+				record.AccountID = lastAccountID
+				record.UpstreamModel = lastUpstreamModel
+				record.ReasoningEffort = lastReasoningEffort
+				record.Status = last.status
+				record.Error = fmt.Sprintf("upstream returned %d; final failover failed: %v", last.status, err)
+				applyBufferedResponseMetadata(&record, last.header, last.body)
+				if record.OutputType == "" && operation == config.OperationImages {
+					record.OutputType = "image"
+				}
+				return
+			}
 			writeAPIError(w, http.StatusBadGateway, "upstream request failed", "upstream_error")
 			record.Status = http.StatusBadGateway
 			return
@@ -364,8 +381,11 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			buffered := bufferResponse(resp, 1<<20)
 			selection.Release()
 			last = buffered
+			lastAccountID = selection.Account.Config.ID
+			lastUpstreamModel = selection.Model
+			lastReasoningEffort = selection.ReasoningEffort
 			cooldown := cooldownFor(resp, state.cfg.Server.CircuitCooldown.Duration)
-			forceCircuit := resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429
+			forceCircuit := resp.StatusCode == 401 || resp.StatusCode == 402 || resp.StatusCode == 403 || resp.StatusCode == 429
 			if !(selection.Targeted && resp.StatusCode == http.StatusNotFound) {
 				selection.Account.reportFailure("HTTP "+strconv.Itoa(resp.StatusCode), state.cfg.Server.FailureThreshold, cooldown, forceCircuit)
 				if retryableStatus(resp.StatusCode) {
@@ -668,11 +688,22 @@ func (r *bufferedResponse) write(w http.ResponseWriter) {
 }
 
 func retryableStatus(code int) bool {
-	return code == 401 || code == 403 || code == 408 || code == 409 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504
+	return code == 401 || code == 402 || code == 403 || code == 408 || code == 409 || code == 425 || code == 429 || (code >= 500 && code <= 599)
 }
 func cooldownFor(resp *http.Response, fallback time.Duration) time.Duration {
-	if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds > 0 && seconds < 3600 {
+	const maximum = 24 * time.Hour
+	raw := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds > 0 {
+		if seconds >= int64(maximum/time.Second) {
+			return maximum
+		}
 		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, err := http.ParseTime(raw); err == nil {
+		wait := time.Until(retryAt)
+		if wait > 0 {
+			return min(wait, maximum)
+		}
 	}
 	return fallback
 }

@@ -307,6 +307,7 @@ func applyDefaults(cfg *Config) {
 	for alias, route := range cfg.Routes {
 		route.Model = strings.TrimSpace(route.Model)
 		route.ReasoningEffort = strings.ToLower(strings.TrimSpace(route.ReasoningEffort))
+		route.Strategy = strings.ToLower(strings.TrimSpace(route.Strategy))
 		cfg.Routes[alias] = route
 	}
 }

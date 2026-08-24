@@ -44,6 +44,15 @@ func TestAdminAutoLoginEnvironmentIsExplicit(t *testing.T) {
 	}
 }
 
+func TestNormalizeCanonicalizesRouteStrategy(t *testing.T) {
+	cfg := Defaults()
+	cfg.Routes["alias"] = Route{Strategy: "  PRIORITY  "}
+	cfg = Normalize(cfg)
+	if got := cfg.Routes["alias"].Strategy; got != "priority" {
+		t.Fatalf("strategy = %q, want priority", got)
+	}
+}
+
 func TestEnvironmentSecretsWin(t *testing.T) {
 	t.Setenv("TEST_UPSTREAM_KEY", "from-env")
 	a := Account{APIKey: "from-file", APIKeyEnv: "TEST_UPSTREAM_KEY"}

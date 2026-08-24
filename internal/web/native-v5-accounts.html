@@ -31,8 +31,9 @@
       <section id="v5SourceAccounts" class="source-pane" role="tabpanel">
         <div class="v10-pane-head">
           <div><span class="v10-eyebrow">Credential accounts</span><h2>认证账号与额度</h2><p>优先显示额度预警、冷却和不可用账号。</p></div>
-          <div class="toolbar"><div class="search"><input id="oauthAccountSearch" aria-label="搜索认证账号" placeholder="搜索账号、套餐或渠道"></div><select id="oauthAccountStatus" aria-label="账号状态筛选"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
+          <div class="toolbar"><label class="oauth-routing-control"><span>同级选号</span><select id="oauthRoutingStrategy" aria-label="OAuth 同优先级账号选择策略" onchange="setOAuthRoutingStrategy(this.value,this)" disabled><option value="round-robin">轮询</option><option value="fill-first">固定首选</option></select></label><button id="oauthRefreshBtn" class="btn-ghost" type="button" onclick="refreshOAuthAccounts('', this)"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>刷新渠道</button><div class="search"><input id="oauthAccountSearch" aria-label="搜索认证账号" placeholder="搜索账号、套餐或渠道"></div><select id="oauthAccountStatus" aria-label="账号状态筛选"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
         </div>
+        <div id="oauthRoutingHint" class="oauth-routing-hint" role="status">正在读取账号选择策略…</div>
         <div id="oauthChannelRail" class="channel-rail" role="tablist" aria-label="按渠道筛选账号"></div>
         <div id="oauthAccounts" class="channel-groups"><div class="empty">正在读取认证账号…</div></div>
         <div class="pagination-note"><span id="oauthAccountCount"></span></div>

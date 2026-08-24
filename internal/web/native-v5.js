@@ -25,6 +25,10 @@
     return card?.querySelector(".route-alias")?.value?.trim() || "未命名";
   }
 
+  function routeKey(card) {
+    return card?.dataset.routeKey || encodeURIComponent(routeAlias(card));
+  }
+
   function routeModel(card) {
     return card?.querySelector(".route-intent select")?.value?.trim() || "未选择模型";
   }
@@ -46,20 +50,22 @@
   }
 
   function routeSignature(cards) {
-    return cards.map(card => [routeAlias(card), routeModel(card), routeTone(card)].join("::")).join("||");
+    return cards.map(card => [routeKey(card), routeAlias(card), routeModel(card), routeTone(card)].join("::")).join("||");
   }
 
-  function selectedRoute(cards) {
+  function selectedRouteKey(cards) {
     const stored = localStorage.getItem(STORAGE.route);
-    if (stored && cards.some(card => routeAlias(card) === stored)) return stored;
-    return routeAlias(cards[0]);
+    if (stored && cards.some(card => routeKey(card) === stored)) return stored;
+    const legacy = cards.find(card => routeAlias(card) === stored);
+    if (legacy) return routeKey(legacy);
+    return routeKey(cards[0]);
   }
 
-  function selectRoute(alias, focus = false) {
+  function selectRoute(key, focus = false) {
     const cards = routeCards();
     if (!cards.length) return;
-    const selected = cards.find(card => routeAlias(card) === alias) || cards[0];
-    const value = routeAlias(selected);
+    const selected = cards.find(card => routeKey(card) === key || routeAlias(card) === key) || cards[0];
+    const value = routeKey(selected);
     localStorage.setItem(STORAGE.route, value);
 
     cards.forEach(card => {
@@ -68,7 +74,7 @@
       card.setAttribute("aria-hidden", String(!active));
     });
     all("#v5RouteList .route-master-item").forEach(button => {
-      const active = button.dataset.route === value;
+      const active = button.dataset.routeKey === value;
       button.setAttribute("aria-selected", String(active));
       button.tabIndex = active ? 0 : -1;
     });
@@ -81,26 +87,28 @@
     const cards = routeCards();
     refineRouteCopy(cards);
     const signature = routeSignature(cards);
-    const selected = selectedRoute(cards);
+    const selected = selectedRouteKey(cards);
 
     if (signature !== state.routeSignature || list.children.length !== cards.length) {
       state.routeSignature = signature;
       list.replaceChildren();
       cards.forEach(card => {
         const alias = routeAlias(card);
+        const key = routeKey(card);
         const model = routeModel(card);
         const tone = routeTone(card);
         const button = document.createElement("button");
         button.type = "button";
         button.className = "route-master-item";
         button.dataset.route = alias;
-        button.setAttribute("aria-selected", String(alias === selected));
+        button.dataset.routeKey = key;
+        button.setAttribute("aria-selected", String(key === selected));
         button.innerHTML = `<span class="route-master-copy"><strong></strong><small></small></span><span class="route-master-state ${tone === "ready" ? "" : tone}" aria-hidden="true"></span>`;
         button.querySelector("strong").textContent = alias;
         button.querySelector("small").textContent = model;
         // Pointer selection should keep focus in the master list. Editing the
         // alias remains an explicit action instead of an accidental side effect.
-        button.addEventListener("click", () => selectRoute(alias, false));
+        button.addEventListener("click", () => selectRoute(key, false));
         list.append(button);
       });
     }
@@ -235,6 +243,9 @@
     if (created) new MutationObserver(schedule).observe(created, { attributes: true, subtree: true, childList: true, characterData: true, attributeFilter: ["hidden"] });
     $("createdKey")?.addEventListener("input", schedule);
     document.addEventListener("change", event => {
+      if (event.target.closest?.("#routeRows")) schedule();
+    });
+    document.addEventListener("input", event => {
       if (event.target.closest?.("#routeRows")) schedule();
     });
   }

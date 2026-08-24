@@ -203,6 +203,14 @@ type Selection struct {
 	release         func()
 }
 
+type routeTargetCandidate struct {
+	index           int
+	account         *AccountRuntime
+	key             string
+	model           string
+	reasoningEffort string
+}
+
 func (s *Selection) Release() {
 	if s != nil && s.release != nil {
 		s.release()
@@ -377,6 +385,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		capacityBlocked := false
 		now := time.Now()
 		skipped := make([]string, 0, len(route.Targets))
+		candidates := make([]routeTargetCandidate, 0, len(route.Targets))
 		for index, target := range route.Targets {
 			key := routeTargetKey(index, target)
 			if _, skip := excluded[key]; skip {
@@ -393,12 +402,24 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 				continue
 			}
 			eligible = true
+			candidates = append(candidates, routeTargetCandidate{
+				index: index, account: account, key: key,
+				model: upstreamModel, reasoningEffort: reasoningEffort,
+			})
+		}
+		counter := uint64(0)
+		if route.Strategy == "round_robin" && len(candidates) > 1 {
+			counter = s.counter(model)
+		}
+		orderRouteTargetCandidates(candidates, route.Strategy, model, session, counter)
+		for _, candidate := range candidates {
+			account := candidate.account
 			available := account.available(now)
 			if !available || !account.tryAcquire() {
 				if available {
 					capacityBlocked = true
 				}
-				skipped = append(skipped, key)
+				skipped = append(skipped, candidate.key)
 				continue
 			}
 			for _, skippedKey := range skipped {
@@ -409,8 +430,8 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 			s.mu.RUnlock()
 			selected := account
 			return &Selection{
-				Account: selected, Model: upstreamModel, ReasoningEffort: reasoningEffort,
-				Key: key, Targeted: true, release: func() {
+				Account: selected, Model: candidate.model, ReasoningEffort: candidate.reasoningEffort,
+				Key: candidate.key, Targeted: true, release: func() {
 					selected.release()
 					select {
 					case s.notify <- struct{}{}:
@@ -489,6 +510,7 @@ func (s *Scheduler) CachedUpstreamFailure(model, operation string, excluded map[
 	route, routed := s.routes[model]
 	now := time.Now()
 	if routed && len(route.Targets) > 0 {
+		candidates := make([]routeTargetCandidate, 0, len(route.Targets))
 		for index, target := range route.Targets {
 			key := routeTargetKey(index, target)
 			if _, skip := excluded[key]; skip {
@@ -501,6 +523,11 @@ func (s *Scheduler) CachedUpstreamFailure(model, operation string, excluded map[
 			if _, _, compatible := config.ResolveRouteTarget(account.Config, route, target); !compatible || account.available(now) {
 				continue
 			}
+			candidates = append(candidates, routeTargetCandidate{index: index, account: account, key: key})
+		}
+		orderRouteTargetCandidates(candidates, route.Strategy, model, "", 0)
+		for _, candidate := range candidates {
+			account := candidate.account
 			if failure := account.cachedUpstreamFailure(model, operation); failure != nil {
 				return failure
 			}
@@ -547,6 +574,63 @@ func (s *Scheduler) CachedUpstreamFailure(model, operation string, excluded map[
 
 func routeTargetKey(index int, target config.RouteTarget) string {
 	return fmt.Sprintf("target:%d:%s:%s:%s", index, target.Account, target.Model, target.ReasoningEffort)
+}
+
+// orderRouteTargetCandidates applies an optional scheduling policy to an
+// explicit target set. An empty strategy deliberately preserves the authored
+// order for backward compatibility. Strategy-bearing target routes now honor
+// the same account controls as legacy account routes while retaining each
+// target's provider-specific model mapping.
+func orderRouteTargetCandidates(candidates []routeTargetCandidate, strategy, model, session string, counter uint64) {
+	strategy = strings.TrimSpace(strategy)
+	if len(candidates) < 2 || strategy == "" {
+		return
+	}
+	if strategy == "round_robin" {
+		// counter starts at one; make the first request use the first authored
+		// target and rotate from there.
+		offset := 0
+		if counter > 0 {
+			offset = int((counter - 1) % uint64(len(candidates)))
+		}
+		if offset > 0 {
+			rotated := append([]routeTargetCandidate(nil), candidates[offset:]...)
+			rotated = append(rotated, candidates[:offset]...)
+			copy(candidates, rotated)
+		}
+		return
+	}
+	if strategy == "sticky" && session != "" {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			iKey := model + "\x00" + candidates[i].key
+			jKey := model + "\x00" + candidates[j].key
+			iScore := rendezvousScore(session, iKey, candidates[i].account)
+			jScore := rendezvousScore(session, jKey, candidates[j].account)
+			if iScore != jScore {
+				return iScore > jScore
+			}
+			return candidates[i].index < candidates[j].index
+		})
+		return
+	}
+
+	// Sticky without a stable session follows the least-loaded policy, matching
+	// the legacy scheduler. Priority values are lower-first in Lite2API.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i].account, candidates[j].account
+		if strategy != "priority" {
+			if aLoad, bLoad := load(a), load(b); aLoad != bLoad {
+				return aLoad < bLoad
+			}
+		}
+		if a.Config.Priority != b.Config.Priority {
+			return a.Config.Priority < b.Config.Priority
+		}
+		if a.Config.ID != b.Config.ID && strategy != "priority" {
+			return a.Config.ID < b.Config.ID
+		}
+		return candidates[i].index < candidates[j].index
+	})
 }
 
 func (s *Scheduler) counter(model string) uint64 {

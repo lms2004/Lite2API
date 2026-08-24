@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +63,20 @@ type oauthAccountDeleteInput struct {
 	ID string `json:"id"`
 }
 
+type oauthAccountRefreshInput struct {
+	ID  string `json:"id,omitempty"`
+	All bool   `json:"all,omitempty"`
+}
+
+type oauthAccountPriorityInput struct {
+	ID       string `json:"id"`
+	Priority *int   `json:"priority"`
+}
+
+type oauthRoutingInput struct {
+	Strategy string `json:"strategy"`
+}
+
 type oauthAdapterResponse struct {
 	Status string `json:"status"`
 	URL    string `json:"url"`
@@ -72,11 +89,14 @@ type oauthCredential struct {
 	Provider       string             `json:"provider"`
 	Identity       string             `json:"identity"`
 	Plan           string             `json:"plan,omitempty"`
+	Priority       int                `json:"priority"`
 	Status         string             `json:"status"`
 	Disabled       bool               `json:"disabled"`
 	Ready          bool               `json:"ready"`
 	Success        int64              `json:"success"`
 	Failed         int64              `json:"failed"`
+	RecentSuccess  int64              `json:"recent_success"`
+	RecentFailed   int64              `json:"recent_failed"`
 	UpdatedAt      string             `json:"updated_at,omitempty"`
 	LastRefresh    string             `json:"last_refresh,omitempty"`
 	NextRetryAfter string             `json:"next_retry_after,omitempty"`
@@ -122,9 +142,12 @@ type oauthAuthFilesResponse struct {
 		Email          string `json:"email"`
 		Account        string `json:"account"`
 		AccountType    string `json:"account_type"`
+		Priority       int    `json:"priority"`
 		Status         string `json:"status"`
 		Disabled       bool   `json:"disabled"`
 		Unavailable    bool   `json:"unavailable"`
+		RuntimeOnly    bool   `json:"runtime_only"`
+		Path           string `json:"path"`
 		Success        int64  `json:"success"`
 		Failed         int64  `json:"failed"`
 		UpdatedAt      string `json:"updated_at"`
@@ -133,8 +156,13 @@ type oauthAuthFilesResponse struct {
 		Quota          struct {
 			Exceeded bool `json:"exceeded"`
 		} `json:"quota"`
-		QuotaWindows []oauthQuotaWindow `json:"quota_windows"`
-		PromptUsage  *oauthPromptUsage  `json:"prompt_usage"`
+		QuotaWindows   []oauthQuotaWindow `json:"quota_windows"`
+		PromptUsage    *oauthPromptUsage  `json:"prompt_usage"`
+		RecentRequests []struct {
+			Time    string `json:"time"`
+			Success int64  `json:"success"`
+			Failed  int64  `json:"failed"`
+		} `json:"recent_requests"`
 	} `json:"files"`
 }
 
@@ -242,6 +270,130 @@ func (g *Gateway) serveOAuthAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": credentials})
 }
 
+func (g *Gateway) serveOAuthAccountPriority(w http.ResponseWriter, r *http.Request) {
+	var input oauthAccountPriorityInput
+	if decodeAdminJSON(w, r, &input) != nil {
+		return
+	}
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		writeAPIErrorCode(w, http.StatusBadRequest, "OAuth account id is required", "invalid_request_error", "invalid_oauth_account")
+		return
+	}
+	if input.Priority == nil || *input.Priority < 0 || *input.Priority > 1000 {
+		writeAPIErrorCode(w, http.StatusBadRequest, "priority must be an integer between 0 and 1000", "invalid_request_error", "invalid_oauth_priority")
+		return
+	}
+
+	payload := map[string]any{
+		"name":     resolveOAuthAccountName(r.Context(), input.ID),
+		"priority": *input.Priority,
+	}
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := callOAuthAdapter(r.Context(), http.MethodPatch, "auth-files/fields", nil, payload, &result); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "status": result.Status, "id": input.ID, "priority": *input.Priority,
+	})
+}
+
+func (g *Gateway) serveOAuthRouting(w http.ResponseWriter, r *http.Request) {
+	var result struct {
+		Strategy string `json:"strategy"`
+	}
+	if err := callOAuthAdapter(r.Context(), http.MethodGet, "routing/strategy", nil, nil, &result); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	strategy, ok := normalizeOAuthRoutingStrategy(result.Strategy)
+	if !ok {
+		writeAPIErrorCode(w, http.StatusBadGateway, "OAuth adapter returned an unsupported routing strategy", "upstream_error", "invalid_oauth_routing_strategy")
+		return
+	}
+	writeOAuthRouting(w, strategy)
+}
+
+func (g *Gateway) serveOAuthRoutingUpdate(w http.ResponseWriter, r *http.Request) {
+	var input oauthRoutingInput
+	if decodeAdminJSON(w, r, &input) != nil {
+		return
+	}
+	if strings.TrimSpace(input.Strategy) == "" {
+		writeAPIErrorCode(w, http.StatusBadRequest, "strategy is required", "invalid_request_error", "invalid_oauth_routing_strategy")
+		return
+	}
+	strategy, ok := normalizeOAuthRoutingStrategy(input.Strategy)
+	if !ok {
+		writeAPIErrorCode(w, http.StatusBadRequest, "strategy must be round-robin or fill-first", "invalid_request_error", "invalid_oauth_routing_strategy")
+		return
+	}
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := callOAuthAdapter(r.Context(), http.MethodPut, "routing/strategy", nil, map[string]any{"value": strategy}, &result); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeOAuthRouting(w, strategy)
+}
+
+func writeOAuthRouting(w http.ResponseWriter, strategy string) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                 true,
+		"strategy":           strategy,
+		"priority_direction": "higher_first",
+		"automatic_failover": true,
+	})
+}
+
+func normalizeOAuthRoutingStrategy(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "round-robin", "round_robin", "roundrobin", "rr":
+		return "round-robin", true
+	case "fill-first", "fill_first", "fillfirst", "ff":
+		return "fill-first", true
+	default:
+		return "", false
+	}
+}
+
+func (g *Gateway) serveOAuthAccountRefresh(w http.ResponseWriter, r *http.Request) {
+	var input oauthAccountRefreshInput
+	if decodeAdminJSON(w, r, &input) != nil {
+		return
+	}
+	input.ID = strings.TrimSpace(input.ID)
+
+	payload := map[string]any{"all": true}
+	if input.ID != "" {
+		payload = map[string]any{"name": resolveOAuthAccountName(r.Context(), input.ID)}
+	}
+
+	var result struct {
+		Status    string           `json:"status"`
+		Refreshed int              `json:"refreshed"`
+		Skipped   int              `json:"skipped"`
+		Files     []map[string]any `json:"files"`
+		Failed    []map[string]any `json:"failed"`
+	}
+	if err := callOAuthAdapter(r.Context(), http.MethodPost, "auth-files/refresh", nil, payload, &result); err != nil {
+		writeOAuthAdapterError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        len(result.Failed) == 0,
+		"status":    result.Status,
+		"refreshed": result.Refreshed,
+		"skipped":   result.Skipped,
+		"files":     result.Files,
+		"failed":    result.Failed,
+	})
+}
+
 func (g *Gateway) serveOAuthAccountDelete(w http.ResponseWriter, r *http.Request) {
 	var input oauthAccountDeleteInput
 	if decodeAdminJSON(w, r, &input) != nil {
@@ -298,8 +450,14 @@ func resolveOAuthAccountName(ctx context.Context, id string) string {
 		return id
 	}
 	for _, item := range payload.Files {
-		if id != strings.TrimSpace(item.AuthIndex) && id != strings.TrimSpace(item.ID) && id != strings.TrimSpace(item.Name) {
+		publicID := shortCredentialID(firstNonEmpty(item.ID, item.Name))
+		if id != strings.TrimSpace(item.AuthIndex) && id != strings.TrimSpace(item.ID) && id != strings.TrimSpace(item.Name) && id != publicID {
 			continue
+		}
+		if item.RuntimeOnly {
+			if name := filepath.Base(strings.TrimSpace(item.Path)); name != "." && name != "" {
+				return name
+			}
 		}
 		if name := firstNonEmpty(strings.TrimSpace(item.Name), strings.TrimSpace(item.ID)); name != "" {
 			return name
@@ -321,7 +479,7 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 		}
 		id := strings.TrimSpace(item.AuthIndex)
 		if id == "" {
-			id = shortCredentialID(item.ID)
+			id = shortCredentialID(firstNonEmpty(item.ID, item.Name))
 		}
 		status := strings.ToLower(strings.TrimSpace(item.Status))
 		if item.Disabled {
@@ -339,15 +497,33 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 			promptUsage = &copyPromptUsage
 		}
 		copy(quotaWindows, item.QuotaWindows)
+		var recentSuccess, recentFailed int64
+		for _, bucket := range item.RecentRequests {
+			recentSuccess += bucket.Success
+			recentFailed += bucket.Failed
+		}
 		credentials = append(credentials, oauthCredential{
 			ID: id, Provider: provider, Identity: maskCredentialIdentity(identity),
-			Plan: strings.TrimSpace(item.AccountType), Status: status, Disabled: item.Disabled,
+			Plan: strings.TrimSpace(item.AccountType), Priority: item.Priority, Status: status, Disabled: item.Disabled,
 			Ready:   status == "active" && !item.Disabled && !item.Unavailable,
 			Success: item.Success, Failed: item.Failed, UpdatedAt: item.UpdatedAt, LastRefresh: item.LastRefresh,
+			RecentSuccess: recentSuccess, RecentFailed: recentFailed,
 			NextRetryAfter: item.NextRetryAfter, QuotaExceeded: item.Quota.Exceeded,
 			QuotaWindows: quotaWindows, PromptUsage: promptUsage,
 		})
 	}
+	sort.SliceStable(credentials, func(i, j int) bool {
+		if credentials[i].Provider != credentials[j].Provider {
+			return credentials[i].Provider < credentials[j].Provider
+		}
+		if credentials[i].Priority != credentials[j].Priority {
+			return credentials[i].Priority > credentials[j].Priority
+		}
+		if credentials[i].Ready != credentials[j].Ready {
+			return credentials[i].Ready
+		}
+		return credentials[i].ID < credentials[j].ID
+	})
 	return credentials, nil
 }
 
@@ -405,10 +581,11 @@ func maskCredentialIdentity(value string) string {
 
 func shortCredentialID(value string) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= 16 {
-		return value
+	if value == "" {
+		return ""
 	}
-	return value[:16]
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:8])
 }
 
 func callOAuthAdapter(ctx context.Context, method, endpoint string, query url.Values, body any, target any) error {
@@ -484,17 +661,20 @@ func oauthAdapterBaseURL() (*url.URL, error) {
 	return u, nil
 }
 
-func oauthHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			Proxy:                 nil,
-			DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-			ResponseHeaderTimeout: 10 * time.Second,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("OAuth adapter redirects are disabled") },
-	}
+var sharedOAuthHTTPClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		Proxy:                 nil,
+		DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		MaxIdleConns:          8,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("OAuth adapter redirects are disabled") },
 }
+
+func oauthHTTPClient() *http.Client { return sharedOAuthHTTPClient }
 
 func validOAuthState(state string) bool { return oauthStatePattern.MatchString(state) }
 

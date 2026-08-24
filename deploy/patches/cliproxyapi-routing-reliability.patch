@@ -1,0 +1,413 @@
+diff --git a/internal/api/handlers/management/config_basic.go b/internal/api/handlers/management/config_basic.go
+--- a/internal/api/handlers/management/config_basic.go
++++ b/internal/api/handlers/management/config_basic.go
+@@ -13,6 +13,7 @@ import (
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+ 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
++	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+ 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+ 	log "github.com/sirupsen/logrus"
+ 	"gopkg.in/yaml.v3"
+@@ -313,8 +314,54 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid strategy"})
+ 		return
+ 	}
++	if h == nil || h.cfg == nil {
++		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config unavailable"})
++		return
++	}
++
++	h.mu.Lock()
++	previous := h.cfg.Routing.Strategy
+ 	h.cfg.Routing.Strategy = normalized
+-	h.persist(c)
++	if !h.persistLocked(c) {
++		h.cfg.Routing.Strategy = previous
++		h.mu.Unlock()
++		return
++	}
++	selector := selectorForRoutingConfig(h.cfg)
++	manager := h.authManager
++	h.mu.Unlock()
++
++	// The management handler and the running service share the same config
++	// pointer, so the file watcher cannot reliably infer the old strategy after
++	// this mutation. Apply the selector directly to make the API change effective
++	// before returning control to the caller; the watcher remains responsible for
++	// the rest of the config reload.
++	if manager != nil {
++		manager.SetSelector(selector)
++	}
++}
++
++func selectorForRoutingConfig(cfg *config.Config) coreauth.Selector {
++	var selector coreauth.Selector = &coreauth.RoundRobinSelector{}
++	if cfg == nil {
++		return selector
++	}
++	if strategy, _ := normalizeRoutingStrategy(cfg.Routing.Strategy); strategy == "fill-first" {
++		selector = &coreauth.FillFirstSelector{}
++	}
++	if !cfg.Routing.ClaudeCodeSessionAffinity && !cfg.Routing.SessionAffinity {
++		return selector
++	}
++	ttl := time.Hour
++	if raw := strings.TrimSpace(cfg.Routing.SessionAffinityTTL); raw != "" {
++		if parsed, errParse := time.ParseDuration(raw); errParse == nil && parsed > 0 {
++			ttl = parsed
++		}
++	}
++	return coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
++		Fallback: selector,
++		TTL:      ttl,
++	})
+ }
+ 
+ // Proxy URL
+diff --git a/internal/registry/models/models.json b/internal/registry/models/models.json
+--- a/internal/registry/models/models.json
++++ b/internal/registry/models/models.json
+@@ -1293,29 +1293,6 @@
+         ]
+       }
+     },
+-    {
+-      "id": "gpt-5.5",
+-      "object": "model",
+-      "created": 1776902400,
+-      "owned_by": "openai",
+-      "type": "openai",
+-      "display_name": "GPT 5.5",
+-      "version": "gpt-5.5",
+-      "description": "Frontier model for complex coding, research, and real-world work.",
+-      "context_length": 272000,
+-      "max_completion_tokens": 128000,
+-      "supported_parameters": [
+-        "tools"
+-      ],
+-      "thinking": {
+-        "levels": [
+-          "low",
+-          "medium",
+-          "high",
+-          "xhigh"
+-        ]
+-      }
+-    },
+     {
+       "id": "codex-auto-review",
+       "object": "model",
+diff --git a/internal/runtime/executor/antigravity_executor.go b/internal/runtime/executor/antigravity_executor.go
+--- a/internal/runtime/executor/antigravity_executor.go
++++ b/internal/runtime/executor/antigravity_executor.go
+@@ -1789,7 +1789,13 @@ func (e *AntigravityExecutor) updateAntigravityCreditsBalance(ctx context.Contex
+ 		log.Debugf("antigravity executor: marshal loadCodeAssist request error: %v", errMarshal)
+ 		return
+ 	}
+-	baseURL := buildBaseURL(auth)
++	// loadCodeAssist is an account/onboarding API served by the production
++	// Cloud Code host. The daily host is used for Antigravity inference and
++	// retrieveUserQuota, but does not reliably expose paid-tier credit data.
++	baseURL := antigravityBaseURLProd
++	if customBaseURL := resolveCustomAntigravityBaseURL(auth); customBaseURL != "" {
++		baseURL = customBaseURL
++	}
+ 	endpointURL := strings.TrimSuffix(baseURL, "/") + "/v1internal:loadCodeAssist"
+ 	httpReq, errReq := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(loadReqBody))
+ 	if errReq != nil {
+diff --git a/sdk/cliproxy/auth/conductor.go b/sdk/cliproxy/auth/conductor.go
+--- a/sdk/cliproxy/auth/conductor.go
++++ b/sdk/cliproxy/auth/conductor.go
+@@ -342,8 +342,13 @@ func (m *Manager) SetSelector(selector Selector) {
+ 		selector = &RoundRobinSelector{}
+ 	}
+ 	m.mu.Lock()
++	previousSessionSelector, hadSessionSelector := m.selector.(*SessionAffinitySelector)
++	nextSessionSelector, keepsSessionSelector := selector.(*SessionAffinitySelector)
+ 	m.selector = selector
+ 	m.mu.Unlock()
++	if hadSessionSelector && (!keepsSessionSelector || previousSessionSelector != nextSessionSelector) {
++		previousSessionSelector.Stop()
++	}
+ 	if m.scheduler != nil {
+ 		m.scheduler.setSelector(selector)
+ 		m.syncScheduler()
+diff --git a/internal/api/handlers/management/auth_files_patch_fields_test.go b/internal/api/handlers/management/auth_files_patch_fields_test.go
+--- a/internal/api/handlers/management/auth_files_patch_fields_test.go
++++ b/internal/api/handlers/management/auth_files_patch_fields_test.go
+@@ -11,6 +11,7 @@ import (
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+ 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
+ )
+ 
+ func TestPatchAuthFileFields_MergeHeadersAndDeleteEmptyValues(t *testing.T) {
+@@ -108,6 +109,47 @@ func TestPatchAuthFileFields_MergeHeadersAndDeleteEmptyValues(t *testing.T) {
+ 	}
+ }
+ 
++func TestPatchAuthFileFields_PriorityAppliesToLiveScheduler(t *testing.T) {
++	t.Setenv("MANAGEMENT_PASSWORD", "")
++	gin.SetMode(gin.TestMode)
++
++	store := &memoryAuthStore{}
++	manager := coreauth.NewManager(store, &coreauth.RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(&routingSelectionTestExecutor{provider: "claude"})
++	for _, id := range []string{"a.json", "b.json"} {
++		record := &coreauth.Auth{ID: id, FileName: id, Provider: "claude", Metadata: map[string]any{"type": "claude"}}
++		if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
++			t.Fatal(errRegister)
++		}
++	}
++	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
++
++	recorder := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(recorder)
++	request := httptest.NewRequest(http.MethodPatch, "/v0/management/auth-files/fields", strings.NewReader(`{"name":"b.json","priority":50}`))
++	request.Header.Set("Content-Type", "application/json")
++	ctx.Request = request
++	h.PatchAuthFileFields(ctx)
++	if recorder.Code != http.StatusOK {
++		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
++	}
++	updated, ok := manager.GetByID("b.json")
++	if !ok || updated.Attributes["priority"] != "50" {
++		t.Fatalf("updated auth=%+v", updated)
++	}
++
++	selected := ""
++	metadata := map[string]any{
++		cliproxyexecutor.SelectedAuthCallbackMetadataKey: func(id string) { selected = id },
++	}
++	if _, errExecute := manager.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{}, cliproxyexecutor.Options{Metadata: metadata}); errExecute != nil {
++		t.Fatal(errExecute)
++	}
++	if selected != "b.json" {
++		t.Fatalf("selected=%q, want highest-priority b.json", selected)
++	}
++}
++
+ func TestPatchAuthFileFields_HeadersEmptyMapIsNoop(t *testing.T) {
+ 	t.Setenv("MANAGEMENT_PASSWORD", "")
+ 	gin.SetMode(gin.TestMode)
+diff --git a/internal/api/handlers/management/config_lists_delete_keys_test.go b/internal/api/handlers/management/config_lists_delete_keys_test.go
+--- a/internal/api/handlers/management/config_lists_delete_keys_test.go
++++ b/internal/api/handlers/management/config_lists_delete_keys_test.go
+@@ -24,7 +24,6 @@ func writeTestConfigFile(t *testing.T) string {
+ 
+ func TestDeleteGeminiKey_RequiresBaseURLWhenAPIKeyDuplicated(t *testing.T) {
+ 	t.Parallel()
+-	gin.SetMode(gin.TestMode)
+ 
+ 	h := &Handler{
+ 		cfg: &config.Config{
+@@ -52,7 +51,6 @@ func TestDeleteGeminiKey_RequiresBaseURLWhenAPIKeyDuplicated(t *testing.T) {
+ 
+ func TestDeleteGeminiKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
+ 	t.Parallel()
+-	gin.SetMode(gin.TestMode)
+ 
+ 	h := &Handler{
+ 		cfg: &config.Config{
+@@ -83,7 +81,6 @@ func TestDeleteGeminiKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
+ 
+ func TestDeleteClaudeKey_DeletesEmptyBaseURLWhenExplicitlyProvided(t *testing.T) {
+ 	t.Parallel()
+-	gin.SetMode(gin.TestMode)
+ 
+ 	h := &Handler{
+ 		cfg: &config.Config{
+@@ -114,7 +111,6 @@ func TestDeleteClaudeKey_DeletesEmptyBaseURLWhenExplicitlyProvided(t *testing.T)
+ 
+ func TestDeleteVertexCompatKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
+ 	t.Parallel()
+-	gin.SetMode(gin.TestMode)
+ 
+ 	h := &Handler{
+ 		cfg: &config.Config{
+@@ -145,7 +141,6 @@ func TestDeleteVertexCompatKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
+ 
+ func TestDeleteCodexKey_RequiresBaseURLWhenAPIKeyDuplicated(t *testing.T) {
+ 	t.Parallel()
+-	gin.SetMode(gin.TestMode)
+ 
+ 	h := &Handler{
+ 		cfg: &config.Config{
+diff --git a/internal/api/handlers/management/config_routing_test.go b/internal/api/handlers/management/config_routing_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/api/handlers/management/config_routing_test.go
+@@ -0,0 +1,115 @@
++package management
++
++import (
++	"context"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
++	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
++)
++
++type routingSelectionTestExecutor struct{ provider string }
++
++func (e *routingSelectionTestExecutor) Identifier() string { return e.provider }
++func (e *routingSelectionTestExecutor) Execute(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
++	return cliproxyexecutor.Response{}, nil
++}
++func (e *routingSelectionTestExecutor) ExecuteStream(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
++	return nil, nil
++}
++func (e *routingSelectionTestExecutor) Refresh(_ context.Context, auth *coreauth.Auth) (*coreauth.Auth, error) {
++	return auth, nil
++}
++func (e *routingSelectionTestExecutor) CountTokens(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
++	return cliproxyexecutor.Response{}, nil
++}
++func (e *routingSelectionTestExecutor) HttpRequest(context.Context, *coreauth.Auth, *http.Request) (*http.Response, error) {
++	return nil, nil
++}
++
++func TestPutRoutingStrategyPersistsAndAppliesImmediately(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	configPath := filepath.Join(t.TempDir(), "config.yaml")
++	if errWrite := os.WriteFile(configPath, []byte("routing:\n  strategy: round-robin\n"), 0o600); errWrite != nil {
++		t.Fatal(errWrite)
++	}
++
++	cfg := &config.Config{Routing: config.RoutingConfig{Strategy: "round-robin"}}
++	manager := coreauth.NewManager(nil, &coreauth.RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(&routingSelectionTestExecutor{provider: "claude"})
++	for _, id := range []string{"b", "a"} {
++		if _, errRegister := manager.Register(context.Background(), &coreauth.Auth{ID: id, Provider: "claude"}); errRegister != nil {
++			t.Fatal(errRegister)
++		}
++	}
++	h := NewHandler(cfg, configPath, manager)
++
++	recorder := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(recorder)
++	request := httptest.NewRequest(http.MethodPut, "/v0/management/routing/strategy", strings.NewReader(`{"value":"fill-first"}`))
++	request.Header.Set("Content-Type", "application/json")
++	ctx.Request = request
++	h.PutRoutingStrategy(ctx)
++
++	if recorder.Code != http.StatusOK {
++		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
++	}
++	if cfg.Routing.Strategy != "fill-first" {
++		t.Fatalf("in-memory strategy=%q", cfg.Routing.Strategy)
++	}
++	persisted, errRead := os.ReadFile(configPath)
++	if errRead != nil || !strings.Contains(string(persisted), "strategy: fill-first") {
++		t.Fatalf("persisted config=%q err=%v", persisted, errRead)
++	}
++
++	for attempt := 0; attempt < 2; attempt++ {
++		selected := ""
++		metadata := map[string]any{
++			cliproxyexecutor.SelectedAuthCallbackMetadataKey: func(id string) { selected = id },
++		}
++		if _, errExecute := manager.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{}, cliproxyexecutor.Options{Metadata: metadata}); errExecute != nil {
++			t.Fatal(errExecute)
++		}
++		if selected != "a" {
++			t.Fatalf("fill-first attempt %d selected %v, want a", attempt, selected)
++		}
++	}
++}
++
++func TestPutRoutingStrategyRollsBackWhenPersistenceFails(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	cfg := &config.Config{Routing: config.RoutingConfig{Strategy: "round-robin"}}
++	h := NewHandler(cfg, filepath.Join(t.TempDir(), "missing", "config.yaml"), coreauth.NewManager(nil, nil, nil))
++	recorder := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(recorder)
++	request := httptest.NewRequest(http.MethodPut, "/v0/management/routing/strategy", strings.NewReader(`{"value":"fill-first"}`))
++	request.Header.Set("Content-Type", "application/json")
++	ctx.Request = request
++	h.PutRoutingStrategy(ctx)
++
++	if recorder.Code != http.StatusInternalServerError {
++		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
++	}
++	if cfg.Routing.Strategy != "round-robin" {
++		t.Fatalf("strategy was not rolled back: %q", cfg.Routing.Strategy)
++	}
++}
++
++func TestSelectorForRoutingConfigPreservesSessionAffinity(t *testing.T) {
++	cfg := &config.Config{Routing: config.RoutingConfig{
++		Strategy: "fill-first", SessionAffinity: true, SessionAffinityTTL: "15m",
++	}}
++	selector := selectorForRoutingConfig(cfg)
++	sticky, ok := selector.(*coreauth.SessionAffinitySelector)
++	if !ok {
++		t.Fatalf("selector type=%T", selector)
++	}
++	defer sticky.Stop()
++}
+diff --git a/internal/runtime/executor/antigravity_executor_credits_test.go b/internal/runtime/executor/antigravity_executor_credits_test.go
+--- a/internal/runtime/executor/antigravity_executor_credits_test.go
++++ b/internal/runtime/executor/antigravity_executor_credits_test.go
+@@ -17,10 +17,27 @@ import (
+ )
+ 
+ func resetAntigravityCreditsRetryState() {
+-	antigravityCreditsFailureByAuth = sync.Map{}
+-	antigravityShortCooldownByAuth = sync.Map{}
+-	antigravityCreditsBalanceByAuth = sync.Map{}
+-	antigravityCreditsHintRefreshByID = sync.Map{}
++	// A warm-token refresh finishes asynchronously. Wait for any in-flight
++	// refresh before clearing shared test state, and mutate sync.Map through its
++	// concurrency-safe API instead of replacing the map while a goroutine uses it.
++	antigravityCreditsHintRefreshByID.Range(func(_, value any) bool {
++		if state, ok := value.(*antigravityCreditsHintRefreshState); ok && state != nil {
++			state.mu.Lock()
++			state.mu.Unlock()
++		}
++		return true
++	})
++	clearAntigravityTestMap(&antigravityCreditsFailureByAuth)
++	clearAntigravityTestMap(&antigravityShortCooldownByAuth)
++	clearAntigravityTestMap(&antigravityCreditsBalanceByAuth)
++	clearAntigravityTestMap(&antigravityCreditsHintRefreshByID)
++}
++
++func clearAntigravityTestMap(values *sync.Map) {
++	values.Range(func(key, _ any) bool {
++		values.Delete(key)
++		return true
++	})
+ }
+ 
+ func TestClassifyAntigravity429(t *testing.T) {
+diff --git a/sdk/cliproxy/auth/scheduler_test.go b/sdk/cliproxy/auth/scheduler_test.go
+--- a/sdk/cliproxy/auth/scheduler_test.go
++++ b/sdk/cliproxy/auth/scheduler_test.go
+@@ -95,6 +95,17 @@ func TestSchedulerPick_RoundRobinHighestPriority(t *testing.T) {
+ 	}
+ }
+ 
++func TestManagerSetSelectorStopsReplacedSessionCache(t *testing.T) {
++	sticky := NewSessionAffinitySelector(&RoundRobinSelector{})
++	manager := NewManager(nil, sticky, nil)
++	manager.SetSelector(&FillFirstSelector{})
++	select {
++	case <-sticky.cache.stopCh:
++	default:
++		t.Fatal("replaced session selector cleanup loop was not stopped")
++	}
++}
++
+ func TestSchedulerPick_FillFirstSticksToFirstReady(t *testing.T) {
+ 	t.Parallel()
+ 

@@ -3,7 +3,7 @@
     <div class="v9-page-copy">
       <span class="v9-kicker">Routing studio</span>
       <h1>模型路由</h1>
-      <p>一个客户端别名对应一条清晰的真实上游链；首选失败后才进入下一跳。</p>
+      <p>一个客户端别名对应一组真实上游；可按顺序、优先级、负载、轮询或会话粘滞自动选号。</p>
     </div>
     <div class="actions route-actions">
       <span id="routeStatus" class="route-status"><span class="route-status-dot"></span>已同步</span>
@@ -33,7 +33,7 @@
         <div class="v9-route-legend"><span><i class="ready"></i>就绪</span><span><i class="warn"></i>需关注</span><span><i class="unknown"></i>尚未验证</span></div>
       </div>
       <div id="routeRows" class="route-chain-list"></div>
-      <div class="v9-route-note"><svg class="icon" aria-hidden="true"><use href="#i-routes"></use></svg><span>网络错误、限流、鉴权失败、上游 5xx 或目标模型不存在时，才按顺序进入下一跳。</span></div>
+      <div class="v9-route-note"><svg class="icon" aria-hidden="true"><use href="#i-routes"></use></svg><span>网络错误、额度/限流、鉴权失败、上游 5xx 或目标模型不存在时，会排除当前目标并自动尝试下一可用账号。</span></div>
     </div>
   </section>
 </section>

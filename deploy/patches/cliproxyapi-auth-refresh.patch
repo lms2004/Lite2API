@@ -1,0 +1,626 @@
+diff --git a/internal/api/handlers/management/auth_files.go b/internal/api/handlers/management/auth_files.go
+index 56a84d6..a2d962b 100644
+--- a/internal/api/handlers/management/auth_files.go
++++ b/internal/api/handlers/management/auth_files.go
+@@ -47,6 +47,7 @@ const (
+ 	codexCallbackPort     = 1455
+ 	geminiCLIEndpoint     = "https://cloudcode-pa.googleapis.com"
+ 	geminiCLIVersion      = "v1internal"
++	authRefreshWorkers    = 4
+ )
+ 
+ type callbackForwarder struct {
+@@ -308,6 +309,214 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
+ 	c.JSON(200, gin.H{"models": result})
+ }
+ 
++// RefreshAuthFiles forces credential refresh for one or more auth files.
++func (h *Handler) RefreshAuthFiles(c *gin.Context) {
++	if h.authManager == nil {
++		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
++		return
++	}
++
++	names, all, errNames := requestedAuthFileNamesForRefresh(c)
++	if errNames != nil {
++		c.JSON(http.StatusBadRequest, gin.H{"error": errNames.Error()})
++		return
++	}
++
++	targets := make([]*coreauth.Auth, 0)
++	if all || len(names) == 0 {
++		targets = h.authManager.List()
++	} else {
++		missing := make([]string, 0)
++		for _, name := range names {
++			auth := h.findAuthByNameOrID(name)
++			if auth == nil {
++				missing = append(missing, name)
++				continue
++			}
++			targets = append(targets, auth)
++		}
++		if len(missing) > 0 {
++			c.JSON(http.StatusNotFound, gin.H{"error": "auth file not found", "missing": missing})
++			return
++		}
++	}
++
++	uniqueTargets := make([]*coreauth.Auth, 0, len(targets))
++	seen := make(map[string]struct{}, len(targets))
++	for _, auth := range targets {
++		if auth == nil || strings.TrimSpace(auth.ID) == "" {
++			continue
++		}
++		if _, ok := seen[auth.ID]; ok {
++			continue
++		}
++		seen[auth.ID] = struct{}{}
++		uniqueTargets = append(uniqueTargets, auth)
++	}
++
++	type refreshResult struct {
++		updated *coreauth.Auth
++		err     error
++		skipped bool
++	}
++	results := make([]refreshResult, len(uniqueTargets))
++	workers := authRefreshWorkers
++	if len(uniqueTargets) < workers {
++		workers = len(uniqueTargets)
++	}
++	if workers > 0 {
++		ctx := c.Request.Context()
++		jobs := make(chan int)
++		var wait sync.WaitGroup
++		wait.Add(workers)
++		for worker := 0; worker < workers; worker++ {
++			go func() {
++				defer wait.Done()
++				for index := range jobs {
++					auth := uniqueTargets[index]
++					if auth.Disabled || auth.Status == coreauth.StatusDisabled {
++						results[index].skipped = true
++						continue
++					}
++					results[index].updated, results[index].err = h.authManager.ForceRefreshAuth(ctx, auth.ID)
++				}
++			}()
++		}
++		for index := range uniqueTargets {
++			jobs <- index
++		}
++		close(jobs)
++		wait.Wait()
++	}
++
++	refreshed := make([]gin.H, 0, len(uniqueTargets))
++	failed := make([]gin.H, 0)
++	skipped := make([]gin.H, 0)
++	for index, auth := range uniqueTargets {
++		entry := authFileRefreshEntry(auth)
++		if results[index].skipped {
++			entry["reason"] = "disabled"
++			skipped = append(skipped, entry)
++			continue
++		}
++		if results[index].err != nil {
++			entry["error"] = results[index].err.Error()
++			failed = append(failed, entry)
++			continue
++		}
++		refreshed = append(refreshed, authFileRefreshEntry(results[index].updated))
++	}
++
++	status := http.StatusOK
++	responseStatus := "ok"
++	if len(failed) > 0 {
++		status = http.StatusMultiStatus
++		responseStatus = "partial"
++	}
++	c.JSON(status, gin.H{
++		"status":    responseStatus,
++		"refreshed": len(refreshed),
++		"skipped":   len(skipped),
++		"files":     refreshed,
++		"failed":    failed,
++	})
++}
++
++func authFileRefreshEntry(auth *coreauth.Auth) gin.H {
++	entry := gin.H{}
++	if auth == nil {
++		return entry
++	}
++	auth.EnsureIndex()
++	entry["id"] = auth.ID
++	entry["auth_index"] = auth.Index
++	if name := strings.TrimSpace(auth.FileName); name != "" {
++		entry["name"] = name
++	}
++	if provider := strings.TrimSpace(auth.Provider); provider != "" {
++		entry["provider"] = provider
++	}
++	return entry
++}
++
++func requestedAuthFileNamesForRefresh(c *gin.Context) ([]string, bool, error) {
++	if c == nil {
++		return nil, false, nil
++	}
++	names := uniqueAuthFileNames(append(c.QueryArray("name"), c.QueryArray("names")...))
++	all := queryBool(c.Query("all"))
++	if len(names) > 0 || all {
++		return names, all, nil
++	}
++
++	body, err := io.ReadAll(c.Request.Body)
++	if err != nil {
++		return nil, false, fmt.Errorf("failed to read body")
++	}
++	body = bytes.TrimSpace(body)
++	if len(body) == 0 {
++		return nil, false, nil
++	}
++
++	if body[0] == '[' {
++		var arrayBody []string
++		if err := json.Unmarshal(body, &arrayBody); err != nil {
++			return nil, false, fmt.Errorf("invalid request body")
++		}
++		return uniqueAuthFileNames(arrayBody), false, nil
++	}
++
++	var objectBody struct {
++		Name  string   `json:"name"`
++		Names []string `json:"names"`
++		All   bool     `json:"all"`
++	}
++	if err := json.Unmarshal(body, &objectBody); err != nil {
++		return nil, false, fmt.Errorf("invalid request body")
++	}
++	out := make([]string, 0, len(objectBody.Names)+1)
++	if strings.TrimSpace(objectBody.Name) != "" {
++		out = append(out, objectBody.Name)
++	}
++	out = append(out, objectBody.Names...)
++	return uniqueAuthFileNames(out), objectBody.All, nil
++}
++
++func queryBool(raw string) bool {
++	switch strings.ToLower(strings.TrimSpace(raw)) {
++	case "1", "true", "yes", "on", "*":
++		return true
++	default:
++		return false
++	}
++}
++
++func (h *Handler) findAuthByNameOrID(name string) *coreauth.Auth {
++	if h == nil || h.authManager == nil {
++		return nil
++	}
++	name = strings.TrimSpace(name)
++	if name == "" {
++		return nil
++	}
++	if auth, ok := h.authManager.GetByID(name); ok {
++		return auth
++	}
++	for _, auth := range h.authManager.List() {
++		if auth == nil {
++			continue
++		}
++		auth.EnsureIndex()
++		if strings.TrimSpace(auth.ID) == name || strings.TrimSpace(auth.Index) == name || strings.TrimSpace(auth.FileName) == name {
++			return auth
++		}
++		if filepath.Base(strings.TrimSpace(authAttribute(auth, "path"))) == name {
++			return auth
++		}
++	}
++	return nil
++}
++
+ // List auth files from disk when the auth manager is unavailable.
+ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
+ 	entries, err := os.ReadDir(h.cfg.AuthDir)
+diff --git a/internal/api/handlers/management/auth_files_refresh_test.go b/internal/api/handlers/management/auth_files_refresh_test.go
+new file mode 100644
+index 0000000..7d8bb2f
+--- /dev/null
++++ b/internal/api/handlers/management/auth_files_refresh_test.go
+@@ -0,0 +1,183 @@
++package management
++
++import (
++	"context"
++	"fmt"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/gin-gonic/gin"
++	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
++	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
++)
++
++type authFileRefreshTestExecutor struct {
++	provider    string
++	calls       atomic.Int32
++	inFlight    atomic.Int32
++	maxInFlight atomic.Int32
++	started     chan struct{}
++	release     chan struct{}
++}
++
++func (e *authFileRefreshTestExecutor) Identifier() string { return e.provider }
++
++func (e *authFileRefreshTestExecutor) Execute(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
++	return cliproxyexecutor.Response{}, nil
++}
++
++func (e *authFileRefreshTestExecutor) ExecuteStream(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
++	return nil, nil
++}
++
++func (e *authFileRefreshTestExecutor) Refresh(ctx context.Context, auth *coreauth.Auth) (*coreauth.Auth, error) {
++	e.calls.Add(1)
++	inFlight := e.inFlight.Add(1)
++	defer e.inFlight.Add(-1)
++	for current := e.maxInFlight.Load(); inFlight > current && !e.maxInFlight.CompareAndSwap(current, inFlight); current = e.maxInFlight.Load() {
++	}
++	if e.started != nil {
++		select {
++		case e.started <- struct{}{}:
++		case <-ctx.Done():
++			return nil, ctx.Err()
++		}
++	}
++	if e.release != nil {
++		select {
++		case <-e.release:
++		case <-ctx.Done():
++			return nil, ctx.Err()
++		}
++	}
++	if auth.Metadata == nil {
++		auth.Metadata = make(map[string]any)
++	}
++	auth.Metadata["refreshed_by_test"] = true
++	return auth, nil
++}
++
++func (e *authFileRefreshTestExecutor) CountTokens(context.Context, *coreauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
++	return cliproxyexecutor.Response{}, nil
++}
++
++func (e *authFileRefreshTestExecutor) HttpRequest(context.Context, *coreauth.Auth, *http.Request) (*http.Response, error) {
++	return nil, nil
++}
++
++func TestRefreshAuthFiles_ForcesAuthManagerRefresh(t *testing.T) {
++	t.Setenv("MANAGEMENT_PASSWORD", "")
++	gin.SetMode(gin.TestMode)
++
++	manager := coreauth.NewManager(nil, nil, nil)
++	executor := &authFileRefreshTestExecutor{provider: "claude"}
++	manager.RegisterExecutor(executor)
++	record := &coreauth.Auth{
++		ID:       "claude-user.json",
++		FileName: "claude-user.json",
++		Provider: "claude",
++		Metadata: map[string]any{"type": "claude"},
++	}
++	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
++		t.Fatalf("failed to register auth record: %v", errRegister)
++	}
++
++	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
++
++	rec := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(rec)
++	req := httptest.NewRequest(http.MethodPost, "/v0/management/auth-files/refresh", strings.NewReader(`{"name":"claude-user.json"}`))
++	req.Header.Set("Content-Type", "application/json")
++	ctx.Request = req
++	h.RefreshAuthFiles(ctx)
++
++	if rec.Code != http.StatusOK {
++		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rec.Code, rec.Body.String())
++	}
++	if executor.calls.Load() != 1 {
++		t.Fatalf("refresh calls = %d, want 1", executor.calls.Load())
++	}
++	updated, ok := manager.GetByID("claude-user.json")
++	if !ok || updated == nil {
++		t.Fatalf("expected auth record to exist after refresh")
++	}
++	if updated.LastRefreshedAt.IsZero() {
++		t.Fatal("expected LastRefreshedAt to be set")
++	}
++	if got, _ := updated.Metadata["refreshed_by_test"].(bool); !got {
++		t.Fatalf("metadata.refreshed_by_test = %v, want true", updated.Metadata["refreshed_by_test"])
++	}
++	if !strings.Contains(rec.Body.String(), `"refreshed":1`) {
++		t.Fatalf("refresh response did not include refreshed count: %s", rec.Body.String())
++	}
++}
++
++func TestRefreshAuthFiles_RefreshesAccountsWithBoundedConcurrency(t *testing.T) {
++	t.Setenv("MANAGEMENT_PASSWORD", "")
++	gin.SetMode(gin.TestMode)
++
++	executor := &authFileRefreshTestExecutor{
++		provider: "claude",
++		started:  make(chan struct{}, 6),
++		release:  make(chan struct{}),
++	}
++	manager := coreauth.NewManager(nil, nil, nil)
++	manager.RegisterExecutor(executor)
++	for index := 0; index < 6; index++ {
++		record := &coreauth.Auth{
++			ID:       fmt.Sprintf("claude-user-%d.json", index),
++			FileName: fmt.Sprintf("claude-user-%d.json", index),
++			Provider: "claude",
++			Metadata: map[string]any{"type": "claude"},
++		}
++		if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
++			t.Fatalf("failed to register auth record: %v", errRegister)
++		}
++	}
++
++	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
++	recorder := httptest.NewRecorder()
++	ctx, _ := gin.CreateTestContext(recorder)
++	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/auth-files/refresh", strings.NewReader(`{"all":true}`))
++	ctx.Request.Header.Set("Content-Type", "application/json")
++
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		h.RefreshAuthFiles(ctx)
++	}()
++
++	timer := time.NewTimer(2 * time.Second)
++	defer timer.Stop()
++	for started := 0; started < authRefreshWorkers; started++ {
++		select {
++		case <-executor.started:
++		case <-timer.C:
++			close(executor.release)
++			<-done
++			t.Fatalf("only %d refresh calls started concurrently, want %d", started, authRefreshWorkers)
++		}
++	}
++	if got := executor.maxInFlight.Load(); got != authRefreshWorkers {
++		close(executor.release)
++		<-done
++		t.Fatalf("maximum concurrent refreshes = %d, want %d", got, authRefreshWorkers)
++	}
++	close(executor.release)
++	<-done
++
++	if recorder.Code != http.StatusOK {
++		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, recorder.Code, recorder.Body.String())
++	}
++	if executor.calls.Load() != 6 {
++		t.Fatalf("refresh calls = %d, want 6", executor.calls.Load())
++	}
++	if !strings.Contains(recorder.Body.String(), `"refreshed":6`) {
++		t.Fatalf("refresh response did not include refreshed count: %s", recorder.Body.String())
++	}
++}
+diff --git a/internal/api/server.go b/internal/api/server.go
+index 487ea57..092e8be 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -645,6 +645,7 @@ func (s *Server) registerManagementRoutes() {
+ 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
+ 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
+ 		mgmt.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
++		mgmt.POST("/auth-files/refresh", s.mgmt.RefreshAuthFiles)
+ 		mgmt.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
+ 		mgmt.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
+ 		mgmt.POST("/vertex/import", s.mgmt.ImportVertexCredential)
+diff --git a/sdk/cliproxy/auth/conductor.go b/sdk/cliproxy/auth/conductor.go
+index 6e0a5cd..e28a513 100644
+--- a/sdk/cliproxy/auth/conductor.go
++++ b/sdk/cliproxy/auth/conductor.go
+@@ -256,6 +256,77 @@ func (m *Manager) RefreshSchedulerEntry(authID string) {
+ 	m.scheduler.upsertAuth(snapshot)
+ }
+ 
++// ForceRefreshAuth refreshes one auth immediately, bypassing scheduler timing
++// gates while still using the normal executor, persistence, hook, and scheduler
++// update path.
++func (m *Manager) ForceRefreshAuth(ctx context.Context, authID string) (*Auth, error) {
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	authID = strings.TrimSpace(authID)
++	if authID == "" {
++		return nil, errors.New("auth id is required")
++	}
++
++	m.mu.RLock()
++	auth := m.auths[authID]
++	var exec ProviderExecutor
++	var cloned *Auth
++	if auth != nil {
++		provider := auth.Provider
++		exec = m.executors[provider]
++		cloned = auth.Clone()
++	}
++	m.mu.RUnlock()
++
++	if cloned == nil {
++		return nil, errors.New("auth not found")
++	}
++	if cloned.Disabled || cloned.Status == StatusDisabled {
++		return nil, errors.New("auth is disabled")
++	}
++	if exec == nil {
++		return nil, errors.New("provider executor is not registered")
++	}
++
++	updated, err := exec.Refresh(ctx, cloned)
++	now := time.Now()
++	if err != nil {
++		// A caller cancellation is not a credential failure. Penalizing the auth
++		// here would make a closed admin request or service shutdown sideline an
++		// otherwise healthy account for refreshFailureBackoff.
++		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
++			return nil, err
++		}
++		m.mu.Lock()
++		if current := m.auths[authID]; current != nil {
++			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
++			current.LastError = &Error{Message: err.Error()}
++			m.auths[authID] = current
++			if m.scheduler != nil {
++				m.scheduler.upsertAuth(current.Clone())
++			}
++		}
++		m.mu.Unlock()
++		m.queueRefreshReschedule(authID)
++		return nil, err
++	}
++	if updated == nil {
++		updated = cloned
++	}
++	if updated.Runtime == nil {
++		updated.Runtime = cloned.Runtime
++	}
++	updated.LastRefreshedAt = now
++	updated.NextRefreshAfter = time.Time{}
++	updated.LastError = nil
++	updated.UpdatedAt = now
++	if m.shouldRefresh(updated, now) {
++		updated.NextRefreshAfter = now.Add(refreshIneffectiveBackoff)
++	}
++	return m.Update(ctx, updated)
++}
++
+ // ReconcileRegistryModelStates aligns per-model runtime state with the current
+ // registry snapshot for one auth.
+ //
+@@ -3537,62 +3608,16 @@ func (m *Manager) markRefreshPending(id string, now time.Time) bool {
+ }
+ 
+ func (m *Manager) refreshAuth(ctx context.Context, id string) {
+-	if ctx == nil {
+-		ctx = context.Background()
+-	}
+-	m.mu.RLock()
+-	auth := m.auths[id]
+-	var exec ProviderExecutor
+-	var cloned *Auth
+-	if auth != nil {
+-		exec = m.executors[auth.Provider]
+-		cloned = auth.Clone()
+-	}
+-	m.mu.RUnlock()
+-	if auth == nil || exec == nil {
+-		return
+-	}
+-	updated, err := exec.Refresh(ctx, cloned)
++	updated, err := m.ForceRefreshAuth(ctx, id)
+ 	if err != nil && errors.Is(err, context.Canceled) {
+-		log.Debugf("refresh canceled for %s, %s", auth.Provider, auth.ID)
+-		return
+-	}
+-	log.Debugf("refreshed %s, %s, %v", auth.Provider, auth.ID, err)
+-	now := time.Now()
+-	if err != nil {
+-		shouldReschedule := false
+-		m.mu.Lock()
+-		if current := m.auths[id]; current != nil {
+-			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
+-			current.LastError = &Error{Message: err.Error()}
+-			m.auths[id] = current
+-			shouldReschedule = true
+-			if m.scheduler != nil {
+-				m.scheduler.upsertAuth(current.Clone())
+-			}
+-		}
+-		m.mu.Unlock()
+-		if shouldReschedule {
+-			m.queueRefreshReschedule(id)
+-		}
++		log.Debugf("refresh canceled for %s", id)
+ 		return
+ 	}
+-	if updated == nil {
+-		updated = cloned
+-	}
+-	// Preserve runtime created by the executor during Refresh.
+-	// If executor didn't set one, fall back to the previous runtime.
+-	if updated.Runtime == nil {
+-		updated.Runtime = auth.Runtime
+-	}
+-	updated.LastRefreshedAt = now
+-	updated.NextRefreshAfter = time.Time{}
+-	updated.LastError = nil
+-	updated.UpdatedAt = now
+-	if m.shouldRefresh(updated, now) {
+-		updated.NextRefreshAfter = now.Add(refreshIneffectiveBackoff)
++	provider := ""
++	if updated != nil {
++		provider = updated.Provider
+ 	}
+-	_, _ = m.Update(ctx, updated)
++	log.Debugf("refreshed %s, %s, %v", provider, id, err)
+ }
+ 
+ func (m *Manager) executorFor(provider string) ProviderExecutor {
+diff --git a/sdk/cliproxy/auth/conductor_scheduler_refresh_test.go b/sdk/cliproxy/auth/conductor_scheduler_refresh_test.go
+index 5c6eff7..bd19426 100644
+--- a/sdk/cliproxy/auth/conductor_scheduler_refresh_test.go
++++ b/sdk/cliproxy/auth/conductor_scheduler_refresh_test.go
+@@ -36,6 +36,42 @@ func (e schedulerProviderTestExecutor) HttpRequest(ctx context.Context, auth *Au
+ 	return nil, nil
+ }
+ 
++type canceledRefreshTestExecutor struct {
++	schedulerProviderTestExecutor
++}
++
++func (e canceledRefreshTestExecutor) Refresh(ctx context.Context, _ *Auth) (*Auth, error) {
++	return nil, ctx.Err()
++}
++
++func TestManager_ForceRefreshAuth_CancellationDoesNotPenalizeCredential(t *testing.T) {
++	t.Parallel()
++
++	manager := NewManager(nil, &RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(canceledRefreshTestExecutor{schedulerProviderTestExecutor{provider: "claude"}})
++	auth := &Auth{ID: "canceled-refresh", Provider: "claude"}
++	if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
++		t.Fatalf("register auth: %v", errRegister)
++	}
++
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if _, errRefresh := manager.ForceRefreshAuth(ctx, auth.ID); !errors.Is(errRefresh, context.Canceled) {
++		t.Fatalf("ForceRefreshAuth() error = %v, want context canceled", errRefresh)
++	}
++
++	got, ok := manager.GetByID(auth.ID)
++	if !ok || got == nil {
++		t.Fatal("auth disappeared after canceled refresh")
++	}
++	if got.LastError != nil {
++		t.Fatalf("LastError = %#v, want nil after caller cancellation", got.LastError)
++	}
++	if !got.NextRefreshAfter.IsZero() {
++		t.Fatalf("NextRefreshAfter = %v, want zero after caller cancellation", got.NextRefreshAfter)
++	}
++}
++
+ func TestManager_RefreshSchedulerEntry_RebuildsSupportedModelSetAfterModelRegistration(t *testing.T) {
+ 	ctx := context.Background()
+ 

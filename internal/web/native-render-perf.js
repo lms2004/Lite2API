@@ -28,6 +28,13 @@
     } catch (_) {}
   }
 
+  function routeEditorIsBusy() {
+    if (activeView() !== "routes") return false;
+    if (typeof window.routeEditorBusy === "function" && window.routeEditorBusy()) return true;
+    const active = document.activeElement;
+    return Boolean(routesDirty || active?.closest?.("#routeRows") || $("v7ModelDialog")?.open);
+  }
+
   function renderMonitorView() {
     safeCall("renderMonitor");
     const subtitle = $("viewSubtitle");
@@ -46,6 +53,7 @@
   }
 
   function renderRoutesView() {
+    if (routeEditorIsBusy()) return;
     syncRouteDraftIfClean();
     safeCall("renderRoutes");
   }
@@ -77,5 +85,5 @@
   }
 
   window.render = renderActiveView;
-  window.Lite2APIRenderPerf = Object.freeze({ version: BUILD, render: renderActiveView, fullRender });
+  window.Lite2APIRenderPerf = Object.freeze({ version: BUILD, render: renderActiveView, fullRender, routeEditorIsBusy });
 })();

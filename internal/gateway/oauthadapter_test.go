@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,9 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	const serviceKey = "service-test-secret"
 	var callbackReceived atomic.Bool
 	var statusPatched atomic.Bool
+	var refreshRequested atomic.Bool
+	var priorityPatched atomic.Bool
+	var routingUpdated atomic.Bool
 	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0/management/codex-auth-url":
@@ -50,12 +54,57 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 			}
 			statusPatched.Store(true)
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "disabled": true})
+		case "/v0/management/auth-files/refresh":
+			var payload struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Name != "codex-user@example.com.json" {
+				t.Errorf("unexpected auth refresh: %+v", payload)
+			}
+			refreshRequested.Store(true)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "refreshed": 1, "skipped": 0, "files": []map[string]any{{"name": payload.Name}}})
+		case "/v0/management/auth-files/fields":
+			var payload struct {
+				Name     string `json:"name"`
+				Priority int    `json:"priority"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if r.Method != http.MethodPatch || payload.Name != "codex-user@example.com.json" || payload.Priority != 80 {
+				t.Errorf("unexpected auth priority patch: method=%s payload=%+v", r.Method, payload)
+			}
+			priorityPatched.Store(true)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		case "/v0/management/routing/strategy":
+			switch r.Method {
+			case http.MethodGet:
+				writeJSON(w, http.StatusOK, map[string]any{"strategy": "round-robin"})
+			case http.MethodPut:
+				var payload struct {
+					Value string `json:"value"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.Value != "fill-first" {
+					t.Errorf("unexpected OAuth routing strategy: %+v", payload)
+				}
+				routingUpdated.Store(true)
+				writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 		case "/v0/management/auth-files":
 			writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{{
 				"id": "codex-user@example.com.json", "auth_index": "safe-index", "provider": "codex",
-				"label": "user@example.com", "account_type": "plus", "status": "active", "success": 3, "failed": 1,
-				"quota_windows": []map[string]any{{"kind": "five_hour", "used_percentage": 42.5, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_response"}},
-				"prompt_usage":  map[string]any{"provider": "codex", "model": "gpt-5", "input_tokens": 128, "cached_tokens": 64, "output_tokens": 24, "reasoning_tokens": 8, "total_tokens": 160, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_usage"},
+				"label": "user@example.com", "account_type": "plus", "priority": 20, "status": "active", "success": 3, "failed": 1,
+				"recent_requests": []map[string]any{{"time": "00:00-00:10", "success": 2, "failed": 1}},
+				"quota_windows":   []map[string]any{{"kind": "five_hour", "used_percentage": 42.5, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_response"}},
+				"prompt_usage":    map[string]any{"provider": "codex", "model": "gpt-5", "input_tokens": 128, "cached_tokens": 64, "output_tokens": 24, "reasoning_tokens": 8, "total_tokens": 160, "observed_at": "2026-08-16T01:02:03Z", "source": "provider_usage"},
 			}}})
 		case "/v1/models":
 			if r.Header.Get("Authorization") != "Bearer "+serviceKey {
@@ -116,8 +165,15 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	accounts := adminOAuthRequest(http.MethodGet, "/admin/api/oauth/accounts", "", cookie, csrf)
 	accountsW := httptest.NewRecorder()
 	g.ServeAdminAPI(accountsW, accounts)
-	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || !strings.Contains(accountsW.Body.String(), `"input_tokens":128`) || !strings.Contains(accountsW.Body.String(), `"cached_tokens":64`) || !strings.Contains(accountsW.Body.String(), `"reasoning_tokens":8`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
+	if accountsW.Code != http.StatusOK || !strings.Contains(accountsW.Body.String(), `"identity":"us***@example.com"`) || !strings.Contains(accountsW.Body.String(), `"plan":"plus"`) || !strings.Contains(accountsW.Body.String(), `"priority":20`) || !strings.Contains(accountsW.Body.String(), `"recent_success":2`) || !strings.Contains(accountsW.Body.String(), `"recent_failed":1`) || !strings.Contains(accountsW.Body.String(), `"used_percentage":42.5`) || !strings.Contains(accountsW.Body.String(), `"input_tokens":128`) || !strings.Contains(accountsW.Body.String(), `"cached_tokens":64`) || !strings.Contains(accountsW.Body.String(), `"reasoning_tokens":8`) || strings.Contains(accountsW.Body.String(), `user@example.com`) {
 		t.Fatalf("accounts status=%d body=%s", accountsW.Code, accountsW.Body.String())
+	}
+
+	refresh := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/accounts/refresh", `{"id":"safe-index"}`, cookie, csrf)
+	refreshW := httptest.NewRecorder()
+	g.ServeAdminAPI(refreshW, refresh)
+	if refreshW.Code != http.StatusOK || !refreshRequested.Load() || !strings.Contains(refreshW.Body.String(), `"refreshed":1`) {
+		t.Fatalf("refresh status=%d body=%s requested=%v", refreshW.Code, refreshW.Body.String(), refreshRequested.Load())
 	}
 
 	toggle := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/accounts/status", `{"id":"safe-index","disabled":true}`, cookie, csrf)
@@ -125,6 +181,41 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	g.ServeAdminAPI(toggleW, toggle)
 	if toggleW.Code != http.StatusOK || !statusPatched.Load() {
 		t.Fatalf("toggle status=%d body=%s patched=%v", toggleW.Code, toggleW.Body.String(), statusPatched.Load())
+	}
+
+	priority := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/accounts/priority", `{"id":"safe-index","priority":80}`, cookie, csrf)
+	priorityW := httptest.NewRecorder()
+	g.ServeAdminAPI(priorityW, priority)
+	if priorityW.Code != http.StatusOK || !priorityPatched.Load() || !strings.Contains(priorityW.Body.String(), `"priority":80`) {
+		t.Fatalf("priority status=%d body=%s patched=%v", priorityW.Code, priorityW.Body.String(), priorityPatched.Load())
+	}
+
+	routing := adminOAuthRequest(http.MethodGet, "/admin/api/oauth/routing", "", cookie, csrf)
+	routingW := httptest.NewRecorder()
+	g.ServeAdminAPI(routingW, routing)
+	if routingW.Code != http.StatusOK || !strings.Contains(routingW.Body.String(), `"strategy":"round-robin"`) || !strings.Contains(routingW.Body.String(), `"automatic_failover":true`) {
+		t.Fatalf("routing status=%d body=%s", routingW.Code, routingW.Body.String())
+	}
+
+	routingUpdate := adminOAuthRequest(http.MethodPut, "/admin/api/oauth/routing", `{"strategy":"fill_first"}`, cookie, csrf)
+	routingUpdateW := httptest.NewRecorder()
+	g.ServeAdminAPI(routingUpdateW, routingUpdate)
+	if routingUpdateW.Code != http.StatusOK || !routingUpdated.Load() || !strings.Contains(routingUpdateW.Body.String(), `"strategy":"fill-first"`) {
+		t.Fatalf("routing update status=%d body=%s updated=%v", routingUpdateW.Code, routingUpdateW.Body.String(), routingUpdated.Load())
+	}
+
+	invalidPriority := adminOAuthRequest(http.MethodPost, "/admin/api/oauth/accounts/priority", `{"id":"safe-index","priority":-1}`, cookie, csrf)
+	invalidPriorityW := httptest.NewRecorder()
+	g.ServeAdminAPI(invalidPriorityW, invalidPriority)
+	if invalidPriorityW.Code != http.StatusBadRequest {
+		t.Fatalf("invalid priority status=%d body=%s", invalidPriorityW.Code, invalidPriorityW.Body.String())
+	}
+
+	invalidRouting := adminOAuthRequest(http.MethodPut, "/admin/api/oauth/routing", `{}`, cookie, csrf)
+	invalidRoutingW := httptest.NewRecorder()
+	g.ServeAdminAPI(invalidRoutingW, invalidRouting)
+	if invalidRoutingW.Code != http.StatusBadRequest {
+		t.Fatalf("missing routing strategy status=%d body=%s", invalidRoutingW.Code, invalidRoutingW.Body.String())
 	}
 }
 
@@ -194,6 +285,63 @@ func TestNormalizeOAuthProvider(t *testing.T) {
 		if actual := normalizeOAuthProvider(input); actual != expected {
 			t.Errorf("normalizeOAuthProvider(%q)=%q want %q", input, actual, expected)
 		}
+	}
+}
+
+func TestNormalizeOAuthRoutingStrategy(t *testing.T) {
+	for input, expected := range map[string]string{
+		"": "round-robin", "round_robin": "round-robin", "rr": "round-robin", "fill_first": "fill-first", "ff": "fill-first",
+	} {
+		actual, ok := normalizeOAuthRoutingStrategy(input)
+		if !ok || actual != expected {
+			t.Errorf("normalizeOAuthRoutingStrategy(%q)=(%q,%v), want (%q,true)", input, actual, ok, expected)
+		}
+	}
+	if _, ok := normalizeOAuthRoutingStrategy("random"); ok {
+		t.Fatal("unsupported OAuth routing strategy was accepted")
+	}
+}
+
+func TestShortCredentialIDIsStableAndRedacted(t *testing.T) {
+	first := shortCredentialID("codex-user@example.com.json")
+	if first == "" || len(first) != 16 || first != shortCredentialID("codex-user@example.com.json") {
+		t.Fatalf("unexpected public credential id %q", first)
+	}
+	if strings.Contains(first, "user") || first == shortCredentialID("another@example.com.json") {
+		t.Fatalf("credential id was not safely pseudonymized: %q", first)
+	}
+}
+
+func TestOAuthCredentialPriorityOrderingAndRuntimeParentResolution(t *testing.T) {
+	const managementKey = "management-order-secret"
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v0/management/auth-files" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{
+			{"id": "low.json", "auth_index": "low", "provider": "codex", "status": "active", "priority": 10},
+			{"id": "high-disabled.json", "auth_index": "high-disabled", "provider": "codex", "status": "active", "disabled": true, "priority": 30},
+			{"id": "high-ready.json", "auth_index": "high-ready", "provider": "codex", "status": "active", "priority": 30},
+			{"id": "virtual-project", "auth_index": "virtual", "provider": "gemini-cli", "status": "active", "runtime_only": true, "path": "/var/lib/cliproxyapi/auths/gemini-parent.json", "priority": 40},
+		}})
+	}))
+	defer adapter.Close()
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", adapter.URL)
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_KEY", managementKey)
+
+	credentials, err := listOAuthCredentials(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 4 {
+		t.Fatalf("credential count=%d", len(credentials))
+	}
+	if credentials[0].ID != "high-ready" || credentials[1].ID != "high-disabled" || credentials[2].ID != "low" || credentials[3].Provider != "gemini" {
+		t.Fatalf("codex priority/readiness order=%+v", credentials)
+	}
+	if got := resolveOAuthAccountName(context.Background(), "virtual"); got != "gemini-parent.json" {
+		t.Fatalf("runtime parent=%q", got)
 	}
 }
 

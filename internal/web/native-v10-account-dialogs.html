@@ -101,7 +101,7 @@
             <label class="v10-field">协议<select name="type"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic Messages</option></select></label>
             <label class="v10-field">并发上限<input name="concurrency" type="number" value="2" min="0"></label>
             <label class="v10-field">保存状态<select name="enabled"><option value="true">立即启用</option><option value="false">先保存为停用</option></select></label>
-            <label class="v10-field">优先级<input name="priority" type="number" value="0" min="0"></label>
+            <label class="v10-field">兼容路由优先级（小值优先）<input name="priority" type="number" value="0" min="0"></label>
             <label class="v10-field">权重<input name="weight" type="number" value="1" min="1"></label>
             <label class="v10-field">认证 Header<select name="auth_header"><option value="">自动</option><option value="authorization">Authorization</option><option value="x-api-key">x-api-key</option><option value="none">不发送认证头</option></select></label>
             <label class="v10-field">认证 Scheme<input name="auth_scheme" placeholder="Bearer；留空由协议决定"></label>

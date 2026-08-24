@@ -68,7 +68,7 @@ curl http://127.0.0.1:45679/v1/chat/completions \
   -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
 
-模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 仅保存真实接入渠道及其 fallback 顺序。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取和保存；管理页会保留这类直连目标，不会强制转换成 `capabilities[]`。
+模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 保存真实接入渠道及其 fallback 集合。每条显式目标路由可选择严格顺序（默认）、账号优先级、最少负载、轮询分配或会话粘滞；无论首选如何产生，失败后都会排除当前目标并继续。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取和保存；管理页会保留这类直连目标，不会强制转换成 `capabilities[]`。
 
 ## 热加载
 
@@ -89,9 +89,11 @@ curl -X POST http://127.0.0.1:45679/admin/api/reload \
 
 在 VPN 内打开“渠道账号”并点击“接入新账号”，可直接选择 OpenAI/Codex、Claude、Gemini CLI、Antigravity 或 Kimi。页面会生成并复制授权链接；完成认证后，将浏览器地址栏中的 localhost 回调 URL 粘贴回来，页面会自动提交、轮询结果、保存适配器凭据，并确认 `cliproxy-oauth` 路由池已热加载。Kimi 使用设备授权，页面自动检测完成状态，无需粘贴回调。
 
-账号页按渠道归组认证凭据；路由连接收进次级折叠区。每次 OAuth 登录新增或更新的是隔离凭据，不应重复增加 `cliproxy-oauth` 路由行。Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、Gemini CLI 与 Antigravity 在账号页可见时异步读取各自官方额度接口，每个凭据 10 分钟内最多一次。反重力的 Credits、模型桶以及所有渠道的 429 冷却/重置时间采用同一展示协议。CLIProxyAPI 只把脱敏的百分比、余额、模型、重置和观测时间保存在内存；没有可信数据时页面显示“等待观测”，不会伪装成 0%，也不打开全局响应头透传。
+账号页按渠道归组认证凭据；路由连接收进次级折叠区。每次 OAuth 登录新增或更新的是隔离凭据，不应重复增加 `cliproxy-oauth` 路由行。每个认证账号可设置 `0–1000` 的选号优先级，**数值越大越优先**；调度器只在当前最高的可用优先级层选号，同级可选择轮询或固定首选，账号被禁用、鉴权失败、额度耗尽、模型冷却或上游故障时自动降级到下一可用账号。这个认证池优先级不要与 Lite2API 外层连接的 `priority` 混用：外层仍为**小值优先**，且只有路由的“账号策略”选为账号优先级时才覆盖显式 `targets[]` 的手动顺序。
 
-凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理受 CSRF 保护的 `POST /admin/api/oauth/start`、`POST /admin/api/oauth/callback`、`POST /admin/api/oauth/status` 和只读 `GET /admin/api/oauth/accounts`。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
+Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、Gemini CLI 与 Antigravity 在账号页可见时异步读取各自官方额度接口，每个凭据 10 分钟内最多一次，也可从账号页显式刷新。反重力的 Credits、模型桶、最近约 200 分钟的逐账号成功/失败计数，以及所有渠道的 429 冷却/重置时间采用同一展示协议。CLIProxyAPI 只把脱敏的百分比、余额、模型、重置和观测时间保存在内存；没有可信数据时页面显示“等待观测”，不会伪装成 0%，也不打开全局响应头透传。
+
+凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理平台白名单内的 OAuth 操作、脱敏账号列表、账号状态/删除/刷新/优先级以及认证池选号策略，所有写操作都要求管理会话与 CSRF。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
 
 Gemini Web 与 Grok Web/Console 属于 Cookie/SSO 型接入。管理页只在本地浏览器整理扩展导出的 Cookie-Editor JSON、Netscape Cookie、单行 Cookie 或 SSO 文本，然后提示写入对应隔离适配器；Lite2API 核心不会接收或保存这些内容。为节省资源，未配置凭据的 Web 适配器保持停止，配置完成后才按需启动。
 

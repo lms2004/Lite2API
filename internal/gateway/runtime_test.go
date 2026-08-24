@@ -187,6 +187,82 @@ func TestOrderedTargetChainDoesNotMoveBackAfterSkippingBusyTarget(t *testing.T) 
 	}
 }
 
+func TestTargetRoutePriorityStrategyUsesAccountPriorityAndFailsOver(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts[0].Priority = 20
+	cfg.Accounts[1].Priority = 5
+	cfg.Routes["alias"] = config.Route{
+		Strategy: "priority",
+		Targets: []config.RouteTarget{
+			{Account: "a", Model: "m"},
+			{Account: "b", Model: "m"},
+		},
+	}
+	s := NewScheduler(cfg)
+	excluded := map[string]struct{}{}
+
+	first, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", excluded, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Account.Config.ID != "b" {
+		t.Fatalf("priority selection = %s, want lower-valued account b", first.Account.Config.ID)
+	}
+	excluded[first.Key] = struct{}{}
+	first.Release()
+
+	second, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", excluded, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Release()
+	if second.Account.Config.ID != "a" {
+		t.Fatalf("priority failover = %s, want account a", second.Account.Config.ID)
+	}
+}
+
+func TestTargetRouteRoundRobinRotatesAuthoredTargets(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Routes["alias"] = config.Route{
+		Strategy: "round_robin",
+		Targets:  []config.RouteTarget{{Account: "a", Model: "m"}, {Account: "b", Model: "m"}},
+	}
+	s := NewScheduler(cfg)
+	want := []string{"a", "b", "a"}
+	for index, wantID := range want {
+		selection, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", nil, 0)
+		if err != nil {
+			t.Fatalf("selection %d: %v", index, err)
+		}
+		if selection.Account.Config.ID != wantID {
+			t.Fatalf("selection %d = %s, want %s", index, selection.Account.Config.ID, wantID)
+		}
+		selection.Release()
+	}
+}
+
+func TestTargetRouteStickyStrategyIsStable(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Routes["alias"] = config.Route{
+		Strategy: "sticky",
+		Targets:  []config.RouteTarget{{Account: "a", Model: "m"}, {Account: "b", Model: "m"}},
+	}
+	s := NewScheduler(cfg)
+	selectedID := ""
+	for index := 0; index < 4; index++ {
+		selection, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "session-target", nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selectedID == "" {
+			selectedID = selection.Account.Config.ID
+		} else if selection.Account.Config.ID != selectedID {
+			t.Fatalf("sticky target changed from %s to %s", selectedID, selection.Account.Config.ID)
+		}
+		selection.Release()
+	}
+}
+
 func TestSchedulerResolvesLogicalModelPerRealChannel(t *testing.T) {
 	cfg := schedulerConfig()
 	cfg.Accounts[0].Models = []string{"antigravity/claude-opus-4-6-thinking"}
