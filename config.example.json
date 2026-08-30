@@ -1,22 +1,23 @@
 {
+  "version": 1,
   "server": {
     "listen": "127.0.0.1:45679",
     "api_key_env": "LITE2API_API_KEYS",
     "admin_token_env": "LITE2API_ADMIN_TOKEN",
     "client_keys_path": "client_keys.json",
-    "admin_allowed_cidrs": ["127.0.0.0/8", "::1/128", "212.17.236.178/32"],
+    "admin_allowed_cidrs": ["127.0.0.0/8", "::1/128"],
     "trusted_proxy_cidrs": ["127.0.0.0/8", "::1/128"],
     "admin_session_ttl": "30m",
-    "max_body_bytes": 67108864,
-    "max_inflight_requests": 256,
+    "max_body_bytes": 8388608,
+    "max_inflight_requests": 32,
     "request_read_timeout": "30s",
     "queue_timeout": "30s",
     "response_header_timeout": "5m",
     "stream_idle_timeout": "15m",
     "idle_conn_timeout": "90s",
-    "max_idle_conns": 256,
-    "max_idle_conns_per_host": 128,
-    "max_conns_per_host": 256,
+    "max_idle_conns": 128,
+    "max_idle_conns_per_host": 64,
+    "max_conns_per_host": 64,
     "failure_threshold": 3,
     "circuit_cooldown": "30s",
     "max_failover_attempts": 3,
@@ -46,7 +47,7 @@
       "priority": 0,
       "weight": 1,
       "concurrency": 1,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "deepseek-main",

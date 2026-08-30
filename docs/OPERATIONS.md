@@ -18,7 +18,8 @@
 ```bash
 docker compose ps
 docker compose logs --tail=100 lite2api
-curl -fsS http://127.0.0.1:45679/health
+curl -fsS http://127.0.0.1:45679/livez
+curl -fsS http://127.0.0.1:45679/readyz  # 启用并配置上游后再要求成功
 docker stats --no-stream lite2api
 ```
 
@@ -32,13 +33,13 @@ systemctl status lite2api cliproxyapi
 journalctl -u lite2api -u cliproxyapi --since today
 ```
 
-Lite2API 本体使用统一的无备份原子安装流程；脚本先构建临时二进制、验证生产配置，再覆盖二进制并重启服务：
+Lite2API 本体使用可重建、自动回滚的安装流程：脚本会创建缺失的用户、目录、环境文件和初始配置，从当前 `HEAD` 的 detached worktree 构建，验证配置后再切换服务：
 
 ```bash
 sudo ./deploy/install-lite2api-systemd.sh
 ```
 
-服务器若有多个 Go 版本，可通过 `GO_BIN=/absolute/path/to/go` 指定 Go 1.23 以上工具链。当前安装流程不会复制配置、凭据或旧二进制；这是本轮明确要求的部署方式。
+服务器若有多个 Go 版本，可通过 `GO_BIN=/absolute/path/to/go` 指定工具链；部署严格要求 Go `1.26.5`（与 Docker/CI 相同），升级工具链必须同时修改安装器、容器、CI 和版本证据。dirty/untracked 文件不会进入二进制；失败会恢复旧 binary/unit 和服务启用状态，成功后打印本机 rollback snapshot 路径。
 
 CLIProxyAPI 的固定版本安装或升级流程：
 
@@ -47,33 +48,66 @@ git submodule update --init third_party/cliproxyapi
 sudo ./deploy/install-cliproxyapi-systemd.sh
 ```
 
-安装器具有幂等性：已有密钥和 OAuth 凭据不会被轮换或删除；二进制、配置与单元文件会被更新，随后执行回环健康检查及两条鉴权检查。
+安装器具有幂等性：已有密钥和 OAuth 凭据不会被轮换或删除；固定上游提交在隔离 worktree 中重放三组补丁，随后执行回环健康检查及两条鉴权检查。失败会恢复二进制、unit、配置、两个环境文件与服务状态。
+
+Nginx 与应用的管理来源名单只维护一份。修改 `/etc/lite2api/lite2api.env` 中的 `LITE2API_ADMIN_ALLOWED_CIDRS` 后执行：
+
+```bash
+sudo ./deploy/render-nginx-admin-allowlist.sh
+sudo systemctl reload nginx
+```
+
+脚本拒绝公网 `/0`、符号链接和缺失 loopback 的列表，原子生成 `/etc/nginx/snippets/lite2api-admin-allowlist.conf`，并在保留新文件前运行 `nginx -t`。`check-services.sh` 会验证 Nginx 与应用列表完全一致。
 
 ## 更新与回滚
 
-配置更新由程序先验证，再以临时文件 + `fsync` + 原子 rename 保存。建议更新镜像前保留当前镜像 ID：
+配置更新由程序先验证，再以临时文件 + `fsync` + 原子 rename 保存。Compose 更新前必须同时给旧镜像打不可变回滚标签，并导出命名卷；仅记录 image ID 或备份仓库内 `data/` 都不能恢复实际命名卷：
 
 ```bash
-docker image inspect lite2api:local --format '{{.Id}}'
+release_id=$(date -u +%Y%m%dT%H%M%SZ)
+docker image tag lite2api:local "lite2api:rollback-$release_id"
+docker volume ls --filter label=com.docker.compose.volume=lite2api-data
+# 将上一步显示的精确卷名以只读方式导出到加密/异地备份介质。
 docker compose build
 docker compose up -d
 curl -fsS http://127.0.0.1:45679/health
 ```
 
-镜像升级失败时，将 Compose 的 `image` 改回旧标签后重新 `up -d`。配置回滚只需恢复 `data/config.json` 并发送 HUP。
+镜像升级失败时无需编辑 YAML：`LITE2API_IMAGE="lite2api:rollback-$release_id" docker compose up -d --no-build`。配置回滚必须恢复命名卷中的 `/app/data/config.json`、`client_keys.json` 和相关日志状态，再重建容器；仓库路径 `data/config.json` 不参与当前 Compose。
 
-systemd 安装器按当前生产要求直接原子替换二进制和配置，不自动创建备份。只有管理员明确要求保留回滚点时，才单独运行 `/root/server-ops/backup-configs.sh`。
+systemd 安装器在切换前创建本机短期 rollback snapshot，并在健康失败时自动恢复。成功安装输出 snapshot 路径；它用于快速升级回退，不替代异地备份。Lite2API 的动态配置、Key 元数据和日志仍在 `/etc/lite2api/` 原子更新；目录使用 `root:lite2api 1770` sticky 边界，服务拥有 `config.json`，但不能替换 root 拥有的 `lite2api.env`。
 
 ## 备份
 
-如启用人工备份，应覆盖：
+备份至少应覆盖：
 
 - Docker 命名卷 `lite2api-data` 中的 `/app/data/config.json`
 - 同一命名卷中的 `/app/data/client_keys.json`（仅包含摘要，但丢失后所有托管 Key 都会失效）
 - `.env`
-- systemd 部署的 `/etc/lite2api/`、`/etc/cliproxyapi/` 和 `/var/lib/cliproxyapi/auths/`
+- Compose 渠道运行目录 `channels/runtime/`（Gemini Cookie、CLIProxyAPI OAuth 凭据与渠道私有配置）
+- 已创建的 Grok 命名卷 `lite2api-grok-data` 与 `lite2api-grok-quality`
+- systemd 部署的 `/etc/lite2api/`（含 `client_keys.json` 与有界日志）、`/etc/cliproxyapi/` 和 `/var/lib/cliproxyapi/auths/`
 
-程序没有数据库。运行统计在内存中，重启丢失，不属于需要恢复的业务状态。
+备份必须在产生端加密后发送到异地主机或对象存储，设置 retention，并定期恢复到临时目录演练；不要在同一台服务器长期堆放明文 tar。程序没有数据库。运行统计在内存中，重启丢失，不属于需要恢复的业务状态。
+
+Compose 提供无明文临时归档的 age 快照与流式验证脚本（`age` 私钥应保存在另一台主机或硬件介质）：
+
+```bash
+LITE2API_DATA_VOLUME=精确命名卷 \
+  ./deploy/snapshot-compose-state.sh /mnt/offsite/lite2api-$(date -u +%Y%m%d) age1...
+./deploy/verify-compose-snapshot.sh /mnt/offsite/lite2api-YYYYMMDD
+```
+
+快照脚本以只读卷、无网络、固定 Alpine digest 和仅 `DAC_READ_SEARCH` 能力导出，分别加密 Lite2API 卷、存在的 Grok 卷、存在的 `channels/runtime/` 与 `.env`；目标已存在时拒绝覆盖，状态树中出现符号链接也会失败。多 Compose 项目产生同名标签时，脚本拒绝猜测，需用 `LITE2API_DATA_VOLUME`、`GROK2API_DATA_VOLUME`、`GROK2API_QUALITY_VOLUME` 指定精确卷名。验证脚本对白名单内的密文清单做摘要校验，流式解密每个 tar，并确认必需环境密钥满足强度且不是示例占位符，不把密钥值打印到终端。为得到跨文件一致的灾备点，应先停写或停容器再快照；生产恢复仍需在停流后由管理员显式执行，避免自动脚本误覆盖活跃卷。
+
+systemd 状态使用同样的流式 age 边界：
+
+```bash
+sudo ./deploy/server-ops/backup-configs.sh /mnt/offsite/lite2api-systemd-$(date -u +%Y%m%d) age1...
+./deploy/server-ops/verify-systemd-backup.sh /mnt/offsite/lite2api-systemd-YYYYMMDD
+```
+
+旧的同机 `/root/server-backups/*.tar.gz` 明文归档方式已移除；新脚本拒绝符号链接、从不创建明文 tar、拒绝覆盖既有目标。
 
 ## 故障判断
 
@@ -91,7 +125,7 @@ systemd 安装器按当前生产要求直接原子替换二进制和配置，不
 - 页面提示“认证成功”但路由档位数量未增加：这是正常行为。OAuth 登录写入“认证账号池”，已有 `cliproxy-oauth` 路由档位会复用新凭据；检查 `GET /admin/api/oauth/accounts` 的脱敏条目和 `ready` 状态，不要为每个登录复制路由配置。
 - OAuth 多账号看似没有自动切换：先确认同一 provider 至少有两个支持该模型且状态为 `ready` 的凭据。认证账号优先级是高值优先；最高优先级账号健康时不会使用低优先级账号，同级是否平均分配由“同级选号”决定。会话粘性会让同一会话保持账号，但鉴权、额度、冷却或上游故障后仍会重选。结合账号卡片最近约 200 分钟的成功/失败数、`next_retry_after` 和服务日志判断是固定首选、会话粘性、模型不兼容还是实际故障转移。
 - 调整 OAuth 优先级后仍命中旧账号：刷新账号列表确认持久化值；Gemini 虚拟项目账号会把优先级写回父凭据并同步到项目条目。若目标账号处于冷却或不支持请求模型，调度器会跳过它，即使它的数值最高。
-- 外层路由没有按连接优先级选号：显式 `targets[]` 默认为严格手动顺序。到“模型路由”把“账号策略”改为“账号优先级”后，才会按 Lite 连接 priority **小值优先**；同值继续使用拖动顺序。也可选最少负载、轮询或会话粘滞。所有策略都会在额度/限流、鉴权、网络、上游 5xx 或模型不存在时排除当前目标并继续 failover。
+- 外层路由没有按连接优先级选号：显式 `targets[]` 默认为严格手动顺序。到“模型路由”把“账号策略”改为“账号优先级”后，才会按 Lite 连接 priority **小值优先**；同值继续使用拖动顺序。也可选最少负载、轮询或会话粘滞。明确拒绝的 401/402/403/429、显式目标 404 和可证明尚未写入上游的连接错误可以排除当前目标后继续；任意上游 POST 的 408/409/425/5xx 或写入后传输错误都可能已经产生结果或计费（包括 Embeddings、Rerank），会返回 `uncertain_submission` 而不自动重放。
 - “同级选号”保存失败：CLIProxyAPI 必须能写自己的单个配置文件。Compose 应把 `/CLIProxyAPI/config.yaml` 以 `rw` 挂载；systemd 配置应为 `root:cliproxyapi 0660`，并在沙箱中仅放行 `/etc/cliproxyapi/config.yaml`。仓库安装器会设置这两个边界，并在升级时保留已选的 `round-robin` / `fill-first`。不要扩大为整个 `/etc` 可写。
 - Claude 额度显示“等待观测”：先确认已有真实 Claude 请求成功；Claude 快照等待真实响应。Codex、Gemini CLI 或 Antigravity 显示“正在按需同步”时，保持账号页打开一个刷新周期；官方查询异步执行，并按凭据缓存 10 分钟。不要把未知当作 0%，也不要开启 `passthrough-headers`。
 - 额度显示“数据已过期”：账号可能长时间没有流量；这是观测新鲜度提示，不会单独触发停用。真正的 429/冷却仍由适配器健康状态处理。
@@ -109,10 +143,10 @@ CLIProxyAPI 模板把 `max-retry-credentials` 设为 `0`，含义是一次执行
 
 单机 Key 鉴权和限流应保持内存实现。只有扩展为多个 Lite2API 实例时，才启用 Redis 状态实现；Redis 不负责保存 Key 明文。
 
-适配器状态探针同样保持无守护轮询：只有管理端读取目录才触发，500 ms 超时、60 秒内存缓存。不要为单机增加数据库、消息队列、服务注册中心或独立监控 Agent。
+适配器状态探针同样保持无守护轮询：只有管理端读取目录才触发，相同身份 singleflight 合并、最多 4 路并行、整体预算 750 ms；成功缓存 60 秒，失败最多 5 秒。带 Key 的适配器只有鉴权模型目录非空时才 ready。不要为单机增加数据库、消息队列、服务注册中心或独立监控 Agent。
 
 请求明细只保留最近 512 条记录在内存；每条记录只包含路由、状态、耗时、模态、字节数和上游返回的 Token usage，不保存正文。运行趋势另有独立的 1 分钟数据点环形缓冲，默认保留最近 7 天；超过容量后覆盖最早数据。管理台通过 `/admin/api/trends?range=1h|6h|24h|3d|7d` 读取趋势，健康判断仍严格使用最近 5 分钟。摘要日志默认写到配置文件同目录的 `request.log`，单文件 8 MiB、保留 2 个备份，达到上限后循环覆盖；可用 `server.request_log_path`、`server.request_log_max_bytes` 和 `server.request_log_backups` 调整。
 
 OAuth 账号卡片中的 Prompt usage 只来自 CLIProxyAPI 对真实 provider `usage.Detail` 的最新观测：输入字段标为“注入后输入 / 上游 input tokens”，不能解读为纯 system prompt 或纯注入长度。快照仅驻留进程内，账号禁用或删除时清理；原始 prompt、响应正文和凭据不会写入 auth 持久化 JSON。无真实观测时管理台显示“暂无真实 usage”，不会按请求字符串估算 token。
 
-安装脚本不会创建配置、凭据或旧二进制备份。额度快照只在内存中存在，不属于备份或恢复范围。
+安装器创建的 rollback snapshot 只保留升级前文件并留在本机；应按运维周期清理，不能替代加密异地备份。额度快照只在内存中存在，不属于备份或恢复范围。

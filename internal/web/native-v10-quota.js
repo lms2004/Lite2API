@@ -10,15 +10,19 @@
     if (!force && Date.now() - loadedAt < 60000) return;
     if (typeof activeViewName !== 'undefined' && activeViewName !== 'monitor') return;
     busy = true;
+    let succeeded = false;
     try {
       const response = await api('/oauth/accounts');
       state.oauth_accounts = response.data || [];
       state.oauth_error = response.warning || '';
+      succeeded = true;
     } catch (error) {
       state.oauth_accounts = state.oauth_accounts || [];
       state.oauth_error = error.message || '认证适配器当前不可读';
     } finally {
-      loadedAt = Date.now();
+      // Cache only a successful response. A startup 401, timeout, or transient
+      // adapter failure must remain immediately retryable after session recovery.
+      if (succeeded) loadedAt = Date.now();
       busy = false;
       window.Lite2APINativeV10?.sync?.();
     }

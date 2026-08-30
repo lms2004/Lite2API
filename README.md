@@ -13,7 +13,7 @@
 - 按请求操作类型筛选适配器能力，避免跨协议误路由
 - `least_loaded`、`round_robin`、`priority`、`sticky` 四种调度策略
 - 原子并发槽、最长等待时间、客户端取消传递
-- 401/403/429/5xx 与网络错误自动换号
+- 明确拒绝的 401/402/403/429 与显式目标 404 可安全换号；所有上游 POST 对可能已被接收的 408/409/425/5xx 或写入后传输错误返回 `uncertain_submission`，不会跨账号自动重放
 - 连续失败熔断和自动恢复
 - 模型别名与上游模型重写
 - 管理页面、快捷 OAuth 添加账号、一键生成客户端 API Key、账号增删改、批量导入/导出、适配器目录、实时状态和最近 512 条请求
@@ -49,12 +49,6 @@ docker compose up -d --build
 
 Compose 使用 Linux host network，以便直接访问同机 `127.0.0.1:45678` 上的 AtomCode2Api。对外服务时建议继续由 Nginx 终止 TLS，不要把管理端口直接暴露公网。
 
-当前服务器的正式入口：
-
-- API Base URL：`https://sub2api.foresights.top/lite/v1`
-- 管理页：`https://sub2api.foresights.top/lite-admin/`（仅连接服务器 V2Ray/VPN 后可访问）
-- 旧 Sub2API 已停止；域名根路径跳转到 Lite2API 的受鉴权模型列表。
-
 ## 创建客户端 API Key
 
 VPN 内进入“客户端访问”页面，选择“个人开发”“临时测试”或“可信服务”安全预设后创建 Key。所有预设都有 RPM、并发和有效期边界；默认不再生成无限权限、永不过期的凭据。明文只显示一次，随后可直接复制客户端配置，并通过只读 `/v1/models` 验证认证与路由连接，不产生模型调用费用。模型白名单或其他自定义限制仍可在高级创建中设置。
@@ -62,13 +56,14 @@ VPN 内进入“客户端访问”页面，选择“个人开发”“临时测�
 ## 调用
 
 ```bash
-curl http://127.0.0.1:45679/v1/chat/completions \
-  -H "Authorization: Bearer $LITE2API_API_KEY" \
+# Bash process substitution keeps the long-lived token out of curl's argv.
+curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$LITE2API_API_KEY") \
+  http://127.0.0.1:45679/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"deepseek-fast","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
 
-模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 保存真实接入渠道及其 fallback 集合。每条显式目标路由可选择严格顺序（默认）、账号优先级、最少负载、轮询分配或会话粘滞；无论首选如何产生，失败后都会排除当前目标并继续。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。旧的目标级 `model` / `reasoning_effort` 以及 `accounts`、`upstream_model`、`strategy` 仍可读取和保存；管理页会保留这类直连目标，不会强制转换成 `capabilities[]`。
+模型别名通过 `routes.<alias>` 编排：路由优先选择一次逻辑 `model` 与 `reasoning_effort`，`targets[]` 保存真实接入渠道及其 fallback 集合。每条显式目标路由可选择严格顺序（默认）、账号优先级、最少负载、轮询分配或会话粘滞；无论首选如何产生，失败后都会排除当前目标并继续。每个渠道可在 `capabilities[]` 中声明自己支持的逻辑模型、推理强度与渠道专用上游 ID；管理页会自动筛除不兼容渠道，运行时再解析为对应上游模型。这里的渠道是 Antigravity、Claude Code 官方、Web 代理或 API 账号等实际凭据来源，不是 Quality、Balanced、Fast 一类虚拟档位。客户端始终使用稳定别名，不需要随渠道调整而改变配置。版本 1 配置也可整体使用 legacy `accounts` / `upstream_model` schema，但同一路由禁止混合两套 schema；空目标默认拒绝，只有显式 `all_accounts: true` 才表示 wildcard。
 
 ## 热加载
 
@@ -81,8 +76,8 @@ docker kill --signal HUP lite2api
 或者调用：
 
 ```bash
-curl -X POST http://127.0.0.1:45679/admin/api/reload \
-  -H "Authorization: Bearer $LITE2API_ADMIN_TOKEN"
+curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$LITE2API_ADMIN_TOKEN") \
+  -X POST http://127.0.0.1:45679/admin/api/reload
 ```
 
 ## 快捷添加 OAuth 账号
@@ -97,7 +92,7 @@ Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、
 
 Gemini Web 与 Grok Web/Console 属于 Cookie/SSO 型接入。管理页只在本地浏览器整理扩展导出的 Cookie-Editor JSON、Netscape Cookie、单行 Cookie 或 SSO 文本，然后提示写入对应隔离适配器；Lite2API 核心不会接收或保存这些内容。为节省资源，未配置凭据的 Web 适配器保持停止，配置完成后才按需启动。
 
-Docker Compose 与 systemd 两种部署方式均受支持。systemd 服务器可执行 `deploy/install-cliproxyapi-systemd.sh` 安装或升级固定版本适配器；脚本会校验固定子模块提交、幂等应用仓库维护的额度快照补丁、同步两把服务端密钥、启动服务，并验证管理与模型鉴权路径。完整步骤和凭据位置见 [渠道适配层](channels/README.md)。
+Docker Compose 与 systemd 两种部署方式均受支持。systemd 安装器从选定提交的隔离 worktree 构建，不会把现场 dirty/untracked 文件打入固定版本；升级失败会自动恢复旧二进制、unit、配置和环境文件。完整步骤和凭据位置见 [渠道适配层](channels/README.md)。
 
 ## 批量导入与导出账号
 
@@ -157,6 +152,6 @@ Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状
 
 ## 适配器目录与可选渠道
 
-管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分原生就绪、运行就绪、待授权、运行未配置、未运行和仅收录状态，并展示操作类型、认证方式、本机延迟与模型数量。运行探针只在读取管理目录时按需执行，结果缓存 60 秒；普通请求路径没有轮询、注册中心或额外网络开销。“收录”不等同于自动安装或信任第三方代码。
+管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分原生就绪、运行就绪、待授权、运行未配置、未运行和仅收录状态，并展示操作类型、认证方式、本机延迟与模型数量。运行探针只在读取管理目录时按需执行：同一适配器请求 singleflight 合并、最多 4 路并行、整体等待预算 750 ms，带 Key 的适配器必须通过鉴权模型目录才会判定 ready；成功结果缓存 60 秒，失败最多缓存 5 秒。普通请求路径没有轮询、注册中心或额外网络开销。“收录”不等同于自动安装或信任第三方代码。
 
-Grok2API、Gemini Web 与 CLIProxyAPI 已作为固定提交的 Git 子模块或固定源码接入，并使用独立进程隔离，不增加 Lite2API 核心镜像体积。开发或整套容器部署可使用独立 Compose profile；当前单机生产也提供 CLIProxyAPI systemd 安装器。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)；新增适配器的类型选择、能力契约和资源预算见 [Adapter Design](docs/ADAPTER_DESIGN.md)。
+Grok2API 使用不可变 OCI digest，Gemini Web 使用固定 Git 子模块，CLIProxyAPI 使用固定提交加仓库维护补丁；三者都在独立、非 root、能力清空的容器或 systemd 服务中运行，不增加 Lite2API 核心镜像体积。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)；新增适配器的类型选择、能力契约和资源预算见 [Adapter Design](docs/ADAPTER_DESIGN.md)。

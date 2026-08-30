@@ -4,11 +4,17 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +39,7 @@ func newTestGateway(t testing.TB, accounts []config.Account, routes map[string]c
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(g.Close)
 	return g
 }
 
@@ -86,6 +93,45 @@ func TestBuildUpstreamURLCompatibilityRoots(t *testing.T) {
 	}
 }
 
+func TestBuildUpstreamURLPreservesConfiguredQuery(t *testing.T) {
+	got, err := buildUpstreamURL("https://azure.example/openai?api-version=2026-01-01&fixed=yes", "/v1/chat/completions", "api-version=attacker&trace=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("api-version") != "2026-01-01" || query.Get("fixed") != "yes" || query.Get("trace") != "1" {
+		t.Fatalf("merged query=%v", query)
+	}
+}
+
+func TestGatewayRejectsMalformedQueryBeforeSelectingUpstream(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "secret",
+		Models: []string{"m"}, Enabled: true, Weight: 1,
+	}}, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?bad=a;b", strings.NewReader(`{"model":"m"}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, request)
+	if w.Code != http.StatusBadRequest || calls.Load() != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", w.Code, calls.Load(), w.Body.String())
+	}
+	account := g.Accounts()[0]
+	if account.Total != 0 || account.Failures != 0 || account.CircuitOpenUntil != "" {
+		t.Fatalf("malformed client query polluted upstream health: %+v", account)
+	}
+}
+
 func TestGatewayRewritesModelAndAuthenticates(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer upstream-secret" {
@@ -136,9 +182,12 @@ func TestGatewayRecordsUsageAndModalities(t *testing.T) {
 	}
 }
 
-func TestGatewayFailsOver(t *testing.T) {
+func TestGatewayFailsOverAfterDefinitiveRejection(t *testing.T) {
 	var firstCalls, secondCalls atomic.Int64
-	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { firstCalls.Add(1); http.Error(w, "busy", 503) }))
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		http.Error(w, "busy", http.StatusTooManyRequests)
+	}))
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		secondCalls.Add(1)
@@ -148,7 +197,9 @@ func TestGatewayFailsOver(t *testing.T) {
 	accounts := []config.Account{{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 0, Concurrency: 1, Weight: 1, Enabled: true}, {ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 1, Concurrency: 1, Weight: 1, Enabled: true}}
 	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Accounts: []string{"first", "second"}, Strategy: "priority"}})
 	w := httptest.NewRecorder()
-	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"m","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	g.ServeGateway(w, request)
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -158,9 +209,41 @@ func TestGatewayFailsOver(t *testing.T) {
 	if g.Stats().Failovers != 1 {
 		t.Fatalf("failovers=%d", g.Stats().Failovers)
 	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 || recent[0].Outcome != "success" || recent[0].Error != "" || recent[0].Status != http.StatusOK {
+		t.Fatalf("successful failover record is inconsistent: %+v", recent)
+	}
 }
 
-func TestGatewayFailsOverOnPaymentRequired(t *testing.T) {
+func TestGatewayDoesNotReplayGenerativePostAfterAmbiguousStatus(t *testing.T) {
+	var firstCalls, secondCalls atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		http.Error(w, "generation may have completed", http.StatusInternalServerError)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer second.Close()
+	accounts := []config.Account{
+		{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 0, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 1, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Accounts: []string{"first", "second"}, Strategy: "priority"}})
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[]}`))
+	if w.Code != http.StatusBadGateway || firstCalls.Load() != 1 || secondCalls.Load() != 0 {
+		t.Fatalf("status=%d calls=%d,%d body=%s", w.Code, firstCalls.Load(), secondCalls.Load(), w.Body.String())
+	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 || recent[0].Outcome != "uncertain_submission" || !strings.Contains(recent[0].Error, "submission outcome uncertain") {
+		t.Fatalf("ambiguous generation outcome not recorded: %+v", recent)
+	}
+}
+
+func TestGatewayFailsOverGenerativePostOnDefinitivePaymentRejection(t *testing.T) {
 	var firstCalls, secondCalls atomic.Int64
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		firstCalls.Add(1)
@@ -197,6 +280,42 @@ func TestRetryableStatusIncludesProviderOverloadAndRejectsClientErrors(t *testin
 	}
 }
 
+func TestRetryableStatusPolicyProtectsGenerativeOperations(t *testing.T) {
+	for _, code := range []int{http.StatusRequestTimeout, http.StatusConflict, http.StatusTooEarly, http.StatusInternalServerError, 529} {
+		if retry, uncertain := retryableStatusForOperation(config.OperationOpenAIChat, code); retry || !uncertain {
+			t.Errorf("generative status %d policy retry=%v uncertain=%v", code, retry, uncertain)
+		}
+		if retry, uncertain := retryableStatusForOperation(config.OperationEmbeddings, code); retry || !uncertain {
+			t.Errorf("embedding status %d policy retry=%v uncertain=%v", code, retry, uncertain)
+		}
+	}
+	for _, code := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusTooManyRequests} {
+		if retry, uncertain := retryableStatusForOperation(config.OperationOpenAIChat, code); !retry || uncertain {
+			t.Fatalf("definitive rejection %d policy retry=%v uncertain=%v", code, retry, uncertain)
+		}
+	}
+}
+
+func TestTransportRetryRequiresProofRequestWasNotWritten(t *testing.T) {
+	transportErr := errors.New("connection failed")
+	if !retryableTransportError(&upstreamRequestError{err: transportErr, wroteRequest: false}) {
+		t.Fatal("pre-write transport failure should permit failover")
+	}
+	if retryableTransportError(&upstreamRequestError{err: transportErr, wroteRequest: true}) {
+		t.Fatal("post-write transport failure has uncertain submission outcome")
+	}
+}
+
+func TestUpstreamErrorMessageRedactsConfiguredQueryAndUserInfo(t *testing.T) {
+	err := &upstreamRequestError{err: &url.Error{
+		Op: "Post", URL: "https://user:password@example.com/v1?api-key=private-query", Err: errors.New("connection reset"),
+	}, wroteRequest: true}
+	message := upstreamErrorMessage(err)
+	if strings.Contains(message, "password") || strings.Contains(message, "private-query") || !strings.Contains(message, "example.com/v1") {
+		t.Fatalf("unsafe upstream error message: %q", message)
+	}
+}
+
 func TestGatewayPreservesActionableResponseWhenFinalFailoverTransportFails(t *testing.T) {
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "90")
@@ -209,13 +328,52 @@ func TestGatewayPreservesActionableResponseWhenFinalFailoverTransportFails(t *te
 	}
 	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Targets: []config.RouteTarget{{Account: "limited", Model: "m"}, {Account: "offline", Model: "m"}}}})
 	w := httptest.NewRecorder()
-	g.ServeGateway(w, gatewayRequest(`{"model":"m","messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"m","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	g.ServeGateway(w, request)
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "90" || !strings.Contains(w.Body.String(), "all credentials cooling down") {
 		t.Fatalf("status=%d retry-after=%q body=%s", w.Code, w.Header().Get("Retry-After"), w.Body.String())
 	}
 	recent := g.Stats().Recent
 	if len(recent) != 1 || recent[0].AccountID != "limited" || !strings.Contains(recent[0].Error, "final failover failed") {
 		t.Fatalf("recent=%+v", recent)
+	}
+}
+
+func TestGatewayDoesNotReplayEarlierStatusAfterUncertainSubmission(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "90")
+		w.Header().Set("X-Private-Canary", "first-response")
+		http.Error(w, "first-response-canary", http.StatusTooManyRequests)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = connection.Close()
+	}))
+	defer second.Close()
+	accounts := []config.Account{
+		{ID: "limited", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "uncertain", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Targets: []config.RouteTarget{{Account: "limited", Model: "m"}, {Account: "uncertain", Model: "m"}}}})
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"m","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	g.ServeGateway(w, request)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "outcome is uncertain") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Retry-After") != "" || w.Header().Get("X-Private-Canary") != "" || strings.Contains(w.Body.String(), "first-response-canary") {
+		t.Fatalf("earlier response was replayed: headers=%v body=%s", w.Header(), w.Body.String())
+	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 || recent[0].Outcome != "uncertain_submission" || recent[0].AccountID != "uncertain" {
+		t.Fatalf("uncertain submission record=%+v", recent)
 	}
 }
 
@@ -243,21 +401,30 @@ func TestCooldownForSupportsRetryAfterDateAndCapsExtremeValues(t *testing.T) {
 	}
 }
 
-func TestGatewayReturnsCachedUpstreamErrorWithoutQueueWait(t *testing.T) {
+func TestGatewayDoesNotReplayUpstreamErrorAcrossRequests(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "17")
+		w.Header().Set("X-Provider-Request-Id", "private-canary-header")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"upstream_quota"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"private-canary-body","type":"rate_limit_error","code":"upstream_quota"}}`))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
+	cfg := g.Config()
+	cfg.Server.FailureThreshold = 1
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
 
 	first := httptest.NewRecorder()
 	g.ServeGateway(first, gatewayRequest(`{"model":"m","messages":[]}`))
-	if first.Code != http.StatusTooManyRequests || !strings.Contains(first.Body.String(), "quota exceeded") {
+	if first.Code != http.StatusTooManyRequests || !strings.Contains(first.Body.String(), "private-canary-body") {
 		t.Fatalf("first response status=%d body=%s", first.Code, first.Body.String())
 	}
 
@@ -267,14 +434,933 @@ func TestGatewayReturnsCachedUpstreamErrorWithoutQueueWait(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("second request waited for queue timeout: %v", elapsed)
 	}
-	if second.Code != http.StatusTooManyRequests || second.Body.String() != first.Body.String() {
-		t.Fatalf("second response status=%d body=%s, want cached 429 response %s", second.Code, second.Body.String(), first.Body.String())
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second response status=%d body=%s, want sanitized 503", second.Code, second.Body.String())
 	}
-	if second.Header().Get("Retry-After") != "17" {
-		t.Fatalf("Retry-After=%q, want 17", second.Header().Get("Retry-After"))
+	if strings.Contains(second.Body.String(), "private-canary") || second.Header().Get("X-Provider-Request-Id") != "" || second.Header().Get("Retry-After") == "17" {
+		t.Fatalf("second response replayed upstream data: headers=%v body=%s", second.Header(), second.Body.String())
 	}
 	if got := calls.Load(); got != 1 {
-		t.Fatalf("upstream calls=%d, want cached response without retry", got)
+		t.Fatalf("upstream calls=%d, want open circuit without replay", got)
+	}
+}
+
+type trackedBody struct {
+	reader io.Reader
+	reads  atomic.Int64
+}
+
+type repeatingByteReader byte
+
+func (r repeatingByteReader) Read(data []byte) (int, error) {
+	for index := range data {
+		data[index] = byte(r)
+	}
+	return len(data), nil
+}
+
+func (b *trackedBody) Read(p []byte) (int, error) {
+	b.reads.Add(1)
+	return b.reader.Read(p)
+}
+func (*trackedBody) Close() error { return nil }
+
+func TestAdmissionRejectsManagedKeyConcurrencyBeforeReadingBody(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	_, secret, err := g.clientKeys.Create(ClientKeyCreate{Name: "bounded", Concurrency: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, failure := g.clientKeys.Authenticate(secret, nil)
+	if failure != "" {
+		t.Fatal(failure)
+	}
+	defer held.Complete(false)
+	body := &trackedBody{reader: strings.NewReader(`{"model":"m","messages":[]}`)}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Body = body
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer "+secret)
+	w := httptest.NewRecorder()
+	g.routeExecutionProfileHandler(http.HandlerFunc(g.ServeGateway)).ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if reads := body.reads.Load(); reads != 0 {
+		t.Fatalf("body read %d times before concurrency admission", reads)
+	}
+}
+
+func TestBodyMemoryBudgetRejectsBeforeReadingBody(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	budget := requestBodyMemoryBudget(g.Config().Server.MaxBodyBytes)
+	g.bodyBytes.Store(budget)
+	defer g.bodyBytes.Store(0)
+	body := &trackedBody{reader: strings.NewReader(`{"model":"m","messages":[]}`)}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Body = body
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer gateway-secret")
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, req)
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), "body_memory_limit_reached") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if reads := body.reads.Load(); reads != 0 {
+		t.Fatalf("body read %d times after memory admission failed", reads)
+	}
+}
+
+func TestTinyChunkedBodyLeaseIsReleasedBeforeLongStream(t *testing.T) {
+	streamStarted := make(chan struct{})
+	releaseStream := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: first\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-streamStarted:
+		default:
+			close(streamStarted)
+		}
+		<-releaseStream
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "stream", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	firstRequest := gatewayRequest(`{"model":"m","stream":true}`)
+	firstRequest.ContentLength = -1
+	firstRequest.TransferEncoding = []string{"chunked"}
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		g.ServeGateway(httptest.NewRecorder(), firstRequest)
+	}()
+	select {
+	case <-streamStarted:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for g.bodyBytes.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		close(releaseStream)
+		<-firstDone
+		t.Fatalf("tiny chunked upload retained %d body bytes for SSE lifetime", retained)
+	}
+	secondBody := &trackedBody{reader: strings.NewReader(`{"model":"m"}`)}
+	secondRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", secondBody)
+	secondRequest.ContentLength = -1
+	secondRequest.TransferEncoding = []string{"chunked"}
+	secondRequest.Header.Set("Authorization", "Bearer gateway-secret")
+	secondResponse := httptest.NewRecorder()
+	g.ServeGateway(secondResponse, secondRequest)
+	if secondResponse.Code == http.StatusTooManyRequests && strings.Contains(secondResponse.Body.String(), "body_memory_limit_reached") {
+		t.Fatalf("tiny chunked stream monopolized body budget: %s", secondResponse.Body.String())
+	}
+	if secondBody.reads.Load() == 0 {
+		t.Fatal("second chunked body was rejected before incremental accounting")
+	}
+	close(releaseStream)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not finish")
+	}
+}
+
+func TestQueuedLargeBodyRemainsChargedUntilUpstreamSubmission(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "queued", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	cfg := g.Config()
+	cfg.Server.QueueTimeout = config.Duration{Duration: 2 * time.Second}
+	cfg.Server.MaxBodyBytes = 8 << 20
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	state := g.state.Load()
+	held, err := state.scheduler.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+
+	budget := requestBodyMemoryBudget(state.cfg.Server.MaxBodyBytes)
+	baseline := budget - (6 << 20)
+	g.bodyBytes.Store(baseline)
+	defer g.bodyBytes.Store(0)
+	firstPayload := `{"model":"m","padding":"` + strings.Repeat("a", 2<<20) + `"}`
+	firstResponse := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		g.ServeGateway(firstResponse, gatewayRequest(firstPayload))
+	}()
+	deadline := time.Now().Add(time.Second)
+	for g.bodyBytes.Load() < baseline+int64(len(firstPayload))*2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if retained := g.bodyBytes.Load(); retained < baseline+int64(len(firstPayload))*2 {
+		t.Fatalf("queued request released its retained body budget: got=%d baseline=%d", retained, baseline)
+	}
+
+	secondPayload := `{"model":"m","padding":"` + strings.Repeat("b", 3<<20) + `"}`
+	secondBody := &trackedBody{reader: strings.NewReader(secondPayload)}
+	secondRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	secondRequest.Body = secondBody
+	secondRequest.ContentLength = int64(len(secondPayload))
+	secondRequest.Header.Set("Authorization", "Bearer gateway-secret")
+	secondResponse := httptest.NewRecorder()
+	g.ServeGateway(secondResponse, secondRequest)
+	if secondResponse.Code != http.StatusTooManyRequests || !strings.Contains(secondResponse.Body.String(), "body_memory_limit_reached") {
+		t.Fatalf("second retained body escaped budget: status=%d body=%s", secondResponse.Code, secondResponse.Body.String())
+	}
+	if secondBody.reads.Load() != 0 {
+		t.Fatalf("known oversized reservation read body %d times", secondBody.reads.Load())
+	}
+	held.Release()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("queued request did not resume after capacity release")
+	}
+	if firstResponse.Code != http.StatusOK {
+		t.Fatalf("queued request status=%d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != baseline {
+		t.Fatalf("completed request retained body bytes: got=%d want baseline=%d", retained, baseline)
+	}
+}
+
+func TestLegalFortyMiBRequestIsNotRejectedByAmplificationAccounting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "large", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	const requestSize = int64(40 << 20)
+	prefix := `{"model":"m"}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	request.Body = io.NopCloser(io.MultiReader(
+		strings.NewReader(prefix),
+		io.LimitReader(repeatingByteReader(' '), requestSize-int64(len(prefix))),
+	))
+	request.ContentLength = requestSize
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	response := httptest.NewRecorder()
+	g.ServeGateway(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("legal 40MiB request was rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("large completed request retained %d body bytes", retained)
+	}
+}
+
+func TestNearLimitFastAliasCoversBothInternalRewrites(t *testing.T) {
+	const maxBody = int64(22 << 20)
+	budget := requestBodyMemoryBudget(maxBody)
+	if want := 3*maxBody + 2*int64(maxInternalRewriteGrowth); budget != want {
+		t.Fatalf("combined rewrite budget=%d want=%d", budget, want)
+	}
+	g := &Gateway{}
+	lease := &bodyByteLease{gateway: g, limit: budget}
+	if !lease.Acquire(maxBody) || !lease.Acquire(maxBody) {
+		t.Fatal("legal inbound and RawMessage copies did not fit")
+	}
+	internal := rewriteBodyReservation(maxBody)
+	if !lease.Acquire(internal) {
+		t.Fatal("fast-profile normalization reservation did not fit")
+	}
+	// Normalization adds at least service_tier, then releases its old source.
+	lease.ShrinkTo(2*maxBody + 1)
+	if !lease.Acquire(internal) {
+		t.Fatal("near-limit fast alias could not reserve its provider-model rewrite")
+	}
+	lease.Release()
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("combined rewrite accounting retained %d bytes", retained)
+	}
+}
+
+func TestRewrittenAttemptBodyIsIncludedInMemoryLease(t *testing.T) {
+	var g *Gateway
+	var observed atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ := io.ReadAll(r.Body)
+		if r.ContentLength != int64(len(upstreamBody)) || len(r.TransferEncoding) != 0 {
+			t.Errorf("upstream framing content_length=%d body=%d transfer_encoding=%v", r.ContentLength, len(upstreamBody), r.TransferEncoding)
+		}
+		observed.Store(g.bodyBytes.Load())
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	account := config.Account{
+		ID: "rewrite", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"real"}, Concurrency: 1, Weight: 1, Enabled: true,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}
+	g = newTestGateway(t, []config.Account{account}, map[string]config.Route{
+		"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "rewrite"}}},
+	})
+	payload := `{"model":"alias","padding":"` + strings.Repeat("x", 1<<20) + `"}`
+	response := httptest.NewRecorder()
+	g.ServeGateway(response, gatewayRequest(payload))
+	if response.Code != http.StatusOK {
+		t.Fatalf("rewritten request status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got, wantMinimum := observed.Load(), int64(len(payload))*3-(64<<10); got < wantMinimum {
+		t.Fatalf("rewritten attempt body was not charged: observed=%d want_at_least=%d", got, wantMinimum)
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("rewritten completed request retained %d body bytes", retained)
+	}
+}
+
+func TestUpstreamRequestWriteIsBoundedAndReleasesBodyLease(t *testing.T) {
+	const upstreamWriteTimeout = 50 * time.Millisecond
+	g := newTestGateway(t, []config.Account{{
+		ID: "blocked", Type: "openai", BaseURL: "https://api.example.com/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	cfg := g.Config()
+	cfg.Server.MaxBodyBytes = 8 << 20
+	cfg.Server.ResponseHeaderTimeout = config.Duration{Duration: upstreamWriteTimeout}
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	transport := &blockingUploadRoundTripper{started: make(chan struct{})}
+	g.state.Load().clients["blocked"] = &http.Client{Transport: transport}
+	request := gatewayRequest(`{"model":"m","padding":"small"}`)
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g.ServeGateway(response, request)
+	}()
+	select {
+	case <-transport.started:
+	case <-time.After(100 * upstreamWriteTimeout):
+		t.Fatal("request did not start its controlled upstream upload")
+	}
+	select {
+	case <-done:
+	case <-time.After(100 * upstreamWriteTimeout):
+		t.Fatal("blocked upstream upload did not obey its pre-header deadline")
+	}
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "uncertain_submission") {
+		t.Fatalf("blocked upstream upload status=%d body=%s", response.Code, response.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("blocked upload retained %d request bytes", retained)
+	}
+	if active := g.Accounts()[0].Active; active != 0 {
+		t.Fatalf("blocked upload retained account lease: %d", active)
+	}
+}
+
+func TestTransportErrorRetainsAttemptLeaseUntilAsynchronousBodyClose(t *testing.T) {
+	account := config.Account{
+		ID: "delayed", Type: "openai", BaseURL: "https://api.example.com/v1", APIKey: "test",
+		Models: []string{"real"}, Concurrency: 1, Weight: 1, Enabled: true,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}
+	g := newTestGateway(t, []config.Account{account}, map[string]config.Route{
+		"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "delayed"}}},
+	})
+	transport := &delayedCloseRoundTripper{returned: make(chan struct{}), release: make(chan struct{})}
+	g.state.Load().clients["delayed"] = &http.Client{Transport: transport}
+	payload := `{"model":"alias","padding":"` + strings.Repeat("x", 1<<20) + `"}`
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g.ServeGateway(response, gatewayRequest(payload))
+	}()
+	select {
+	case <-transport.returned:
+	case <-time.After(time.Second):
+		t.Fatal("custom transport did not return its error")
+	}
+	if retained, minimum := g.bodyBytes.Load(), int64(len(payload))*3-(64<<10); retained < minimum {
+		close(transport.release)
+		<-done
+		t.Fatalf("attempt lease dropped before transport Body.Close: retained=%d want_at_least=%d", retained, minimum)
+	}
+	select {
+	case <-done:
+		close(transport.release)
+		t.Fatal("handler returned before transport relinquished request body ownership")
+	default:
+	}
+	close(transport.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not resume after asynchronous Body.Close")
+	}
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "uncertain_submission") {
+		t.Fatalf("delayed-close transport status=%d body=%s", response.Code, response.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("delayed-close transport retained %d request bytes after close", retained)
+	}
+}
+
+func TestGatewayAppliesFastProfileAfterAdmission(t *testing.T) {
+	var serviceTier string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		serviceTier, _ = body["service_tier"].(string)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "fast", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"sol@fast"}, Enabled: true, Weight: 1,
+		Capabilities: []config.ChannelCapability{{Model: "sol@fast", UpstreamModel: "sol@fast", ReasoningEfforts: []string{"auto"}}},
+	}}, map[string]config.Route{
+		"coding-fast": {Model: "sol@fast", Targets: []config.RouteTarget{{Account: "fast"}}},
+	})
+	w := httptest.NewRecorder()
+	g.routeExecutionProfileHandler(http.HandlerFunc(g.ServeGateway)).ServeHTTP(w, gatewayRequest(`{"model":"coding-fast","messages":[]}`))
+	if w.Code != http.StatusOK || serviceTier != "priority" {
+		t.Fatalf("status=%d service_tier=%q body=%s", w.Code, serviceTier, w.Body.String())
+	}
+}
+
+func TestGatewayRejectsOversizedModelBeforeObservation(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"`+strings.Repeat("m", maxGatewayModelBytes+1)+`","messages":[]}`))
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "model_too_long") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if recent := g.Stats().Recent; len(recent) != 0 {
+		t.Fatalf("oversized model reached observation ring: %+v", recent)
+	}
+}
+
+func TestTopLevelEnvelopeBudgetIsEnforcedBeforeMapAllocation(t *testing.T) {
+	var body strings.Builder
+	body.WriteString(`{"model":"m"`)
+	for index := 0; index < maxRequestEnvelopeFields; index++ {
+		fmt.Fprintf(&body, `,"field_%d":%d`, index, index)
+	}
+	body.WriteByte('}')
+	data := []byte(body.String())
+	if err := validateTopLevelEnvelope(data); !errors.Is(err, errTooManyRequestFields) {
+		t.Fatalf("preflight error=%v, want too many fields", err)
+	}
+	if allocations := testing.AllocsPerRun(100, func() { _ = validateTopLevelEnvelope(data) }); allocations > 0 {
+		t.Fatalf("over-cardinality preflight allocated %.1f objects per run", allocations)
+	}
+	for _, valid := range [][]byte{
+		[]byte(`{"model":"m","nested":{"quoted":"} ] \\\"","items":[1,{"ok":true}]}}`),
+		[]byte(`{"escaped\\\"key":1}`),
+	} {
+		if err := validateTopLevelEnvelope(valid); err != nil {
+			t.Fatalf("valid nested/escaped envelope rejected: %v body=%s", err, valid)
+		}
+	}
+	escapedKey := []byte(`{"` + strings.Repeat(`\u0061`, 100) + `":1}`)
+	if err := validateTopLevelEnvelope(escapedKey); err != nil {
+		t.Fatalf("escaped key within decoded limit was rejected: %v", err)
+	}
+	var escapedEnvelope map[string]json.RawMessage
+	if err := json.Unmarshal(escapedKey, &escapedEnvelope); err != nil || len(escapedEnvelope) != 1 {
+		t.Fatalf("escaped key fixture invalid: err=%v envelope=%v", err, escapedEnvelope)
+	}
+	g := newTestGateway(t, nil, nil)
+	response := httptest.NewRecorder()
+	g.ServeGateway(response, gatewayRequest(string(data)))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "too_many_request_fields") {
+		t.Fatalf("over-cardinality request status=%d body=%s", response.Code, response.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("rejected field bomb retained %d request bytes", retained)
+	}
+}
+
+func TestOversizedSessionKeyIsRejectedWithoutDecodedCopy(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	payload := `{"model":"m","user":"` + strings.Repeat("u", 1<<20) + `"}`
+	response := httptest.NewRecorder()
+	g.ServeGateway(response, gatewayRequest(payload))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "session_key_too_long") {
+		t.Fatalf("oversized session key status=%d body=%s", response.Code, response.Body.String())
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("oversized session key retained %d request bytes", retained)
+	}
+}
+
+type slowResponseWriter struct {
+	header  http.Header
+	delay   time.Duration
+	writing atomic.Bool
+	mu      sync.Mutex
+	body    []byte
+}
+
+type failingResponseWriter struct {
+	header      http.Header
+	deadlineSet atomic.Bool
+}
+
+type testTimeoutError struct{}
+
+func (testTimeoutError) Error() string   { return "downstream write deadline exceeded" }
+func (testTimeoutError) Timeout() bool   { return true }
+func (testTimeoutError) Temporary() bool { return true }
+
+type deadlineBlockingWriter struct {
+	header       http.Header
+	mu           sync.Mutex
+	deadline     time.Time
+	deadlineSet  atomic.Bool
+	observedBody atomic.Int64
+	bodyBytes    *atomic.Int64
+}
+
+type delayedCloseRoundTripper struct {
+	returned chan struct{}
+	release  chan struct{}
+}
+
+type blockingUploadRoundTripper struct {
+	started chan struct{}
+}
+
+func (t *blockingUploadRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	if trace := httptrace.ContextClientTrace(request.Context()); trace != nil && trace.WroteHeaders != nil {
+		trace.WroteHeaders()
+	}
+	close(t.started)
+	<-request.Context().Done()
+	_ = request.Body.Close()
+	return nil, request.Context().Err()
+}
+
+func (t *delayedCloseRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	if trace := httptrace.ContextClientTrace(request.Context()); trace != nil && trace.WroteHeaders != nil {
+		trace.WroteHeaders()
+	}
+	close(t.returned)
+	go func() {
+		<-t.release
+		_ = request.Body.Close()
+	}()
+	return nil, errors.New("transport failed after accepting request")
+}
+
+func (w *deadlineBlockingWriter) Header() http.Header { return w.header }
+func (*deadlineBlockingWriter) WriteHeader(int)       {}
+func (w *deadlineBlockingWriter) SetWriteDeadline(deadline time.Time) error {
+	w.mu.Lock()
+	w.deadline = deadline
+	w.mu.Unlock()
+	if !deadline.IsZero() {
+		w.deadlineSet.Store(true)
+	}
+	return nil
+}
+func (w *deadlineBlockingWriter) Write([]byte) (int, error) {
+	if w.bodyBytes != nil {
+		w.observedBody.Store(w.bodyBytes.Load())
+	}
+	w.mu.Lock()
+	deadline := w.deadline
+	w.mu.Unlock()
+	if delay := time.Until(deadline); delay > 0 {
+		time.Sleep(delay)
+	}
+	return 0, testTimeoutError{}
+}
+
+func (w *failingResponseWriter) Header() http.Header { return w.header }
+func (*failingResponseWriter) WriteHeader(int)       {}
+func (*failingResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("client disconnected")
+}
+func (w *failingResponseWriter) SetWriteDeadline(time.Time) error {
+	w.deadlineSet.Store(true)
+	return nil
+}
+
+func (w *slowResponseWriter) Header() http.Header { return w.header }
+func (*slowResponseWriter) WriteHeader(int)       {}
+func (w *slowResponseWriter) Write(data []byte) (int, error) {
+	w.writing.Store(true)
+	defer w.writing.Store(false)
+	time.Sleep(w.delay)
+	w.mu.Lock()
+	w.body = append(w.body, data...)
+	w.mu.Unlock()
+	return len(data), nil
+}
+
+func TestStreamIdleWatchdogDoesNotTreatSlowDownstreamAsUpstreamIdle(t *testing.T) {
+	w := &slowResponseWriter{header: make(http.Header), delay: 50 * time.Millisecond}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("chunk"))}
+	started := time.Now()
+	if err := streamResponse(w, resp, 500*time.Millisecond); err != nil {
+		t.Fatalf("slow downstream was reported as upstream idle: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < w.delay || w.writing.Load() {
+		t.Fatalf("handler returned before writer completed: elapsed=%v writing=%v", elapsed, w.writing.Load())
+	}
+}
+
+func TestDownstreamWriteFailureDoesNotTripUpstreamBreaker(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"real"}, Concurrency: 1, Weight: 1, Enabled: true,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}}, map[string]config.Route{"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "main"}}}})
+	cfg := g.Config()
+	cfg.Server.FailureThreshold = 1
+	cfg.Server.StreamIdleTimeout = config.Duration{Duration: 50 * time.Millisecond}
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	w := &failingResponseWriter{header: make(http.Header)}
+	g.ServeGateway(w, gatewayRequest(`{"model":"alias"}`))
+	if !w.deadlineSet.Load() {
+		t.Fatal("downstream write deadline was not installed")
+	}
+	account := g.Accounts()[0]
+	if account.Failures != 0 || account.CircuitOpenUntil != "" {
+		t.Fatalf("downstream failure polluted upstream breaker: %+v", account)
+	}
+	recent := g.Stats().Recent
+	if len(recent) != 1 || recent[0].Outcome != "client_cancelled" {
+		t.Fatalf("downstream failure outcome=%+v", recent)
+	}
+	if latest := g.Stats().RouteLatest; len(latest) != 0 {
+		t.Fatalf("client-side write failure replaced route health evidence: %+v", latest)
+	}
+	ready := httptest.NewRecorder()
+	g.serveReadiness(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK || strings.Contains(ready.Body.String(), `"failed_routes":["alias"]`) {
+		t.Fatalf("client-side write failure degraded readiness: status=%d body=%s", ready.Code, ready.Body.String())
+	}
+}
+
+func TestRouteObservationFromOldRuntimeCannotPolluteReplacementRoute(t *testing.T) {
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	oldUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(oldStarted)
+		<-releaseOld
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"old route failed"}`))
+	}))
+	defer oldUpstream.Close()
+	newUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer newUpstream.Close()
+	account := config.Account{
+		ID: "main", Type: "openai", BaseURL: oldUpstream.URL + "/v1", APIKey: "test",
+		Models: []string{"real"}, Concurrency: 1, Weight: 1, Enabled: true,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}
+	g := newTestGateway(t, []config.Account{account}, map[string]config.Route{
+		"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "main"}}},
+	})
+	oldFingerprint := g.state.Load().routeFingerprints["alias"]
+	oldResponse := httptest.NewRecorder()
+	oldDone := make(chan struct{})
+	go func() {
+		defer close(oldDone)
+		g.ServeGateway(oldResponse, gatewayRequest(`{"model":"alias"}`))
+	}()
+	select {
+	case <-oldStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old route request did not reach upstream")
+	}
+	cfg := g.Config()
+	cfg.Accounts[0].BaseURL = newUpstream.URL + "/v1"
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	newFingerprint := g.state.Load().routeFingerprints["alias"]
+	if newFingerprint == oldFingerprint {
+		t.Fatal("changing resolved upstream identity did not advance route fingerprint")
+	}
+	close(releaseOld)
+	select {
+	case <-oldDone:
+	case <-time.After(time.Second):
+		t.Fatal("old route request did not finish")
+	}
+	if latest := g.Stats().RouteLatest; len(latest) != 0 {
+		t.Fatalf("old-generation request inserted readiness evidence after reload: %+v", latest)
+	}
+	ready := httptest.NewRecorder()
+	g.serveReadiness(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK || strings.Contains(ready.Body.String(), `"failed_routes":["alias"]`) {
+		t.Fatalf("old-generation failure degraded replacement route: status=%d body=%s", ready.Code, ready.Body.String())
+	}
+
+	currentResponse := httptest.NewRecorder()
+	g.ServeGateway(currentResponse, gatewayRequest(`{"model":"alias"}`))
+	if currentResponse.Code != http.StatusOK {
+		t.Fatalf("replacement route status=%d body=%s", currentResponse.Code, currentResponse.Body.String())
+	}
+	latest := g.Stats().RouteLatest
+	if len(latest) != 1 || latest[0].RouteFingerprint != newFingerprint || latest[0].Status != http.StatusOK {
+		t.Fatalf("replacement route did not establish current evidence: %+v", latest)
+	}
+}
+
+func TestUpstreamClientRejectionIsNeutralForRouteReadiness(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"invalid messages"}`))
+	}))
+	defer upstream.Close()
+	account := config.Account{
+		ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"real"}, Concurrency: 1, Weight: 1, Enabled: true,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}
+	g := newTestGateway(t, []config.Account{account}, map[string]config.Route{
+		"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "main"}}},
+	})
+	first := httptest.NewRecorder()
+	g.ServeGateway(first, gatewayRequest(`{"model":"alias"}`))
+	if first.Code != http.StatusOK || len(g.Stats().RouteLatest) != 1 {
+		t.Fatalf("success did not establish route evidence: status=%d latest=%+v", first.Code, g.Stats().RouteLatest)
+	}
+	baseline := g.Stats().RouteLatest[0]
+	second := httptest.NewRecorder()
+	g.ServeGateway(second, gatewayRequest(`{"model":"alias","messages":"invalid"}`))
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("upstream client rejection status=%d body=%s", second.Code, second.Body.String())
+	}
+	latest := g.Stats().RouteLatest
+	if len(latest) != 1 || latest[0].Time != baseline.Time || latest[0].Status != http.StatusOK {
+		t.Fatalf("client rejection replaced healthy route evidence: baseline=%+v latest=%+v", baseline, latest)
+	}
+	accountSnapshot := g.Accounts()[0]
+	if accountSnapshot.Failures != 0 || accountSnapshot.CircuitOpenUntil != "" {
+		t.Fatalf("client rejection polluted breaker: %+v", accountSnapshot)
+	}
+	recent := g.Stats().Recent
+	if len(recent) == 0 || recent[0].Outcome != "upstream_rejected" {
+		t.Fatalf("client rejection outcome was not typed neutral: %+v", recent)
+	}
+	ready := httptest.NewRecorder()
+	g.serveReadiness(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK || strings.Contains(ready.Body.String(), `"failed_routes":["alias"]`) {
+		t.Fatalf("client rejection degraded readiness: status=%d body=%s", ready.Code, ready.Body.String())
+	}
+}
+
+func TestRetryableErrorBodyHasIdleBoundaryAndReleasesLease(t *testing.T) {
+	var secondCalls atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer second.Close()
+	accounts := []config.Account{
+		{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}
+	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Targets: []config.RouteTarget{{Account: "first", Model: "m"}, {Account: "second", Model: "m"}}}})
+	cfg := g.Config()
+	cfg.Server.StreamIdleTimeout = config.Duration{Duration: 30 * time.Millisecond}
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, gatewayRequest(`{"model":"m"}`))
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("error body timeout took %s", elapsed)
+	}
+	if w.Code != http.StatusOK || secondCalls.Load() != 1 {
+		t.Fatalf("status=%d second_calls=%d body=%s", w.Code, secondCalls.Load(), w.Body.String())
+	}
+	for _, account := range g.Accounts() {
+		if account.Active != 0 {
+			t.Fatalf("error body retained account lease: %+v", account)
+		}
+	}
+}
+
+func TestBufferedFinalResponseHasWriteDeadlineAndReleasesBodyLeaseFirst(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"limited"}`))
+	}))
+	defer upstream.Close()
+	g := newTestGateway(t, []config.Account{{
+		ID: "limited", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, nil)
+	cfg := g.Config()
+	cfg.Server.StreamIdleTimeout = config.Duration{Duration: 20 * time.Millisecond}
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	writer := &deadlineBlockingWriter{header: make(http.Header), bodyBytes: &g.bodyBytes}
+	payload := `{"model":"m","padding":"` + strings.Repeat("x", 1<<20) + `"}`
+	started := time.Now()
+	g.ServeGateway(writer, gatewayRequest(payload))
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("buffered downstream write exceeded deadline boundary: %s", elapsed)
+	}
+	if !writer.deadlineSet.Load() {
+		t.Fatal("buffered downstream response installed no write deadline")
+	}
+	if retained := writer.observedBody.Load(); retained != 0 {
+		t.Fatalf("buffered downstream write observed %d retained request bytes", retained)
+	}
+	if retained := g.bodyBytes.Load(); retained != 0 {
+		t.Fatalf("timed-out buffered write retained %d request bytes", retained)
+	}
+}
+
+func TestAnthropicGatewayErrorsUseAnthropicEnvelope(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m"}`))
+	w := httptest.NewRecorder()
+	g.ServeGateway(w, req)
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `"type":"error"`) || strings.Contains(w.Body.String(), `"param"`) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestConnectionNamedHeadersAreNotForwarded(t *testing.T) {
+	source := http.Header{"Connection": {"X-Hop, X-Other"}, "X-Hop": {"secret"}, "X-Other": {"secret-2"}, "X-End-To-End": {"ok"}}
+	destination := make(http.Header)
+	copyRequestHeaders(destination, source)
+	if destination.Get("X-Hop") != "" || destination.Get("X-Other") != "" || destination.Get("X-End-To-End") != "ok" {
+		t.Fatalf("forwarded headers=%v", destination)
+	}
+}
+
+func TestReloadReusesUnchangedRequestLogWriter(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	before := g.requestLog.Load()
+	cfg := g.Config()
+	cfg.Server.MaxInFlightRequests++
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if after := g.requestLog.Load(); after != before {
+		t.Fatal("unchanged log configuration created a second writer")
+	}
+}
+
+func TestReloadReconfiguresLongLivedRequestLogWriter(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	before := g.requestLog.Load()
+	cfg := g.Config()
+	cfg.Server.RequestLogMaxBytes += 64 << 10
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	after := g.requestLog.Load()
+	if after != before || after.Status().MaxBytes != cfg.Server.RequestLogMaxBytes {
+		t.Fatalf("log actor was replaced or not reconfigured: before=%p after=%p status=%+v", before, after, after.Status())
+	}
+}
+
+func TestGatewayCloseDrainsAndClosesRequestLog(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	logger := g.requestLog.Load()
+	logger.Enqueue(RequestRecord{Time: time.Now().UTC().Format(time.RFC3339Nano), RequestID: "before-close"})
+	g.Close()
+	if g.requestLog.Load() != nil {
+		t.Fatal("gateway retained request log after close")
+	}
+	select {
+	case <-logger.done:
+	default:
+		t.Fatal("request log worker was not drained")
+	}
+	contents, err := os.ReadFile(logger.path)
+	if err != nil || !strings.Contains(string(contents), "before-close") {
+		t.Fatalf("drained log missing final record: err=%v body=%s", err, contents)
+	}
+	if err := g.Reload(); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("closed gateway accepted reload: %v", err)
+	}
+}
+
+func TestReloadRejectsRestartRequiredServerFields(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	before := g.Config()
+	changed := before
+	changed.Server.Listen = "127.0.0.1:65530"
+	if err := g.store.Save(changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err == nil || !strings.Contains(err.Error(), "process restart") {
+		t.Fatalf("restart-required reload error=%v", err)
+	}
+	if got := g.Config().Server.Listen; got != before.Server.Listen {
+		t.Fatalf("running listener config changed to %q", got)
 	}
 }
 
@@ -341,7 +1427,9 @@ func TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel(t *testing.T) {
 	}}}
 	g := newTestGateway(t, accounts, routes)
 	w := httptest.NewRecorder()
-	g.ServeGateway(w, gatewayRequest(`{"model":"alias","messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"alias","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer gateway-secret")
+	g.ServeGateway(w, request)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -400,11 +1488,11 @@ func TestAuthenticationFailureTripsCircuit(t *testing.T) {
 	defer second.Close()
 	accounts := []config.Account{{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "bad", Models: []string{"m"}, Priority: 0, Concurrency: 1, Weight: 1, Enabled: true}, {ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "ok", Models: []string{"m"}, Priority: 1, Concurrency: 1, Weight: 1, Enabled: true}}
 	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Accounts: []string{"first", "second"}, Strategy: "priority"}})
-	for i := 0; i < 2; i++ {
-		w := httptest.NewRecorder()
-		g.ServeGateway(w, gatewayRequest(`{"model":"m"}`))
-		if w.Code != 200 {
-			t.Fatalf("request %d status=%d", i, w.Code)
+	for index := 0; index < 2; index++ {
+		response := httptest.NewRecorder()
+		g.ServeGateway(response, gatewayRequest(`{"model":"m"}`))
+		if response.Code != http.StatusOK {
+			t.Fatalf("request %d status=%d body=%s", index, response.Code, response.Body.String())
 		}
 	}
 	if got := firstCalls.Load(); got != 1 {
@@ -502,7 +1590,7 @@ func TestStreamIdleTimeoutReleasesSlot(t *testing.T) {
 	if active := g.Accounts()[0].Active; active != 0 {
 		t.Fatalf("active=%d after idle timeout", active)
 	}
-	if recent := g.Stats().Recent; len(recent) == 0 || !strings.Contains(recent[0].Error, "stream idle") {
+	if recent := g.Stats().Recent; len(recent) == 0 || !strings.Contains(recent[0].Error, "stream idle") || recent[0].Outcome != "stream_error" {
 		t.Fatalf("idle timeout not recorded: %+v", recent)
 	}
 }
@@ -739,6 +1827,23 @@ func TestCloneConfigDeepCopiesMutableFields(t *testing.T) {
 	}
 	if cfg.Routes["alias"].Accounts[0] != "a" || cfg.Routes["alias"].Targets[0].Model != "real" {
 		t.Fatalf("route mutable fields were shared: %+v", cfg.Routes["alias"])
+	}
+}
+
+func TestGatewayConfigReturnsDeepCopy(t *testing.T) {
+	g := newTestGateway(t, []config.Account{{
+		ID: "a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "secret", Models: []string{"m"},
+		Headers: map[string]string{"X-Test": "original"}, Enabled: true, Weight: 1,
+	}}, map[string]config.Route{"alias": {Accounts: []string{"a"}}})
+	copyConfig := g.Config()
+	copyConfig.Accounts[0].Models[0] = "changed"
+	copyConfig.Accounts[0].Headers["X-Test"] = "changed"
+	route := copyConfig.Routes["alias"]
+	route.Accounts[0] = "changed"
+	copyConfig.Routes["alias"] = route
+	runtimeConfig := g.Config()
+	if runtimeConfig.Accounts[0].Models[0] != "m" || runtimeConfig.Accounts[0].Headers["X-Test"] != "original" || runtimeConfig.Routes["alias"].Accounts[0] != "a" {
+		t.Fatalf("caller mutated runtime snapshot: %+v", runtimeConfig)
 	}
 }
 

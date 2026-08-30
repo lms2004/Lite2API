@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestStatsRecentRingNewestFirst(t *testing.T) {
@@ -20,6 +22,42 @@ func TestStatsRecentRingNewestFirst(t *testing.T) {
 		if recent[i].RequestID != want[i] {
 			t.Fatalf("recent[%d]=%q want %q", i, recent[i].RequestID, want[i])
 		}
+	}
+}
+
+func TestStatsBoundsClientControlledObservationFields(t *testing.T) {
+	stats := NewStats(2)
+	stats.Record(RequestRecord{
+		Model: strings.Repeat("模型", 1024), UpstreamModel: strings.Repeat("u", 4096),
+		ClientKeyName: strings.Repeat("k", 4096), Error: strings.Repeat("e", 4096),
+	})
+	record := stats.Snapshot().Recent[0]
+	if len(record.Model) > maxGatewayModelBytes || len(record.UpstreamModel) > maxGatewayModelBytes || len(record.ClientKeyName) > 128 || len(record.Error) > 1024 {
+		t.Fatalf("record exceeded observation budget: model=%d upstream=%d key=%d error=%d", len(record.Model), len(record.UpstreamModel), len(record.ClientKeyName), len(record.Error))
+	}
+	if !utf8.ValidString(record.Model) {
+		t.Fatal("bounded model is not valid UTF-8")
+	}
+}
+
+func TestTrendLatencyMemoryIsBounded(t *testing.T) {
+	stats := NewStatsWithTrend(0, time.Minute)
+	now := time.Now().UTC().Truncate(time.Minute)
+	for index := 0; index < maxTrendSamples*4; index++ {
+		stats.Record(RequestRecord{Time: now.Format(time.RFC3339Nano), Status: 200, LatencyMS: int64(index)})
+	}
+	if got := len(stats.currentTrend.latencySamples); got != maxTrendSamples {
+		t.Fatalf("latency samples=%d want bounded %d", got, maxTrendSamples)
+	}
+}
+
+func TestTrendUsesOutcomeInsteadOfSuccessfulHeaders(t *testing.T) {
+	stats := NewStatsWithTrend(1, time.Minute)
+	now := time.Now().UTC().Truncate(time.Minute)
+	stats.Record(RequestRecord{Time: now.Format(time.RFC3339Nano), Status: 200, Outcome: "stream_error", Error: "stream interrupted"})
+	trend := stats.Trend(now.Add(time.Second), time.Minute)
+	if len(trend.Points) != 1 || trend.Points[0].Failed != 1 {
+		t.Fatalf("stream failure was counted as success: %+v", trend.Points)
 	}
 }
 

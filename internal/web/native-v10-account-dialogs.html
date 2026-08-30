@@ -20,7 +20,7 @@
         </div>
       </aside>
 
-      <main class="v10-method-column">
+      <div class="v10-method-column" role="region" aria-label="接入方式">
         <div class="v10-step-label"><b>2</b><span>选择接入方式</span></div>
         <div id="v10ProviderSummary" class="v10-provider-summary"></div>
         <div id="v10MethodGrid" class="v10-method-grid"></div>
@@ -30,7 +30,7 @@
           <div id="oauthLinkField" class="oauth-field" hidden><label>打开授权链接</label><div class="oauth-link-row"><input id="oauthAuthURL" readonly aria-label="OAuth 授权链接"><button type="button" class="btn-ghost" onclick="copyOAuthURL()">复制</button><button type="button" class="primary" onclick="openOAuthURL()">打开认证</button></div></div>
           <div id="oauthCallbackField" class="oauth-field oauth-callback" hidden><label>粘贴认证后的完整回调 URL</label><p class="v10-inline-help">浏览器停在 localhost 且显示无法访问通常是正常的；复制地址栏完整 URL 粘贴到这里。</p><textarea id="oauthCallbackURL" placeholder="http://localhost:.../?code=...&state=..." onpaste="setTimeout(autoSubmitOAuthCallback,0)"></textarea><div class="actions"><button type="button" class="btn-ghost" onclick="pasteOAuthCallback()">从剪贴板粘贴</button><button id="oauthSubmitCallback" type="button" class="primary" onclick="submitOAuthCallback()">提交并加入账号池</button></div></div>
         </section>
-      </main>
+      </div>
 
       <aside class="v10-onboarding-aside">
         <div class="v10-step-label"><b>3</b><span>完成前检查</span></div>
@@ -76,7 +76,7 @@
         </div>
       </aside>
 
-      <main class="v10-config-column">
+      <div class="v10-config-column" role="region" aria-label="连接信息">
         <div class="v10-step-label"><b>2</b><span>填写连接信息</span></div>
         <div class="v10-form-section">
           <div class="v10-form-grid">
@@ -111,7 +111,7 @@
             <label class="v10-field v10-span-2">环境变量请求头 JSON<input name="headers_env" value="{}" placeholder='{"X-Token":"TOKEN_ENV"}'></label>
           </div>
         </details>
-      </main>
+      </div>
 
       <aside class="v10-review-column">
         <div class="v10-step-label"><b>3</b><span>验证并保存</span></div>
@@ -150,6 +150,6 @@
         <div id="v10ImportIdle" class="v10-import-idle"><strong>等待预检查</strong><span>选择文件后点击下方“预检查”，确认结果再导入。</span></div>
       </section>
     </div>
-    <footer class="v10-dialog-foot"><button type="button" class="btn-ghost" onclick="closeDialog('importDialog')">取消</button><button id="previewImportBtn" type="button" class="btn-ghost" onclick="runImport(true)">预检查</button><button id="applyImportBtn" type="button" class="primary" onclick="runImport(false)">确认导入</button></footer>
+    <footer class="v10-dialog-foot"><button type="button" class="btn-ghost" onclick="closeDialog('importDialog')">取消</button><button id="previewImportBtn" type="button" class="btn-ghost" onclick="runImport(true)">预检查</button><button id="applyImportBtn" type="button" class="primary" onclick="runImport(false)" disabled title="请先完成与当前文件和冲突模式一致的预检查">确认导入</button></footer>
   </div>
 </dialog>

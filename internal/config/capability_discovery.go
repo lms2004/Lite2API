@@ -26,7 +26,7 @@ func FilterDiscoveredModels(account Account, models []string) []string {
 	seen := make(map[string]struct{}, len(models))
 	for _, raw := range models {
 		model := strings.TrimSpace(raw)
-		if model == "" || model == "*" || !modelMatchesDiscoveryScope(discoveryScope(account), model) {
+		if model == "" || model == "*" || len(model) > MaxModelIDBytes || !modelMatchesDiscoveryScope(discoveryScope(account), model) {
 			continue
 		}
 		if _, exists := seen[model]; exists {
@@ -34,6 +34,9 @@ func FilterDiscoveredModels(account Account, models []string) []string {
 		}
 		seen[model] = struct{}{}
 		result = append(result, model)
+		if len(result) == MaxModelsPerAccount {
+			break
+		}
 	}
 	return result
 }
@@ -45,7 +48,7 @@ func FilterDiscoveredCatalog(account Account, models []DiscoveredModel) []Discov
 	for _, raw := range models {
 		model := raw
 		model.ID = strings.TrimSpace(model.ID)
-		if model.ID == "" || model.ID == "*" || !modelMatchesDiscoveryScope(scope, model.ID) {
+		if model.ID == "" || model.ID == "*" || len(model.ID) > MaxModelIDBytes || !modelMatchesDiscoveryScope(scope, model.ID) {
 			continue
 		}
 		if _, exists := seen[model.ID]; exists {
@@ -55,6 +58,9 @@ func FilterDiscoveredCatalog(account Account, models []DiscoveredModel) []Discov
 		model.ReasoningEfforts = unionStrings(nil, normalizeDiscoveredReasoning(model.ReasoningEfforts))
 		model.ServiceTiers = unionStrings(nil, normalizeDiscoveredTiers(model.ServiceTiers))
 		result = append(result, model)
+		if len(result) == MaxModelsPerAccount {
+			break
+		}
 	}
 	return result
 }
@@ -265,25 +271,26 @@ func discoveredContains(values []string, want string) bool {
 
 func coalesceCapabilities(values []ChannelCapability) []ChannelCapability {
 	result := make([]ChannelCapability, 0, len(values))
-	byModel := make(map[string]int, len(values))
+	byIdentity := make(map[string]int, len(values))
 	for _, capability := range values {
 		capability.Model = strings.TrimSpace(capability.Model)
 		capability.UpstreamModel = strings.TrimSpace(capability.UpstreamModel)
 		if capability.Model == "" || capability.UpstreamModel == "" {
 			continue
 		}
-		if index, exists := byModel[capability.Model]; exists {
+		// Reasoning effort is part of the logical-to-upstream mapping. Two
+		// provider IDs may expose the same logical model at different efforts;
+		// merging only by logical model would route every effort to whichever
+		// upstream happened to win the merge.
+		identity := capability.Model + "\x00" + capability.UpstreamModel
+		if index, exists := byIdentity[identity]; exists {
 			current := result[index]
 			current.ReasoningEfforts = unionStrings(current.ReasoningEfforts, capability.ReasoningEfforts)
-			if codexModelPreference(capability.UpstreamModel) > codexModelPreference(current.UpstreamModel) ||
-				(strings.Contains(capability.UpstreamModel, "/") && !strings.Contains(current.UpstreamModel, "/")) {
-				current.UpstreamModel = capability.UpstreamModel
-			}
 			result[index] = current
 			continue
 		}
 		capability.ReasoningEfforts = unionStrings(nil, capability.ReasoningEfforts)
-		byModel[capability.Model] = len(result)
+		byIdentity[identity] = len(result)
 		result = append(result, capability)
 	}
 	return result

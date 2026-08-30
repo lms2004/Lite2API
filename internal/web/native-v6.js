@@ -11,8 +11,6 @@
 
   function syncIdentity() {
     document.documentElement.dataset.ui = "native-v6";
-    const build = byId("uiBuild");
-    if (build) build.textContent = "UI build 2026.08.18-v6";
   }
 
   function syncFreshness() {

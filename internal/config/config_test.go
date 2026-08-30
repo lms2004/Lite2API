@@ -3,7 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateRejectsUnsafeHTTP(t *testing.T) {
@@ -165,6 +167,181 @@ func TestNormalizeBackfillsCLIProxyCapabilities(t *testing.T) {
 	capability := cfg.Accounts[0].Capabilities[0]
 	if capability.Model != "sol" || capability.UpstreamModel != "gpt-5.6-sol" || !containsString(capability.ReasoningEfforts, "max") {
 		t.Fatalf("unexpected normalized capability=%+v", capability)
+	}
+}
+
+func TestLoadRejectsUnknownTrailingAndNumericDuration(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "unknown field", body: `{"server":{},"accounts":[],"routes":{},"typo":true}`, want: "unknown field"},
+		{name: "trailing value", body: `{"server":{},"accounts":[],"routes":{}} {}`, want: "multiple JSON values"},
+		{name: "numeric duration", body: `{"server":{"request_read_timeout":30},"accounts":[],"routes":{}}`, want: "duration must be a duration string"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(test.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestStoreEffectiveDoesNotPersistEnvironmentOverlay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	desired := Defaults()
+	desired.Server.AdminAutoLogin = false
+	desired.Server.MaxBodyBytes = 2 << 20
+	store := NewStore(path)
+	if err := store.Save(desired); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("LITE2API_ADMIN_AUTO_LOGIN", "true")
+	t.Setenv("LITE2API_MAX_BODY_BYTES", "7340032")
+	effective, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !effective.Server.AdminAutoLogin || effective.Server.MaxBodyBytes != 7<<20 {
+		t.Fatalf("environment overlay was not applied: %+v", effective.Server)
+	}
+	if err := store.SaveEffective(effective); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("LITE2API_ADMIN_AUTO_LOGIN", "")
+	t.Setenv("LITE2API_MAX_BODY_BYTES", "")
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Server.AdminAutoLogin || reloaded.Server.MaxBodyBytes != 2<<20 {
+		t.Fatalf("environment overlay leaked into desired config: %+v", reloaded.Server)
+	}
+}
+
+func TestNormalizeDeepCopiesMutableConfiguration(t *testing.T) {
+	cfg := Defaults()
+	cfg.Accounts = []Account{{
+		ID: "a", Type: "openai", BaseURL: "https://api.example.com/v1",
+		Headers: map[string]string{"X-Test": "original"}, Models: []string{"m"},
+		Capabilities: []ChannelCapability{{Model: "m", UpstreamModel: "m", ReasoningEfforts: []string{"auto"}}},
+	}}
+	cfg.Routes["m"] = Route{Targets: []RouteTarget{{Account: "a", Model: "m"}}}
+	normalized := Normalize(cfg)
+	normalized.Accounts[0].Headers["X-Test"] = "changed"
+	normalized.Accounts[0].Models[0] = "changed"
+	normalized.Accounts[0].Capabilities[0].ReasoningEfforts[0] = "high"
+	route := normalized.Routes["m"]
+	route.Targets[0].Model = "changed"
+	normalized.Routes["m"] = route
+	if cfg.Accounts[0].Headers["X-Test"] != "original" || cfg.Accounts[0].Models[0] != "m" ||
+		cfg.Accounts[0].Capabilities[0].ReasoningEfforts[0] != "auto" || cfg.Routes["m"].Targets[0].Model != "m" {
+		t.Fatalf("Normalize mutated or retained aliases to the source: source=%+v normalized=%+v", cfg, normalized)
+	}
+}
+
+func TestValidateRequiresUnambiguousRouteSchema(t *testing.T) {
+	base := Defaults()
+	base.Accounts = []Account{{ID: "a", Type: "openai", BaseURL: "https://api.example.com/v1", Models: []string{"m"}, Enabled: true}}
+
+	mixed := cloneConfig(base)
+	mixed.Routes["alias"] = Route{Accounts: []string{"a"}, Targets: []RouteTarget{{Account: "a", Model: "m"}}}
+	if err := mixed.Validate(); err == nil || !strings.Contains(err.Error(), "cannot combine") {
+		t.Fatalf("mixed route error=%v", err)
+	}
+	empty := cloneConfig(base)
+	empty.Routes["alias"] = Route{}
+	if err := empty.Validate(); err == nil || !strings.Contains(err.Error(), "no targets") {
+		t.Fatalf("empty route error=%v", err)
+	}
+	wildcard := cloneConfig(base)
+	wildcard.Routes["alias"] = Route{AllAccounts: true}
+	if err := wildcard.Validate(); err != nil {
+		t.Fatalf("explicit wildcard route: %v", err)
+	}
+	unsupported := cloneConfig(base)
+	unsupported.Routes["alias"] = Route{Accounts: []string{"a"}, UpstreamModel: "other"}
+	if err := unsupported.Validate(); err == nil || !strings.Contains(err.Error(), "does not advertise") {
+		t.Fatalf("unsupported upstream error=%v", err)
+	}
+}
+
+func TestStoreRejectsConfigurationDataPathCollision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := Defaults()
+	cfg.Server.ClientKeysPath = filepath.Base(path)
+	if err := NewStore(path).Save(cfg); err == nil || !strings.Contains(err.Error(), "different files") {
+		t.Fatalf("collision error=%v", err)
+	}
+}
+
+func TestLoadRejectsConfigurationDataPathCollision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"version":1,"server":{"client_keys_path":"config.json"}}`)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "different files") {
+		t.Fatalf("startup collision error=%v", err)
+	}
+}
+
+func TestValidateRejectsUnboundedResourceConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{name: "body", mutate: func(cfg *Config) { cfg.Server.MaxBodyBytes = 257 << 20 }},
+		{name: "inflight", mutate: func(cfg *Config) { cfg.Server.MaxInFlightRequests = 65537 }},
+		{name: "stream timeout", mutate: func(cfg *Config) { cfg.Server.StreamIdleTimeout = Duration{25 * time.Hour} }},
+		{name: "failover", mutate: func(cfg *Config) { cfg.Server.MaxFailoverAttempts = 65 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Defaults()
+			test.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected unsafe %s configuration to be rejected", test.name)
+			}
+		})
+	}
+}
+
+func TestValidateEnforcesRoutingIdentifierBudgets(t *testing.T) {
+	base := Defaults()
+	base.Accounts = []Account{{
+		ID: "account", Type: "openai", BaseURL: "https://api.example.com/v1",
+		Models: []string{"m"}, Enabled: true,
+	}}
+	base.Routes["m"] = Route{Accounts: []string{"account"}}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{name: "account id", mutate: func(cfg *Config) {
+			cfg.Accounts[0].ID = strings.Repeat("a", MaxAccountIDBytes+1)
+		}},
+		{name: "account model", mutate: func(cfg *Config) {
+			cfg.Accounts[0].Models[0] = strings.Repeat("m", MaxModelIDBytes+1)
+		}},
+		{name: "route alias", mutate: func(cfg *Config) {
+			delete(cfg.Routes, "m")
+			cfg.Routes[strings.Repeat("r", MaxModelIDBytes+1)] = Route{Accounts: []string{"account"}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := cloneConfig(base)
+			test.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected oversized %s to be rejected", test.name)
+			}
+		})
 	}
 }
 

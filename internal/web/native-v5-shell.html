@@ -26,7 +26,7 @@
           <option value="dark">夜间模式</option>
         </select>
       </div>
-      <div class="vpn-auth" aria-label="管理会话状态"><span class="vpn-dot"></span><span>已连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
+      <div id="adminSessionStatus" class="vpn-auth" data-state="connecting" aria-label="管理会话状态" role="status"><span class="vpn-dot"></span><span id="adminSessionLabel">正在连接</span><span id="lastUpdated" class="muted">等待同步</span></div>
     </div>
   </header>
   <div id="notice" class="notice" role="status" aria-live="polite"></div>

@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core, scripts, and deployment contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: 1.26.5
+          # This stdlib-only module intentionally has no go.sum.
+          cache: false
+
+      - name: Formatting and static analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t unformatted < <(gofmt -l cmd internal)
+          if ((${#unformatted[@]})); then
+            printf 'gofmt required: %s\n' "${unformatted[@]}" >&2
+            exit 1
+          fi
+          go vet ./...
+
+      - name: Unit and race tests
+        run: |
+          go test ./...
+          go test -race ./...
+
+      - name: Offline migration and script contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for javascript in internal/web/*.js; do node --check "$javascript"; done
+          node --test internal/web/admin-core.test.js
+          node --check deploy/migrate-sub2api-auths.mjs
+          node --test deploy/migrate-sub2api-auths.test.mjs
+          bash deploy/bootstrap.test.sh
+          bash deploy/backup-verifiers.test.sh
+          bash -n deploy/*.sh deploy/server-ops/*.sh
+          sh -n deploy/bootstrap.sh deploy/bootstrap-channels.sh
+          shellcheck channels/*/*.sh deploy/*.sh deploy/server-ops/*.sh
+
+      - name: Build and validate the example configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          LITE2API_API_KEYS=ci-client-key \
+          LITE2API_ADMIN_TOKEN=ci-admin-token \
+          "$RUNNER_TEMP/lite2api" -check-config -config config.example.json
+
+      - name: Validate Compose and immutable image policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example \
+            -f docker-compose.yml -f compose.channels.yml \
+            --profile oauth --profile grok --profile gemini config --quiet
+          for dockerfile in Dockerfile channels/cliproxyapi/Dockerfile channels/gemini-web2api/Dockerfile; do
+            awk '
+              $1 == "FROM" {
+                image = $2
+                if (image !~ /@sha256:[0-9a-f]{64}$/) {
+                  print FILENAME ": unpinned base image: " image > "/dev/stderr"
+                  failed = 1
+                }
+              }
+              END { exit failed }
+            ' "$dockerfile"
+            if grep -Eq '^COPY[[:space:]]+--chmod' "$dockerfile"; then
+              echo "$dockerfile uses BuildKit-only COPY --chmod" >&2
+              exit 1
+            fi
+          done
+          for workflow in .github/workflows/*.yml; do
+            awk '
+              $1 == "uses:" {
+                ref = $2
+                sub(/^["\047]/, "", ref)
+                sub(/["\047]$/, "", ref)
+                if (ref !~ /^[.][/]/ && ref !~ /@[0-9a-f]{40}$/) {
+                  print FILENAME ": action is not pinned to a full commit SHA: " ref > "/dev/stderr"
+                  failed = 1
+                }
+              }
+              END { exit failed }
+            ' "$workflow"
+          done
+          if grep -RInE '(^|[[:space:]])(wri''te-all|[a-z-]+:[[:space:]]*wri''te)|git[[:space:]]+push|pull_request_''target:' .github/workflows; then
+            echo 'CI workflows must not mutate the repository' >&2
+            exit 1
+          fi
+
+  cliproxy-patchset:
+    name: Rebuild maintained CLIProxyAPI patchset
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout fixed submodule revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up Go 1.26
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: 1.26.5
+          cache: false
+
+      - name: Verify, apply, and test patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule update --init --depth 1 third_party/cliproxyapi
+          test "$(git -C third_party/cliproxyapi rev-parse HEAD)" = 785b00c3127eea6aa207f1207ead8a2aa93690a3
+          for patch in \
+            deploy/patches/cliproxyapi-quota-snapshot.patch \
+            deploy/patches/cliproxyapi-routing-reliability.patch \
+            deploy/patches/cliproxyapi-auth-refresh.patch; do
+            git -C third_party/cliproxyapi apply --unidiff-zero --check "$GITHUB_WORKSPACE/$patch"
+            git -C third_party/cliproxyapi apply --unidiff-zero "$GITHUB_WORKSPACE/$patch"
+          done
+          git -C third_party/cliproxyapi diff --check
+          cd third_party/cliproxyapi
+          GOTOOLCHAIN=local go test ./...
+
+  container-contracts:
+    name: Rebuild pinned container artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Initialize the fixed Gemini source
+        run: git submodule update --init --depth 1 third_party/gemini-web2api
+
+      - name: Build all local images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag lite2api:ci .
+          docker build --file channels/cliproxyapi/Dockerfile --tag lite2api/cliproxyapi:ci .
+          docker build --file channels/gemini-web2api/Dockerfile --tag lite2api/gemini-web2api:ci .
+          test "$(docker image inspect lite2api:ci --format '{{.Config.User}}')" = 10001:10001
+          test "$(docker image inspect lite2api/cliproxyapi:ci --format '{{.Config.User}}')" = 10001:10001
+          test "$(docker image inspect lite2api/gemini-web2api:ci --format '{{.Config.User}}')" = 10001:10001

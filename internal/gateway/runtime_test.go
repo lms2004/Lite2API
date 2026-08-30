@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +39,25 @@ func TestSchedulerUsesAvailableAccount(t *testing.T) {
 	two.Release()
 }
 
+func TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Routes["empty"] = config.Route{}
+	s := NewScheduler(cfg)
+	if selection, err := s.Select(context.Background(), "empty", config.OperationOpenAIChat, "", nil, 0); selection != nil || err != ErrNoEligibleAccount {
+		t.Fatalf("empty route selected account: selection=%+v err=%v", selection, err)
+	}
+	if containsModel(s.Models(), "empty") {
+		t.Fatal("empty route was advertised")
+	}
+	cfg.Routes["all"] = config.Route{AllAccounts: true}
+	s = NewScheduler(cfg)
+	selection, err := s.Select(context.Background(), "all", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatalf("explicit all_accounts route failed: %v", err)
+	}
+	selection.Release()
+}
+
 func TestSchedulerWaitsForRelease(t *testing.T) {
 	cfg := schedulerConfig()
 	cfg.Accounts = cfg.Accounts[:1]
@@ -60,9 +81,227 @@ func TestSchedulerWaitsForRelease(t *testing.T) {
 	}
 }
 
+func TestSchedulerBroadcastWakesAllWaitersForReleasedCapacity(t *testing.T) {
+	s := NewScheduler(schedulerConfig())
+	first, err := s.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := make(chan *Selection, 2)
+	var started sync.WaitGroup
+	started.Add(2)
+	for range 2 {
+		go func() {
+			started.Done()
+			selection, _ := s.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, time.Second)
+			results <- selection
+		}()
+	}
+	started.Wait()
+	time.Sleep(20 * time.Millisecond)
+	first.Release()
+	second.Release()
+	for index := range 2 {
+		select {
+		case selection := <-results:
+			if selection == nil {
+				t.Fatalf("waiter %d did not acquire released capacity", index)
+			}
+			defer selection.Release()
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("waiter %d was not broadcast-woken", index)
+		}
+	}
+}
+
+func TestSchedulerReleaseBeforeReloadWakesNewGeneration(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	oldScheduler := NewScheduler(cfg)
+	held, err := oldScheduler.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newScheduler := NewSchedulerWithPrevious(cfg, oldScheduler)
+	result := make(chan *Selection, 1)
+	go func() {
+		selection, _ := newScheduler.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, time.Second)
+		result <- selection
+	}()
+	time.Sleep(20 * time.Millisecond)
+	held.Release()
+	select {
+	case selection := <-result:
+		if selection == nil {
+			t.Fatal("new scheduler did not acquire old generation's released slot")
+		}
+		selection.Release()
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("old generation release did not wake new scheduler")
+	}
+}
+
+func TestSchedulerCapacitySurvivesRemoveAndReaddAcrossGenerations(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	cfg.Accounts[0].Concurrency = 1
+	first := NewScheduler(cfg)
+	held, err := first.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removedConfig := cfg
+	removedConfig.Accounts = nil
+	removed := NewSchedulerWithPrevious(removedConfig, first)
+	readded := NewSchedulerWithPrevious(cfg, removed)
+	if selection, err := readded.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0); selection != nil || err != ErrNoCapacity {
+		t.Fatalf("re-added account bypassed old lease: selection=%v err=%v", selection, err)
+	}
+	held.Release()
+	selection, err := readded.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatalf("re-added account did not observe old release: %v", err)
+	}
+	selection.Release()
+}
+
+func TestSelectionReleaseIsIdempotent(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	s := NewScheduler(cfg)
+	selection, err := s.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection.Release()
+	selection.Release()
+	if active := s.Snapshot()[0].Active; active != 0 {
+		t.Fatalf("double release changed active capacity to %d", active)
+	}
+}
+
+func TestSchedulerResetsHealthWhenAccountIdentityChanges(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	oldScheduler := NewScheduler(cfg)
+	oldAccount := oldScheduler.Get("a")
+	oldAccount.reportFailure(oldAccount.beginAttempt(config.OperationOpenAIChat, "m"), "bad credential", 1, time.Hour, true)
+	if oldAccount.available(time.Now(), config.OperationOpenAIChat, "m") {
+		t.Fatal("old account circuit did not open")
+	}
+	cfg.Accounts[0].BaseURL = "http://127.0.0.1:9/v1"
+	newScheduler := NewSchedulerWithPrevious(cfg, oldScheduler)
+	if !newScheduler.Get("a").available(time.Now(), config.OperationOpenAIChat, "m") {
+		t.Fatal("changed upstream identity inherited old circuit")
+	}
+}
+
+func TestLateOlderSuccessDoesNotCloseNewerCircuit(t *testing.T) {
+	s := NewScheduler(schedulerConfig())
+	account := s.Get("a")
+	older := account.beginAttempt(config.OperationOpenAIChat, "m")
+	newer := account.beginAttempt(config.OperationOpenAIChat, "m")
+	account.reportFailure(newer, "bad credential", 1, time.Hour, true)
+	account.reportSuccess(older, time.Millisecond)
+	if account.available(time.Now(), config.OperationOpenAIChat, "m") {
+		t.Fatal("late result from an older attempt closed the newer circuit")
+	}
+}
+
+func TestConcurrentFailuresCountWhenNewestCompletesFirst(t *testing.T) {
+	s := NewScheduler(schedulerConfig())
+	account := s.Get("a")
+	attempts := make([]healthAttempt, 100)
+	for index := range attempts {
+		attempts[index] = account.beginAttempt(config.OperationOpenAIChat, "m")
+	}
+	for index := len(attempts) - 1; index >= 0; index-- {
+		account.reportFailure(attempts[index], "overloaded", 3, time.Hour, false)
+	}
+	if account.available(time.Now(), config.OperationOpenAIChat, "m") {
+		t.Fatal("newest-first concurrent failures did not reach the breaker threshold")
+	}
+	if failures := account.Snapshot().Failures; failures != int64(len(attempts)) {
+		t.Fatalf("failures=%d, want %d", failures, len(attempts))
+	}
+}
+
+func TestCircuitIsScopedByOperationAndUpstreamModel(t *testing.T) {
+	s := NewScheduler(schedulerConfig())
+	account := s.Get("a")
+	attempt := account.beginAttempt(config.OperationOpenAIChat, "m")
+	account.reportFailure(attempt, "model-specific quota", 1, time.Hour, true)
+	if account.available(time.Now(), config.OperationOpenAIChat, "m") {
+		t.Fatal("failed model scope remained available")
+	}
+	if !account.available(time.Now(), config.OperationOpenAIResponses, "m") {
+		t.Fatal("chat breaker blocked responses operation")
+	}
+	if !account.available(time.Now(), config.OperationOpenAIChat, "other-model") {
+		t.Fatal("one model breaker blocked another upstream model")
+	}
+}
+
+func TestWildcardModelRuntimeStateHasBoundedCardinality(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	cfg.Accounts[0].Models = []string{"*"}
+	scheduler := NewScheduler(cfg)
+	account := scheduler.Get("a")
+	for index := 0; index < 10_000; index++ {
+		model := fmt.Sprintf("unbounded-client-model-%d", index)
+		attempt := account.beginAttempt(config.OperationOpenAIChat, model)
+		account.reportNeutral(attempt)
+		selection, err := scheduler.Select(context.Background(), model, config.OperationOpenAIChat, "", nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection.Release()
+	}
+	breakerCount := 0
+	account.state.breakers.Range(func(_, _ any) bool {
+		breakerCount++
+		return true
+	})
+	if breakerCount > maxWildcardBreakerBuckets {
+		t.Fatalf("wildcard breaker entries=%d, want <=%d", breakerCount, maxWildcardBreakerBuckets)
+	}
+	counterCount := 0
+	scheduler.roundRobin.Range(func(_, _ any) bool {
+		counterCount++
+		return true
+	})
+	if counterCount != 0 {
+		t.Fatalf("least-loaded scheduler retained %d per-model counters", counterCount)
+	}
+}
+
+func TestLegacyRoundRobinStartsWithFirstAccount(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Routes["m"] = config.Route{Accounts: []string{"a", "b"}, Strategy: "round_robin"}
+	s := NewScheduler(cfg)
+	want := []string{"a", "b", "a"}
+	for index, wantID := range want {
+		selection, err := s.Select(context.Background(), "m", config.OperationOpenAIChat, "", nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selection.Account.Config.ID != wantID {
+			t.Fatalf("selection %d=%q want %q", index, selection.Account.Config.ID, wantID)
+		}
+		selection.Release()
+	}
+}
+
 func TestStickySelectionIsStable(t *testing.T) {
 	cfg := schedulerConfig()
-	cfg.Routes["m"] = config.Route{Strategy: "sticky"}
+	cfg.Routes["m"] = config.Route{AllAccounts: true, Strategy: "sticky"}
 	s := NewScheduler(cfg)
 	var id string
 	for i := 0; i < 5; i++ {

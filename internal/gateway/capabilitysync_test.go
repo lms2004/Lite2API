@@ -65,13 +65,16 @@ func TestDiscoverModelsForAccountUsesAccountAuthentication(t *testing.T) {
 		if got := r.Header.Get("X-Test"); got != "present" {
 			t.Errorf("custom header=%q", got)
 		}
+		if got := r.URL.Query().Get("api-version"); got != "2026-01-01" {
+			t.Errorf("api-version=%q", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"}]}`))
 	}))
 	defer server.Close()
 
 	account := config.Account{
-		ID: "test", Type: "openai", BaseURL: server.URL + "/v1",
+		ID: "test", Type: "openai", BaseURL: server.URL + "/v1?api-version=2026-01-01",
 		APIKey: "secret", AuthHeader: "authorization", AuthScheme: "Bearer",
 		Headers: map[string]string{"X-Test": "present"}, Enabled: true,
 	}
@@ -124,6 +127,47 @@ func TestMergeSyncedCapabilitiesEnrichesExistingReasoning(t *testing.T) {
 		if !found {
 			t.Fatalf("missing effort %q in %v", effort, got[0].ReasoningEfforts)
 		}
+	}
+}
+
+func TestMergeSyncedCapabilitiesKeepsDistinctUpstreamEffortMappings(t *testing.T) {
+	existing := []config.ChannelCapability{{
+		Model: "shared", UpstreamModel: "provider/shared-low", ReasoningEfforts: []string{"auto", "low"},
+	}}
+	inferred := []config.ChannelCapability{{
+		Model: "shared", UpstreamModel: "provider/shared-high", ReasoningEfforts: []string{"auto", "high"},
+	}}
+	got := mergeSyncedCapabilities(existing, inferred)
+	if len(got) != 2 {
+		t.Fatalf("distinct upstream mappings were collapsed: %+v", got)
+	}
+	account := config.Account{ID: "provider", Models: []string{"provider/shared-low", "provider/shared-high"}, Capabilities: got}
+	for effort, wanted := range map[string]string{"low": "provider/shared-low", "high": "provider/shared-high"} {
+		model, _, ok := config.ResolveRouteTarget(account, config.Route{Model: "shared", ReasoningEffort: effort}, config.RouteTarget{Account: account.ID})
+		if !ok || model != wanted {
+			t.Fatalf("effort %q resolved to (%q,%v), want %q; capabilities=%+v", effort, model, ok, wanted, got)
+		}
+	}
+}
+
+func TestDiscoverySourceMatchAllowsMetadataEditButRejectsRoutingEdit(t *testing.T) {
+	source := config.Account{
+		ID: "a", Name: "before", Type: "openai", AdapterID: "generic-openai",
+		BaseURL: "https://api.example.com/v1", AuthHeader: "none", Models: []string{"old"}, Enabled: true,
+	}
+	update := discoveredCapabilityUpdate{
+		AccountID: source.ID, Source: cloneAccount(source),
+		ResolvedAPIKey: source.ResolvedAPIKey(), ResolvedHeader: source.ResolvedHeaders(),
+	}
+	metadataEdit := cloneAccount(source)
+	metadataEdit.Name = "after"
+	if !discoverySourceMatches(update, metadataEdit) {
+		t.Fatal("non-routing metadata edit should allow discovery to rebase")
+	}
+	routingEdit := cloneAccount(source)
+	routingEdit.Models = []string{"manual"}
+	if discoverySourceMatches(update, routingEdit) {
+		t.Fatal("manual model edit must invalidate an in-flight discovery sample")
 	}
 }
 

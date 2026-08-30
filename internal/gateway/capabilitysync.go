@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,8 +19,11 @@ import (
 const capabilityDiscoveryInterval = 10 * time.Minute
 
 type discoveredCapabilityUpdate struct {
-	AccountID string
-	Catalog   []config.DiscoveredModel
+	AccountID      string
+	Catalog        []config.DiscoveredModel
+	Source         config.Account
+	ResolvedAPIKey string
+	ResolvedHeader map[string]string
 }
 
 type discoveredCapabilityMigration struct {
@@ -60,6 +64,11 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		if client == nil {
 			continue
 		}
+		// Capture the credential overlay before starting network I/O. The commit
+		// check below will discard this catalog if an environment-backed secret
+		// changes while discovery is in flight.
+		resolvedAPIKey := account.ResolvedAPIKey()
+		resolvedHeaders := account.ResolvedHeaders()
 		catalog, err := discoverModelsForAccount(ctx, client, account)
 		if err != nil {
 			slog.Debug("upstream model discovery skipped", "account", account.ID, "error", err)
@@ -70,48 +79,56 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 		if len(catalog) == 0 {
 			continue
 		}
-		updates = append(updates, discoveredCapabilityUpdate{AccountID: account.ID, Catalog: catalog})
+		updates = append(updates, discoveredCapabilityUpdate{
+			AccountID: account.ID, Catalog: catalog, Source: cloneAccount(account),
+			ResolvedAPIKey: resolvedAPIKey, ResolvedHeader: resolvedHeaders,
+		})
 	}
 
-	cfg := cloneConfig(state.cfg)
 	changedAccounts := 0
-	migrations := make([]discoveredCapabilityMigration, 0)
-	for _, update := range updates {
-		index := accountIndex(cfg.Accounts, update.AccountID)
-		if index < 0 {
-			continue
-		}
-		current := cfg.Accounts[index]
-		updated := current
-		discoveredIDs := discoveredModelIDs(update.Catalog)
-		inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
-		if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
-			var accountMigrations []discoveredCapabilityMigration
-			updated.Capabilities, accountMigrations = reconcileDiscoveredCapabilities(current.Capabilities, inferred)
-			for migrationIndex := range accountMigrations {
-				accountMigrations[migrationIndex].AccountID = update.AccountID
+	if len(updates) > 0 {
+		if err := g.updateConfig(func(cfg *config.Config) (bool, error) {
+			migrations := make([]discoveredCapabilityMigration, 0)
+			for _, update := range updates {
+				index := accountIndex(cfg.Accounts, update.AccountID)
+				if index < 0 || !discoverySourceMatches(update, cfg.Accounts[index]) {
+					continue
+				}
+				current := cfg.Accounts[index]
+				updated := current
+				discoveredIDs := discoveredModelIDs(update.Catalog)
+				inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
+				if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
+					var accountMigrations []discoveredCapabilityMigration
+					updated.Capabilities, accountMigrations = reconcileDiscoveredCapabilities(current.Capabilities, inferred)
+					for migrationIndex := range accountMigrations {
+						accountMigrations[migrationIndex].AccountID = update.AccountID
+					}
+					migrations = append(migrations, accountMigrations...)
+					updated.Models = discoveredIDs
+				} else {
+					updated.Models = appendUniqueModels(current.Models, discoveredIDs)
+					updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
+				}
+				// A retained capability may refer to a model that temporarily vanished
+				// from a shared /models response. Keep that upstream ID advertised so a
+				// valid existing route cannot be made invalid by an incomplete catalog.
+				updated.Models = appendUniqueModels(updated.Models, capabilityUpstreamModels(updated.Capabilities))
+				if sameModels(current.Models, updated.Models) && sameChannelCapabilities(current.Capabilities, updated.Capabilities) {
+					continue
+				}
+				cfg.Accounts[index] = updated
+				changedAccounts++
 			}
-			migrations = append(migrations, accountMigrations...)
-			updated.Models = discoveredIDs
-		} else {
-			updated.Models = appendUniqueModels(current.Models, discoveredIDs)
-			updated.Capabilities = mergeSyncedCapabilities(current.Capabilities, inferred)
-		}
-		// A retained capability may refer to a model that temporarily vanished
-		// from a shared /models response. Keep that upstream ID advertised so a
-		// valid existing route cannot be made invalid by an incomplete catalog.
-		updated.Models = appendUniqueModels(updated.Models, capabilityUpstreamModels(updated.Capabilities))
-		if sameModels(current.Models, updated.Models) && sameChannelCapabilities(current.Capabilities, updated.Capabilities) {
-			continue
-		}
-		cfg.Accounts[index] = updated
-		changedAccounts++
-	}
-	if changedAccounts > 0 {
-		applyDiscoveredCapabilityMigrations(&cfg, migrations)
-		if err := g.saveAndReload(cfg); err != nil {
+			if changedAccounts > 0 {
+				applyDiscoveredCapabilityMigrations(cfg, migrations)
+			}
+			return changedAccounts > 0, nil
+		}); err != nil {
 			return fmt.Errorf("update discovered capabilities: %w", err)
 		}
+	}
+	if changedAccounts > 0 {
 		slog.Info("upstream capabilities synchronized", "accounts", changedAccounts)
 	}
 	if len(updates) == 0 && len(failures) > 0 {
@@ -120,14 +137,28 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 	return nil
 }
 
+func discoverySourceMatches(update discoveredCapabilityUpdate, current config.Account) bool {
+	source := update.Source
+	return current.Enabled &&
+		current.ID == source.ID && current.Type == source.Type &&
+		current.AdapterID == source.AdapterID && current.InstanceID == source.InstanceID &&
+		current.BaseURL == source.BaseURL && current.AuthHeader == source.AuthHeader &&
+		current.AuthScheme == source.AuthScheme && current.ProxyURL == source.ProxyURL &&
+		current.APIKey == source.APIKey && current.APIKeyEnv == source.APIKeyEnv &&
+		maps.Equal(current.Headers, source.Headers) && maps.Equal(current.HeadersEnv, source.HeadersEnv) &&
+		sameModels(current.Models, source.Models) && sameChannelCapabilities(current.Capabilities, source.Capabilities) &&
+		current.ResolvedAPIKey() == update.ResolvedAPIKey && maps.Equal(current.ResolvedHeaders(), update.ResolvedHeader)
+}
+
 func reconcileDiscoveredCapabilities(existing, inferred []config.ChannelCapability) ([]config.ChannelCapability, []discoveredCapabilityMigration) {
 	result := append([]config.ChannelCapability(nil), existing...)
 	matched := make([]bool, len(result))
-	byModel := make(map[string][]int, len(result))
+	byIdentity := make(map[string][]int, len(result))
 	byUpstream := make(map[string][]int, len(result))
 	for index, capability := range result {
-		if capability.Model != "" {
-			byModel[capability.Model] = append(byModel[capability.Model], index)
+		if capability.Model != "" && capability.UpstreamModel != "" {
+			identity := capability.Model + "\x00" + capability.UpstreamModel
+			byIdentity[identity] = append(byIdentity[identity], index)
 		}
 		if capability.UpstreamModel != "" {
 			byUpstream[capability.UpstreamModel] = append(byUpstream[capability.UpstreamModel], index)
@@ -135,8 +166,12 @@ func reconcileDiscoveredCapabilities(existing, inferred []config.ChannelCapabili
 	}
 	migrations := make([]discoveredCapabilityMigration, 0)
 	for _, capability := range inferred {
-		index := firstUnmatchedCapability(byModel[capability.Model], matched)
+		identity := capability.Model + "\x00" + capability.UpstreamModel
+		index := firstUnmatchedCapability(byIdentity[identity], matched)
 		if index < 0 {
+			// Matching by upstream is safe for a logical-name migration. Matching
+			// by logical model alone is not: distinct upstream IDs can encode
+			// distinct reasoning efforts for that same logical model.
 			index = firstUnmatchedCapability(byUpstream[capability.UpstreamModel], matched)
 		}
 		if index < 0 {
@@ -283,7 +318,6 @@ func fetchDiscoveredCatalog(ctx context.Context, client *http.Client, account co
 	}
 	endpoint := *base
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/models"
-	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
 	if rich {
 		query := endpoint.Query()
@@ -450,19 +484,20 @@ func discoveredModelIDs(models []config.DiscoveredModel) []string {
 func mergeSyncedCapabilities(existing, inferred []config.ChannelCapability) []config.ChannelCapability {
 	result := make([]config.ChannelCapability, len(existing))
 	copy(result, existing)
-	byModel := make(map[string]int, len(existing)+len(inferred))
+	byIdentity := make(map[string]int, len(existing)+len(inferred))
 	for index, capability := range result {
 		capability.ReasoningEfforts = append([]string(nil), capability.ReasoningEfforts...)
 		result[index] = capability
-		if capability.Model != "" {
-			byModel[capability.Model] = index
+		if capability.Model != "" && capability.UpstreamModel != "" {
+			byIdentity[capability.Model+"\x00"+capability.UpstreamModel] = index
 		}
 	}
 	for _, capability := range inferred {
 		if capability.Model == "" || capability.UpstreamModel == "" {
 			continue
 		}
-		if index, exists := byModel[capability.Model]; exists {
+		identity := capability.Model + "\x00" + capability.UpstreamModel
+		if index, exists := byIdentity[identity]; exists {
 			current := result[index]
 			current.ReasoningEfforts = mergeOrderedStrings(current.ReasoningEfforts, capability.ReasoningEfforts)
 			if current.UpstreamModel == "" {
@@ -472,7 +507,7 @@ func mergeSyncedCapabilities(existing, inferred []config.ChannelCapability) []co
 			continue
 		}
 		capability.ReasoningEfforts = mergeOrderedStrings(nil, capability.ReasoningEfforts)
-		byModel[capability.Model] = len(result)
+		byIdentity[identity] = len(result)
 		result = append(result, capability)
 	}
 	return result

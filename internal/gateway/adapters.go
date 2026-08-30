@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,6 +42,10 @@ type AdapterDescriptor struct {
 	Migration     []string `json:"migration"`
 	AccountIDs    []string `json:"account_ids,omitempty"`
 	Description   string   `json:"description"`
+	// trafficConfigured is derived from enabled accounts and deliberately not
+	// serialized. Merely having a disabled/configured account must not make an
+	// external adapter appear able to carry traffic.
+	trafficConfigured bool
 }
 
 var adapterCatalog = []AdapterDescriptor{
@@ -69,6 +74,13 @@ var adapterCatalog = []AdapterDescriptor{
 	{ID: "localai", Name: "LocalAI", Category: "local-inference", Platforms: []string{"Local models"}, Protocols: []string{"openai-chat", "openai-images", "openai-audio"}, AuthModes: []string{"none", "api-key"}, Status: "catalog", Maturity: "stable", License: "MIT", SourceURL: "https://github.com/mudler/LocalAI", Migration: []string{"openai-compatible"}, Description: "多模态本地 OpenAI 兼容服务。"},
 }
 
+var adapterProbeKeyEnv = map[string]string{
+	"atomcode2api":   "ATOMCODE2API_KEY",
+	"grok2api":       "GROK2API_KEY",
+	"gemini-web2api": "GEMINI_WEB2API_KEY",
+	"cli-proxy-api":  "CLIPROXYAPI_KEY",
+}
+
 func AdapterCatalog(accounts []config.Account) []AdapterDescriptor {
 	items := make([]AdapterDescriptor, len(adapterCatalog))
 	for index := range adapterCatalog {
@@ -82,6 +94,7 @@ func AdapterCatalog(accounts []config.Account) []AdapterDescriptor {
 		for _, account := range accounts {
 			if adapterMatchesAccount(item, account) {
 				item.AccountIDs = append(item.AccountIDs, account.ID)
+				item.trafficConfigured = item.trafficConfigured || account.Enabled
 			}
 		}
 		if len(item.AccountIDs) > 0 && item.Status != "built-in" {
@@ -91,11 +104,9 @@ func AdapterCatalog(accounts []config.Account) []AdapterDescriptor {
 		item.Traffic = "disabled"
 		if item.Status == "built-in" {
 			item.RuntimeStatus, item.Readiness = "in-process", "ready"
-			if len(item.AccountIDs) > 0 {
+			if item.trafficConfigured {
 				item.Traffic = "enabled"
 			}
-		} else if len(item.AccountIDs) > 0 {
-			item.Traffic = "enabled"
 		}
 		items[index] = item
 	}
@@ -103,22 +114,38 @@ func AdapterCatalog(accounts []config.Account) []AdapterDescriptor {
 }
 
 type adapterProbeResult struct {
-	running    bool
-	modelCount int
-	latency    time.Duration
-	checkedAt  time.Time
+	running      bool
+	ready        bool
+	authRequired bool
+	statusCode   int
+	modelCount   int
+	latency      time.Duration
+	checkedAt    time.Time
+}
+
+type adapterProbeCall struct {
+	done   chan struct{}
+	result adapterProbeResult
 }
 
 type adapterProbeCache struct {
-	mu      sync.Mutex
-	ttl     time.Duration
-	entries map[string]adapterProbeResult
-	client  *http.Client
+	mu       sync.Mutex
+	ttl      time.Duration
+	entries  map[string]adapterProbeResult
+	inflight map[string]*adapterProbeCall
+	slots    chan struct{}
+	client   *http.Client
 }
+
+const (
+	adapterProbeParallelism = 4
+	adapterProbeDeadline    = 750 * time.Millisecond
+)
 
 func newAdapterProbeCache(ttl time.Duration) *adapterProbeCache {
 	return &adapterProbeCache{
-		ttl: ttl, entries: make(map[string]adapterProbeResult),
+		ttl: ttl, entries: make(map[string]adapterProbeResult), inflight: make(map[string]*adapterProbeCall),
+		slots: make(chan struct{}, adapterProbeParallelism),
 		client: &http.Client{
 			Timeout: 500 * time.Millisecond,
 			Transport: &http.Transport{
@@ -133,30 +160,109 @@ func newAdapterProbeCache(ttl time.Duration) *adapterProbeCache {
 
 func (g *Gateway) AdapterCatalog(ctx context.Context, accounts []config.Account) []AdapterDescriptor {
 	items := AdapterCatalog(accounts)
-	for index := range items {
-		item := &items[index]
-		if item.LocalURL == "" || (item.InstallStatus != "installed" && item.InstallStatus != "configured") {
-			continue
-		}
-		result := g.adapterProbe.probe(ctx, *item)
-		applyAdapterProbe(item, result)
-	}
+	g.adapterProbe.probeAll(ctx, items)
 	return items
 }
 
-func (c *adapterProbeCache) probe(ctx context.Context, item AdapterDescriptor) adapterProbeResult {
-	now := time.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if cached, ok := c.entries[item.ID]; ok && now.Sub(cached.checkedAt) < c.ttl {
-		return cached
+func (c *adapterProbeCache) probeAll(ctx context.Context, items []AdapterDescriptor) {
+	jobs := make(chan int)
+	eligible := 0
+	for index := range items {
+		item := items[index]
+		if item.LocalURL != "" && (item.InstallStatus == "installed" || item.InstallStatus == "configured") {
+			eligible++
+		}
 	}
-	result := c.probeNow(ctx, item, now)
-	c.entries[item.ID] = result
-	return result
+	if eligible == 0 {
+		return
+	}
+	workers := min(adapterProbeParallelism, eligible)
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				result := c.probe(ctx, items[index])
+				applyAdapterProbe(&items[index], result)
+			}
+		}()
+	}
+	for index := range items {
+		item := items[index]
+		if item.LocalURL == "" || (item.InstallStatus != "installed" && item.InstallStatus != "configured") {
+			continue
+		}
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			close(jobs)
+			group.Wait()
+			return
+		}
+	}
+	close(jobs)
+	group.Wait()
 }
 
-func (c *adapterProbeCache) probeNow(ctx context.Context, item AdapterDescriptor, now time.Time) adapterProbeResult {
+func (c *adapterProbeCache) probe(ctx context.Context, item AdapterDescriptor) adapterProbeResult {
+	key, credential := adapterProbeIdentity(item)
+	c.mu.Lock()
+	if cached, ok := c.entries[key]; ok && c.ttl > 0 && time.Since(cached.checkedAt) < c.cacheTTL(cached) {
+		c.mu.Unlock()
+		return cached
+	}
+	call := c.inflight[key]
+	if call == nil {
+		call = &adapterProbeCall{done: make(chan struct{})}
+		c.inflight[key] = call
+		go c.runProbe(key, item, credential, call)
+	}
+	c.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return adapterProbeResult{checkedAt: time.Now()}
+	case <-call.done:
+		return call.result
+	}
+}
+
+func adapterProbeIdentity(item AdapterDescriptor) (cacheKey string, credential string) {
+	key := item.ID + "\x00" + item.LocalURL
+	if envName := adapterProbeKeyEnv[item.ID]; envName != "" {
+		credential = strings.TrimSpace(os.Getenv(envName))
+		digest := sha256.Sum256([]byte(credential))
+		key += "\x00" + string(digest[:])
+	}
+	return key, credential
+}
+
+func (c *adapterProbeCache) cacheTTL(result adapterProbeResult) time.Duration {
+	if result.ready {
+		return c.ttl
+	}
+	return min(c.ttl, 5*time.Second)
+}
+
+func (c *adapterProbeCache) runProbe(key string, item AdapterDescriptor, credential string, call *adapterProbeCall) {
+	probeCtx, cancel := context.WithTimeout(context.Background(), adapterProbeDeadline)
+	defer cancel()
+	result := adapterProbeResult{checkedAt: time.Now()}
+	select {
+	case c.slots <- struct{}{}:
+		result = c.probeNow(probeCtx, item, credential, result.checkedAt)
+		<-c.slots
+	case <-probeCtx.Done():
+	}
+	c.mu.Lock()
+	c.entries[key] = result
+	call.result = result
+	delete(c.inflight, key)
+	close(call.done)
+	c.mu.Unlock()
+}
+
+func (c *adapterProbeCache) probeNow(ctx context.Context, item AdapterDescriptor, credential string, now time.Time) adapterProbeResult {
 	result := adapterProbeResult{checkedAt: now}
 	base, err := url.Parse(item.LocalURL)
 	if err != nil || base.Scheme != "http" || net.ParseIP(base.Hostname()) == nil || !net.ParseIP(base.Hostname()).IsLoopback() {
@@ -171,43 +277,84 @@ func (c *adapterProbeCache) probeNow(ctx context.Context, item AdapterDescriptor
 	resp, err := c.client.Do(req)
 	result.latency = time.Since(started)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+			result.running = true
+			result.statusCode = resp.StatusCode
+		}
 		return result
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	resp.Body.Close()
-	result.running = resp.StatusCode >= 200 && resp.StatusCode < 500
-	if result.running && item.ID == "cli-proxy-api" {
-		result.modelCount = c.cliProxyModels(ctx, item.LocalURL)
+	result.running = true
+	result.statusCode = resp.StatusCode
+	result.ready = resp.StatusCode >= 200 && resp.StatusCode < 300
+	result.authRequired = resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
+	if models, attempted := c.adapterModels(ctx, item, credential); attempted {
+		result.modelCount = models.count
+		result.ready = models.ready
+		result.authRequired = models.authRequired
 	}
 	return result
 }
 
-func (c *adapterProbeCache) cliProxyModels(ctx context.Context, localURL string) int {
-	key := strings.TrimSpace(os.Getenv("CLIPROXYAPI_KEY"))
-	if key == "" {
-		return 0
+type adapterModelProbe struct {
+	count        int
+	ready        bool
+	authRequired bool
+}
+
+func (c *adapterProbeCache) adapterModels(ctx context.Context, item AdapterDescriptor, credential string) (adapterModelProbe, bool) {
+	_, attempted := adapterProbeKeyEnv[item.ID]
+	if !attempted {
+		return adapterModelProbe{}, false
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(localURL, "/")+"/models", nil)
+	if credential == "" {
+		return adapterModelProbe{authRequired: true}, true
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(item.LocalURL, "/")+"/models", nil)
 	if err != nil {
-		return 0
+		return adapterModelProbe{}, true
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Authorization", "Bearer "+credential)
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return adapterModelProbe{}, true
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return adapterModelProbe{authRequired: true}, true
+	}
 	if resp.StatusCode != http.StatusOK {
-		return 0
+		return adapterModelProbe{}, true
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(data) > 1<<20 {
+		return adapterModelProbe{}, true
 	}
 	var payload struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload) != nil {
-		return 0
+	if json.Unmarshal(data, &payload) != nil {
+		return adapterModelProbe{}, true
 	}
-	return len(payload.Data)
+	seen := make(map[string]struct{}, min(len(payload.Data), config.MaxModelsPerAccount))
+	for _, model := range payload.Data {
+		id := strings.TrimSpace(model.ID)
+		if id == "" || len(id) > config.MaxModelIDBytes {
+			continue
+		}
+		seen[id] = struct{}{}
+		if len(seen) == config.MaxModelsPerAccount {
+			break
+		}
+	}
+	return adapterModelProbe{count: len(seen), ready: len(seen) > 0}, true
 }
 
 func applyAdapterProbe(item *AdapterDescriptor, result adapterProbeResult) {
@@ -219,12 +366,25 @@ func applyAdapterProbe(item *AdapterDescriptor, result adapterProbeResult) {
 		return
 	}
 	item.RuntimeStatus = "running"
-	if item.ID == "cli-proxy-api" && result.modelCount == 0 {
+	if result.authRequired {
 		item.Status, item.Readiness, item.Traffic = "auth-required", "auth-required", "disabled"
+		return
+	}
+	if !result.ready {
+		if len(item.AccountIDs) > 0 {
+			item.Status = "configured"
+		} else {
+			item.Status = "running"
+		}
+		item.Readiness, item.Traffic = "unavailable", "disabled"
 		return
 	}
 	if len(item.AccountIDs) == 0 {
 		item.Status, item.Readiness, item.Traffic = "running", "unconfigured", "disabled"
+		return
+	}
+	if !item.trafficConfigured {
+		item.Status, item.Readiness, item.Traffic = "configured", "disabled", "disabled"
 		return
 	}
 	item.Status, item.Readiness, item.Traffic = "ready", "ready", "enabled"
@@ -270,8 +430,11 @@ func adapterMatchesAccount(adapter AdapterDescriptor, account config.Account) bo
 	if localURL != "" && baseURL == localURL {
 		return true
 	}
-	hints := strings.ToLower(account.ID + " " + account.Name)
-	return adapter.ID != "generic-openai" && adapter.ID != "generic-anthropic" && strings.Contains(hints, adapter.ID)
+	// Names are presentation data, not identity. Substring matching here used to
+	// associate unrelated accounts with adapters and could falsely enable their
+	// traffic badge. Legacy accounts remain supported through exact LocalURL;
+	// all other associations require an explicit adapter_id.
+	return false
 }
 
 func adapterForImport(hints ...string) string {

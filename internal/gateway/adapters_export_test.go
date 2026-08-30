@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -25,15 +26,36 @@ func TestAdapterCatalogAssociatesConfiguredAccounts(t *testing.T) {
 	t.Fatal("grok2api adapter is missing")
 }
 
+func TestAdapterCatalogDoesNotInferIdentityFromAccountName(t *testing.T) {
+	catalog := AdapterCatalog([]config.Account{{
+		ID: "not-grok2api-production", Name: "grok2api archive",
+		BaseURL: "https://unrelated.example.com/v1", Enabled: true,
+	}})
+	for _, adapter := range catalog {
+		if adapter.ID == "grok2api" && len(adapter.AccountIDs) != 0 {
+			t.Fatalf("presentation text created a false adapter association: %+v", adapter)
+		}
+	}
+}
+
 func TestAdapterProbeClassificationAndOperations(t *testing.T) {
-	item := AdapterDescriptor{ID: "cli-proxy-api", AccountIDs: []string{"oauth"}}
-	applyAdapterProbe(&item, adapterProbeResult{running: true, checkedAt: time.Unix(1, 0)})
+	item := AdapterDescriptor{ID: "cli-proxy-api", AccountIDs: []string{"oauth"}, trafficConfigured: true}
+	applyAdapterProbe(&item, adapterProbeResult{running: true, authRequired: true, checkedAt: time.Unix(1, 0)})
 	if item.Status != "auth-required" || item.RuntimeStatus != "running" || item.Traffic != "disabled" {
 		t.Fatalf("auth-required item=%+v", item)
 	}
-	applyAdapterProbe(&item, adapterProbeResult{running: true, modelCount: 2, latency: 3 * time.Millisecond, checkedAt: time.Unix(2, 0)})
+	applyAdapterProbe(&item, adapterProbeResult{running: true, ready: true, modelCount: 2, latency: 3 * time.Millisecond, checkedAt: time.Unix(2, 0)})
 	if item.Status != "ready" || item.Readiness != "ready" || item.Traffic != "enabled" || item.LatencyMS != 3 {
 		t.Fatalf("ready item=%+v", item)
+	}
+	applyAdapterProbe(&item, adapterProbeResult{running: true, statusCode: http.StatusNotFound, checkedAt: time.Unix(3, 0)})
+	if item.RuntimeStatus != "running" || item.Readiness != "unavailable" || item.Traffic != "disabled" {
+		t.Fatalf("reachable 4xx item was treated as ready: %+v", item)
+	}
+	disabled := AdapterDescriptor{ID: "grok2api", AccountIDs: []string{"disabled"}}
+	applyAdapterProbe(&disabled, adapterProbeResult{running: true, ready: true, modelCount: 1, checkedAt: time.Unix(4, 0)})
+	if disabled.Status != "configured" || disabled.Readiness != "disabled" || disabled.Traffic != "disabled" {
+		t.Fatalf("disabled account was allowed to carry traffic: %+v", disabled)
 	}
 	operations := operationsForProtocols([]string{"openai-chat", "openai-chat", "anthropic-messages", "unknown"})
 	if len(operations) != 2 || operations[0] != config.OperationOpenAIChat || operations[1] != config.OperationAnthropic {

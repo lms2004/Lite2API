@@ -449,8 +449,6 @@
   function sync() {
     picker.scheduled = false;
     document.documentElement.dataset.ui = "native-v7";
-    const build = $("uiBuild");
-    if (build) build.textContent = "UI build 2026.08.18-v7";
     enhanceRoutes();
     if ($("v7ModelDialog")?.open) renderDialog();
   }

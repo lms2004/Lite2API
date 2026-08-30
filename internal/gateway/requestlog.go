@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"container/heap"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,10 @@ import (
 	"time"
 )
 
-const requestLogQueueSize = 256
+const (
+	requestLogQueueSize        = 256
+	maxRecoveredRequestRecords = 16_384
+)
 
 // RequestLogStatus is intentionally small: it lets the admin page explain the
 // retention boundary without exposing a server filesystem path.
@@ -29,18 +33,47 @@ type RequestLogStatus struct {
 }
 
 type requestLogWriter struct {
-	path    string
-	maxSize int64
-	backups int
+	path     string
+	maxSize  int64
+	backups  int
+	configMu sync.RWMutex
 
-	mu     sync.RWMutex
-	queue  chan RequestRecord
-	closed bool
-	done   chan struct{}
+	mu       sync.RWMutex
+	queue    chan RequestRecord
+	commands chan requestLogReconfigure
+	closed   bool
+	done     chan struct{}
 
 	file         *os.File
 	currentBytes atomic.Int64
 	dropped      atomic.Int64
+}
+
+func (l *requestLogWriter) matches(path string, maxSize int64, backups int) bool {
+	if l == nil {
+		return false
+	}
+	l.configMu.RLock()
+	matches := l.path == filepath.Clean(path) && l.maxSize == maxSize && l.backups == backups
+	l.configMu.RUnlock()
+	return matches
+}
+
+func (l *requestLogWriter) configuration() (string, int64, int) {
+	if l == nil {
+		return "", 0, 0
+	}
+	l.configMu.RLock()
+	path, maxSize, backups := l.path, l.maxSize, l.backups
+	l.configMu.RUnlock()
+	return path, maxSize, backups
+}
+
+type requestLogReconfigure struct {
+	path     string
+	maxSize  int64
+	backups  int
+	complete chan error
 }
 
 func newRequestLogWriter(path string, maxSize int64, backups int) (*requestLogWriter, error) {
@@ -58,11 +91,12 @@ func newRequestLogWriter(path string, maxSize int64, backups int) (*requestLogWr
 		return nil, fmt.Errorf("create request log directory: %w", err)
 	}
 	writer := &requestLogWriter{
-		path:    filepath.Clean(path),
-		maxSize: maxSize,
-		backups: backups,
-		queue:   make(chan RequestRecord, requestLogQueueSize),
-		done:    make(chan struct{}),
+		path:     filepath.Clean(path),
+		maxSize:  maxSize,
+		backups:  backups,
+		queue:    make(chan RequestRecord, requestLogQueueSize),
+		commands: make(chan requestLogReconfigure),
+		done:     make(chan struct{}),
 	}
 	if err := writer.open(); err != nil {
 		return nil, err
@@ -96,34 +130,98 @@ func (l *requestLogWriter) open() error {
 
 func (l *requestLogWriter) run() {
 	defer close(l.done)
-	for record := range l.queue {
-		if err := l.write(record); err != nil {
-			slog.Error("request log write failed", "error", err)
+	for {
+		select {
+		case record, ok := <-l.queue:
+			if !ok {
+				if l.file != nil {
+					_ = l.file.Sync()
+					_ = l.file.Close()
+					l.file = nil
+				}
+				return
+			}
+			if err := l.write(record); err != nil {
+				slog.Error("request log write failed", "error", err)
+			}
+		case command := <-l.commands:
+			command.complete <- l.applyReconfigure(command.path, command.maxSize, command.backups)
 		}
-	}
-	if l.file != nil {
-		_ = l.file.Sync()
-		_ = l.file.Close()
-		l.file = nil
 	}
 }
 
+func (l *requestLogWriter) Reconfigure(path string, maxSize int64, backups int) error {
+	if path == "" {
+		return fmt.Errorf("request log path is empty")
+	}
+	if maxSize < 64<<10 {
+		return fmt.Errorf("request log max size must be at least 64KiB")
+	}
+	if backups < 0 {
+		return fmt.Errorf("request log backups cannot be negative")
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.closed {
+		return fmt.Errorf("request log is closed")
+	}
+	command := requestLogReconfigure{
+		path: filepath.Clean(path), maxSize: maxSize, backups: backups, complete: make(chan error, 1),
+	}
+	l.commands <- command
+	return <-command.complete
+}
+
+func (l *requestLogWriter) applyReconfigure(path string, maxSize int64, backups int) error {
+	l.configMu.Lock()
+	defer l.configMu.Unlock()
+	oldPath, oldMaxSize, oldBackups := l.path, l.maxSize, l.backups
+	if l.file != nil {
+		_ = l.file.Sync()
+		if err := l.file.Close(); err != nil {
+			return err
+		}
+		l.file = nil
+	}
+	l.path, l.maxSize, l.backups = path, maxSize, backups
+	configureErr := os.MkdirAll(filepath.Dir(path), 0700)
+	if configureErr == nil {
+		configureErr = l.open()
+	}
+	if configureErr == nil {
+		return nil
+	}
+	l.path, l.maxSize, l.backups = oldPath, oldMaxSize, oldBackups
+	if restoreErr := l.open(); restoreErr != nil {
+		return fmt.Errorf("reconfigure request log: %w; restore previous writer: %v", configureErr, restoreErr)
+	}
+	return fmt.Errorf("reconfigure request log: %w", configureErr)
+}
+
 func (l *requestLogWriter) write(record RequestRecord) error {
+	record = sanitizeRequestRecord(record)
 	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
+	if int64(len(data)) > l.maxSize {
+		// Preserve newline-delimited JSON even if a future record field escapes
+		// the normal observation budget. Byte-slicing JSON would corrupt both
+		// the current line and all recovery scanners that consume it.
+		data, err = json.Marshal(RequestRecord{
+			Time: record.Time, RequestID: record.RequestID, Status: record.Status,
+			Error: "request log record exceeded the configured record budget",
+		})
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+	}
 	if l.currentBytes.Load() > 0 && l.currentBytes.Load()+int64(len(data)) > l.maxSize {
 		if err := l.rotate(); err != nil {
 			return err
 		}
-	}
-	if len(data) > int(l.maxSize) {
-		// A request record is bounded by the fields captured in memory. Keep the
-		// newest record rather than allowing one unusually long error to break
-		// the retention limit.
-		data = append(data[:0], data[len(data)-int(l.maxSize):]...)
 	}
 	n, err := l.file.Write(data)
 	if err != nil {
@@ -194,6 +292,8 @@ func (l *requestLogWriter) Close() {
 }
 
 func (l *requestLogWriter) Status() RequestLogStatus {
+	l.configMu.RLock()
+	defer l.configMu.RUnlock()
 	return RequestLogStatus{
 		Enabled:        true,
 		CurrentBytes:   l.currentBytes.Load(),
@@ -205,11 +305,34 @@ func (l *requestLogWriter) Status() RequestLogStatus {
 	}
 }
 
-// loadRequestRecords restores valid records from the persistent request log
-// and its rotation backups. The records are sorted so Stats can rebuild both
-// the recent list and the minute trend in chronological order.
-func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {
-	records := make([]RequestRecord, 0)
+type recoveredRecord struct {
+	record   RequestRecord
+	observed time.Time
+}
+
+type recoveredRecordHeap []recoveredRecord
+
+func (h recoveredRecordHeap) Len() int           { return len(h) }
+func (h recoveredRecordHeap) Less(i, j int) bool { return h[i].observed.Before(h[j].observed) }
+func (h recoveredRecordHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *recoveredRecordHeap) Push(value any)    { *h = append(*h, value.(recoveredRecord)) }
+func (h *recoveredRecordHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return last
+}
+
+// loadRequestState scans retained files once while keeping only a bounded
+// newest-record heap plus one latest observation per configured route. Startup
+// memory is independent of the configured multi-gigabyte retention envelope.
+func loadRequestState(path string, backups, maxRecords int, routeFingerprints map[string]string) ([]RequestRecord, map[string]RequestRecord, error) {
+	if maxRecords < 0 {
+		maxRecords = 0
+	}
+	records := make(recoveredRecordHeap, 0, maxRecords)
+	heap.Init(&records)
+	routeLatest := make(map[string]recoveredRecord, len(routeFingerprints))
 	for index := 0; index <= backups; index++ {
 		candidate := path
 		if index > 0 {
@@ -220,7 +343,7 @@ func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("open request log backup: %w", err)
+			return nil, nil, fmt.Errorf("open request log backup: %w", err)
 		}
 		scanner := bufio.NewScanner(file)
 		scanner.Buffer(make([]byte, 64*1024), 2<<20)
@@ -229,26 +352,56 @@ func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {
 			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
 				continue
 			}
-			if _, err := time.Parse(time.RFC3339Nano, record.Time); err != nil {
+			observed, err := time.Parse(time.RFC3339Nano, record.Time)
+			if err != nil {
 				continue
 			}
-			records = append(records, record)
+			record = sanitizeRequestRecord(record)
+			recovered := recoveredRecord{record: record, observed: observed}
+			if maxRecords > 0 {
+				if records.Len() < maxRecords {
+					heap.Push(&records, recovered)
+				} else if observed.After(records[0].observed) {
+					heap.Pop(&records)
+					heap.Push(&records, recovered)
+				}
+			}
+			if fingerprint := routeFingerprints[record.Model]; fingerprint != "" && record.RouteFingerprint == fingerprint && routeHealthObservation(record) {
+				key := routeObservationKey(record.Model, record.Operation)
+				current, exists := routeLatest[key]
+				if !exists || observed.After(current.observed) {
+					routeLatest[key] = recovered
+				}
+			}
 		}
 		scanErr := scanner.Err()
 		closeErr := file.Close()
 		if scanErr != nil {
-			return nil, fmt.Errorf("read request log backup: %w", scanErr)
+			return nil, nil, fmt.Errorf("read request log backup: %w", scanErr)
 		}
 		if closeErr != nil {
-			return nil, fmt.Errorf("close request log backup: %w", closeErr)
+			return nil, nil, fmt.Errorf("close request log backup: %w", closeErr)
 		}
 	}
-	sort.SliceStable(records, func(i, j int) bool {
-		left, _ := time.Parse(time.RFC3339Nano, records[i].Time)
-		right, _ := time.Parse(time.RFC3339Nano, records[j].Time)
+	result := make([]RequestRecord, len(records))
+	for index := range records {
+		result[index] = records[index].record
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		left, _ := time.Parse(time.RFC3339Nano, result[i].Time)
+		right, _ := time.Parse(time.RFC3339Nano, result[j].Time)
 		return left.Before(right)
 	})
-	return records, nil
+	latest := make(map[string]RequestRecord, len(routeLatest))
+	for alias, recovered := range routeLatest {
+		latest[alias] = recovered.record
+	}
+	return result, latest, nil
+}
+
+func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {
+	records, _, err := loadRequestState(path, backups, maxRecoveredRequestRecords, nil)
+	return records, err
 }
 
 // loadLatestRequestRecord restores only the newest valid record from the

@@ -13,16 +13,33 @@ Environment=GOMEMLIMIT=160MiB
 ExecStart=/usr/local/bin/lite2api -config /etc/lite2api/config.json
 Restart=on-failure
 RestartSec=3
+UMask=0077
 MemoryMax=192M
 TasksMax=128
+LimitNOFILE=65536
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
 ReadWritePaths=/etc/lite2api
 CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

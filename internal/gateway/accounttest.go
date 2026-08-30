@@ -98,7 +98,6 @@ func probeAccountModels(parent context.Context, account config.Account) (account
 		return accountTestResult{}, fmt.Errorf("parse account base URL: %w", err)
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/models"
-	base.RawQuery = ""
 	base.Fragment = ""
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()

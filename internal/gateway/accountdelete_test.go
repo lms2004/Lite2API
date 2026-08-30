@@ -12,10 +12,10 @@ func TestDeleteAccountRemovesRouteReferences(t *testing.T) {
 		{ID: "second", Type: "openai", BaseURL: "https://second.example.com/v1", APIKey: "second-secret", Models: []string{"m"}, Enabled: true, Weight: 1},
 	}, map[string]config.Route{
 		"chat": {
-			Accounts: []string{"first", "second"},
-			Targets:  []config.RouteTarget{{Account: "first", Model: "m"}, {Account: "second", Model: "m"}},
+			Targets: []config.RouteTarget{{Account: "first", Model: "m"}, {Account: "second", Model: "m"}},
 		},
-		"secondary": {Accounts: []string{"second"}},
+		"legacy":    {Accounts: []string{"first", "second"}},
+		"secondary": {Accounts: []string{"second"}, UpstreamModel: "m"},
 	})
 
 	if err := g.DeleteAccount("first"); err != nil {
@@ -27,10 +27,34 @@ func TestDeleteAccountRemovesRouteReferences(t *testing.T) {
 		t.Fatalf("accounts after delete=%+v", cfg.Accounts)
 	}
 	chat := cfg.Routes["chat"]
-	if len(chat.Accounts) != 1 || chat.Accounts[0] != "second" || len(chat.Targets) != 1 || chat.Targets[0].Account != "second" {
+	if len(chat.Accounts) != 0 || len(chat.Targets) != 1 || chat.Targets[0].Account != "second" {
 		t.Fatalf("chat route after delete=%+v", chat)
+	}
+	legacy := cfg.Routes["legacy"]
+	if len(legacy.Accounts) != 1 || legacy.Accounts[0] != "second" {
+		t.Fatalf("legacy route after delete=%+v", legacy)
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("deleted config is invalid: %v", err)
+	}
+}
+
+func TestDeleteLastRouteAccountRemovesRouteInsteadOfCreatingWildcard(t *testing.T) {
+	g := newTestGateway(t, []config.Account{
+		{ID: "first", Type: "openai", BaseURL: "https://first.example.com/v1", APIKey: "first-secret", Models: []string{"m"}, Enabled: true, Weight: 1},
+		{ID: "unrelated", Type: "openai", BaseURL: "https://other.example.com/v1", APIKey: "other-secret", Models: []string{"m"}, Enabled: true, Weight: 1},
+	}, map[string]config.Route{
+		"legacy": {Accounts: []string{"first"}},
+		"target": {Targets: []config.RouteTarget{{Account: "first", Model: "m"}}},
+	})
+
+	if err := g.DeleteAccount("first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := g.Config().Routes["legacy"]; exists {
+		t.Fatal("legacy route survived without an account and would become a wildcard")
+	}
+	if _, exists := g.Config().Routes["target"]; exists {
+		t.Fatal("target route survived without a target and would become a wildcard")
 	}
 }

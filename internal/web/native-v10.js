@@ -5,6 +5,8 @@
   const qualityResults = new Map();
   let selectedOnboardingProvider = 'codex';
   let syncScheduled = false;
+  let qualityBatchController = null;
+  let qualityBatchTimer = 0;
 
   const $ = id => document.getElementById(id);
   const all = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -127,8 +129,9 @@
     const recent = recentInRange();
     const fallbackCalls = Number(state?.stats?.failovers) || 0;
     const latencies = recent.map(record => Number(record.latency_ms)).filter(Number.isFinite);
-    const trendP95 = points.map(point => Number(point.p95_latency_ms)).filter(Number.isFinite);
-    const p95 = percentile(latencies, .95) ?? (trendP95.length ? trendP95[trendP95.length - 1] : null);
+    const trendP95 = points.map(point => ({ value: Number(point.p95_latency_ms), time: new Date(point.time).getTime() })).filter(point => Number.isFinite(point.value) && Number.isFinite(point.time)).sort((a, b) => a.time - b.time);
+    const detailedP95 = percentile(latencies, .95);
+    const p95 = detailedP95 ?? (trendP95.length ? trendP95[trendP95.length - 1].value : null);
     const sampleCalls = calls || recent.length;
     const sampleFailed = calls ? failed : recent.filter(record => Number(record.status) < 200 || Number(record.status) >= 400).length;
     const successRate = sampleCalls ? ((sampleCalls - sampleFailed) / sampleCalls) * 100 : null;
@@ -141,9 +144,12 @@
     if ($('v10FailureContext')) $('v10FailureContext').textContent = `${number(sampleFailed)} 次失败 · ${calls ? '来自趋势桶' : '来自保留明细'}`;
     if ($('v12FailoverContext')) $('v12FailoverContext').textContent = fallbackCalls ? `进程累计 ${number(fallbackCalls)} 次自动切换` : '';
     if ($('v10P95Latency')) $('v10P95Latency').textContent = p95 === null ? '—' : `${number(Math.round(p95))} ms`;
+    if ($('v10P95Label')) $('v10P95Label').textContent = detailedP95 === null ? '最新原始桶 P95' : '保留明细 P95';
     if ($('v10LatencyContext')) {
       const average = latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null;
-      $('v10LatencyContext').textContent = average === null ? '暂无速度明细样本' : `保留明细平均 ${number(average)} ms`;
+      $('v10LatencyContext').textContent = detailedP95 === null
+        ? (p95 === null ? '暂无速度样本' : '仅显示最新原始桶，不是时间范围 P95')
+        : `${number(latencies.length)} 条保留明细 · 平均 ${number(average)} ms`;
     }
     if ($('v10FailoverCount')) $('v10FailoverCount').textContent = number(fallbackCalls);
     if ($('v10ChannelUsageScope')) $('v10ChannelUsageScope').textContent = `${rangeLabel}内保留的 ${recent.length} 条明细`;
@@ -338,6 +344,7 @@
   function qualityVerdict(result) {
     if (!result || result.state === 'idle') return ['未测试', ''];
     if (result.state === 'running') return ['测试中', ''];
+    if (result.state === 'cancelled') return ['已取消', 'warn'];
     if (!result.successes) return ['不可用', 'bad'];
     const availability = result.successes / result.attempts;
     if (availability === 1 && result.p95 < 1200 && result.consistent) return ['优秀', 'good'];
@@ -360,12 +367,18 @@
       const availability = result.state === 'idle' ? '—' : result.state === 'running' ? `${result.completed || 0}/3` : `${result.successes}/${result.attempts}`;
       const speed = result.p50 == null ? '—' : `${number(result.p50)} ms`;
       const output = result.state === 'idle' ? '—' : result.successes ? (result.consistent ? '一致' : '有差异') : '失败';
-      return `<div class="v10-quality-row ${result.state === 'running' ? 'is-running' : ''}" data-quality-account="${escapeHTML(account.id)}"><div class="v10-quality-channel"><strong>${escapeHTML(account.name || account.id)}</strong><small>${escapeHTML(qualityModel(account) || '未声明测试模型')}</small></div><div class="v10-quality-value">${availability}<small>成功 / 3</small></div><div class="v10-quality-value">${speed}<small>P50</small></div><div class="v10-quality-value">${output}<small>最短回复</small></div><div><span class="v10-quality-result ${tone}">${label}</span></div><button type="button" class="btn-ghost" ${result.state === 'running' ? 'disabled' : ''} onclick="v10TestChannel('${encodeURIComponent(account.id)}')">${result.state === 'running' ? '测试中' : '测试'}</button></div>`;
+      return `<div class="v10-quality-row ${result.state === 'running' ? 'is-running' : ''}" data-quality-account="${escapeHTML(account.id)}"><div class="v10-quality-channel"><strong>${escapeHTML(account.name || account.id)}</strong><small>${escapeHTML(qualityModel(account) || '未声明测试模型')}</small></div><div class="v10-quality-value">${availability}<small>成功 / 3</small></div><div class="v10-quality-value">${speed}<small>P50</small></div><div class="v10-quality-value">${output}<small>最短回复</small></div><div><span class="v10-quality-result ${tone}">${label}</span></div><button type="button" class="btn-ghost" data-quality-test ${result.state === 'running' ? 'disabled' : ''}>${result.state === 'running' ? '测试中' : '测试'}</button></div>`;
     }).join('');
   }
 
-  async function testChannel(encodedID) {
-    const id = decodeURIComponent(encodedID);
+  function qualityAccountID(value) {
+    const raw = String(value || '');
+    if (testableAccounts().some(account => account.id === raw)) return raw;
+    try { return decodeURIComponent(raw); } catch (_) { return raw; }
+  }
+
+  async function testChannel(value, options = {}) {
+    const id = qualityAccountID(value);
     const account = testableAccounts().find(item => item.id === id);
     if (!account) return;
     const model = qualityModel(account);
@@ -381,12 +394,20 @@
       try {
         const data = await api('/prompt-test', {
           method: 'POST',
-          body: JSON.stringify({ account_id: id, model, messages: [{ role: 'user', content: '只回复 OK' }], temperature: 0, max_tokens: 8 })
+          body: JSON.stringify({ account_id: id, model, messages: [{ role: 'user', content: '只回复 OK' }], temperature: 0, max_tokens: 8 }),
+          signal: options.signal,
+          timeoutMs: 20000
         });
         result.successes += 1;
         result.latencies.push(Number(data.latency_ms) || 0);
         result.outputs.push(responseText(data.response));
       } catch (error) {
+        if (options.signal?.aborted || error.name === 'AbortError') {
+          result.state = 'cancelled';
+          qualityResults.set(id, { ...result });
+          syncQualityRows();
+          return;
+        }
         result.errors.push(error.message || '请求失败');
       }
       result.completed = attempt + 1;
@@ -404,11 +425,29 @@
 
   async function testAllChannels() {
     const button = $('v10TestAllChannels');
-    if (button) { button.disabled = true; button.textContent = '测试中…'; }
+    if (qualityBatchController) {
+      qualityBatchController.abort();
+      return;
+    }
+    const accounts = testableAccounts();
+    if (!accounts.length) { say('没有可测试的聊天渠道', true); return; }
+    if (accounts.length > 10) { say(`已阻止批量测试：${accounts.length} 个渠道超过单批 10 个上限；请使用单行测试`, true); return; }
+    const calls = accounts.length * 3;
+    if (!confirm(`这将向 ${accounts.length} 个渠道发起 ${calls} 次真实模型调用（每次最多 8 个输出 token）。\n\n调用可能计费，整批最长运行 90 秒。确认继续？`)) return;
+    const controller = new AbortController();
+    qualityBatchController = controller;
+    qualityBatchTimer = setTimeout(() => controller.abort(), 90000);
+    if (button) { button.disabled = false; button.textContent = '取消批量测试'; }
     try {
-      for (const account of testableAccounts()) await testChannel(encodeURIComponent(account.id));
+      for (const account of accounts) {
+        if (controller.signal.aborted) break;
+        await testChannel(account.id, { signal: controller.signal });
+      }
     } finally {
-      if (button) { button.disabled = false; button.textContent = '测试全部'; }
+      clearTimeout(qualityBatchTimer);
+      qualityBatchTimer = 0;
+      if (qualityBatchController === controller) qualityBatchController = null;
+      if (button) { button.disabled = false; button.textContent = '测试全部渠道'; }
     }
   }
 
@@ -424,6 +463,7 @@
   }
 
   function selectOnboardingProvider(provider) {
+    if (typeof oauthRuntime !== 'undefined' && oauthRuntime.session) resetQuickAuth();
     selectedOnboardingProvider = providers[provider] ? provider : 'custom';
     all('[data-v10-provider]').forEach(button => button.classList.toggle('active', button.dataset.v10Provider === selectedOnboardingProvider));
     const config = providers[selectedOnboardingProvider];
@@ -582,7 +622,7 @@
         pane.setAttribute('aria-hidden', String(!active));
         pane.toggleAttribute('inert', !active);
       });
-      if ($('v12TrendTitle')) $('v12TrendTitle').textContent = metric === 'latency' ? 'P95 响应速度' : '调用次数';
+      if ($('v12TrendTitle')) $('v12TrendTitle').textContent = metric === 'latency' ? '原始分钟桶 P95' : '调用次数';
       if (moveFocus) button.focus();
       requestAnimationFrame(() => window.drawRequestChart?.());
     };
@@ -616,16 +656,22 @@
         }
       }
     });
+    $('v10QualityRows')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-quality-test]');
+      const row = button?.closest('[data-quality-account]');
+      if (row) void testChannel(row.dataset.qualityAccount);
+    });
   }
 
   function init() {
     ensureAdditionalTemplates();
     if ($('chartRange') && typeof chartRange !== 'undefined') {
       chartRange = $('chartRange').value;
-      if (typeof trendLoadedRange !== 'undefined') trendLoadedRange = '';
+      if (typeof trendRuntime !== 'undefined') trendRuntime.loadedRange = '';
     }
     installWrappers();
     installObservers();
+    window.addEventListener('pagehide', () => qualityBatchController?.abort(), { once: true });
     selectOnboardingProvider('codex');
     scheduleSync();
   }

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ const (
 	maxPromptTestMessages = 64
 	maxPromptTestContent  = 256 << 10
 	maxPromptTestResponse = 8 << 20
+	maxPromptTestDuration = 2 * time.Minute
 )
 
 type promptTestMessage struct {
@@ -98,7 +100,7 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 		writeAPIErrorCode(w, http.StatusTooManyRequests, "selected account has reached its concurrency limit", "rate_limit_error", "prompt_test_concurrency_limit")
 		return
 	}
-	defer account.release()
+	defer state.scheduler.releaseAccount(account)
 
 	upstreamModel := account.upstreamModel(input.Model, "")
 	path := "/v1/chat/completions"
@@ -134,13 +136,15 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 		return
 	}
 
-	upstreamInbound := r.Clone(r.Context())
+	testContext, cancel := context.WithTimeout(r.Context(), maxPromptTestDuration)
+	defer cancel()
+	upstreamInbound := r.Clone(testContext)
 	upstreamInbound.Method = http.MethodPost
 	upstreamInbound.URL = &url.URL{Path: path}
 	upstreamInbound.Header = make(http.Header)
 	requestID := requestID()
 	started := time.Now()
-	resp, err := g.doUpstream(r.Context(), state, account, upstreamInbound, body, requestID)
+	resp, err := g.doUpstream(testContext, state, account, upstreamInbound, body, requestID)
 	if err != nil {
 		writeAPIErrorCode(w, http.StatusBadGateway, "upstream test request failed", "upstream_error", "prompt_test_upstream_failed")
 		return

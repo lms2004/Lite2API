@@ -10,6 +10,9 @@ index 56a84d6..a2d962b 100644
  )
  
  type callbackForwarder struct {
+@@ -143 +144 @@ func startCallbackForwarder(port int, provider, targetBase string) (*callbackFo
+-	addr := fmt.Sprintf("0.0.0.0:%d", port)
++	addr := fmt.Sprintf("127.0.0.1:%d", port)
 @@ -308,6 +309,214 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
  	c.JSON(200, gin.H{"models": result})
  }

@@ -63,9 +63,13 @@ func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []Accoun
 	// gateway, regardless of its age. A quiet installation should not become
 	// unknown merely because the last verified request was days ago.
 	requestRows := validOperationRecords(stats.Recent, now)
+	// Route health uses only fingerprint-gated, health-relevant observations.
+	// Falling back to the general recent ring would reintroduce old-generation
+	// and client-side failures that readiness deliberately treats as neutral.
+	routeRows := validOperationRecords(stats.RouteLatest, now)
 	routes := make([]RouteHealthSnapshot, 0, len(cfg.Routes))
 	for alias, route := range cfg.Routes {
-		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, requestRows))
+		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, routeRows))
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Alias < routes[j].Alias })
 
@@ -119,7 +123,7 @@ func summarizeLatest(records []RequestRecord) WindowSnapshot {
 	result.ObservedAt = records[0].Time
 	latencies := make([]int64, 0, 1)
 	for _, record := range records {
-		if record.Status >= 200 && record.Status < 400 {
+		if recordSucceeded(record) {
 			result.Successful++
 		}
 		latencies = append(latencies, record.LatencyMS)
@@ -219,6 +223,9 @@ func routeTargetIDs(route config.Route, accounts []config.Account) []string {
 	}
 	if len(route.Accounts) > 0 {
 		return append([]string(nil), route.Accounts...)
+	}
+	if !route.AllAccounts {
+		return nil
 	}
 	ids := make([]string, 0, len(accounts))
 	for _, account := range accounts {

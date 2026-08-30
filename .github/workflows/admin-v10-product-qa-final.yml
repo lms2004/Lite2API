@@ -31,13 +31,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version-file: go.mod
-          cache: true
+          go-version: 1.26.5
+          cache: false
 
       - name: Test, build, and validate configuration
         shell: bash
@@ -138,10 +140,8 @@ jobs:
           CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           printf '%s\n' "$CHROME" > evidence/browser-executable.txt
-          mkdir -p "$RUNNER_TEMP/browser"
-          cd "$RUNNER_TEMP/browser"
-          npm init -y > "$GITHUB_WORKSPACE/evidence/npm-init.log" 2>&1
-          npm install --no-audit --no-fund playwright-core 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-install.log"
+          cd "$GITHUB_WORKSPACE/.github/qa"
+          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-install.log"
 
       - name: Exercise every Native v10 product workflow
         shell: bash
@@ -149,7 +149,7 @@ jobs:
           set -euo pipefail
           CHROME="$(cat evidence/browser-executable.txt)" \
             OUTPUT_DIR="$GITHUB_WORKSPACE/evidence" \
-            NODE_PATH="$RUNNER_TEMP/browser/node_modules" \
+            NODE_PATH="$GITHUB_WORKSPACE/.github/qa/node_modules" \
             node .github/qa/v10_capture.js 2>&1 | tee evidence/playwright-run.log
           file evidence/*.png | tee evidence/screenshot-files.txt
           sha256sum evidence/*.png | tee evidence/screenshot-sha256.txt
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload product evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: lite2api-native-v10-product-acceptance-final
           retention-days: 3

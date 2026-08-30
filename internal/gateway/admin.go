@@ -2,9 +2,12 @@ package gateway
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,7 +35,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveAdminLogin(w, r, state)
 		return
 	}
-	principal, authenticated := g.adminAuth.Authenticate(r, state.adminToken)
+	principal, authenticated := g.adminAuth.AuthenticateAtGeneration(r, state.adminToken, state.adminAuthGeneration)
 	if !authenticated {
 		writeAPIErrorCode(w, http.StatusUnauthorized, "authentication required", "authentication_error", "invalid_admin_credentials")
 		return
@@ -144,7 +147,11 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err := g.ImportAccounts(r.Context(), input)
 		if err != nil {
-			writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_account_import")
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrConfigConflict) {
+				status = http.StatusConflict
+			}
+			writeAPIErrorCode(w, status, err.Error(), "invalid_request_error", "invalid_account_import")
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -154,7 +161,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := g.UpsertAccount(account); err != nil {
-			writeAPIError(w, 400, err.Error(), "config_error")
+			writeConfigMutationError(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -165,7 +172,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := g.DeleteAccount(id); err != nil {
-			writeAPIError(w, 400, err.Error(), "config_error")
+			writeConfigMutationError(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -175,13 +182,21 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := g.ReplaceRoutes(routes); err != nil {
-			writeAPIError(w, 400, err.Error(), "config_error")
+			writeConfigMutationError(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	default:
 		writeAPIError(w, 404, "admin endpoint not found", "not_found")
 	}
+}
+
+func writeConfigMutationError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, ErrConfigConflict) {
+		status = http.StatusConflict
+	}
+	writeAPIError(w, status, err.Error(), "config_error")
 }
 
 type gzipResponseWriter struct {
@@ -228,9 +243,9 @@ func (g *Gateway) serveAdminLogin(w http.ResponseWriter, r *http.Request, state 
 	var session, csrf string
 	var err error
 	if state.cfg.Server.AdminAutoLogin {
-		session, csrf, err = g.adminAuth.IssueSession(ip)
+		session, csrf, err = g.adminAuth.IssueSessionAtGeneration(ip, state.adminAuthGeneration)
 	} else {
-		session, csrf, err = g.adminAuth.Login(ip, input.Token, state.adminToken)
+		session, csrf, err = g.adminAuth.LoginAtGeneration(ip, input.Token, state.adminToken, state.adminAuthGeneration)
 	}
 	if errors.Is(err, ErrAdminLoginLocked) {
 		w.Header().Set("Retry-After", strconv.Itoa(15*60))
@@ -254,90 +269,156 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
 		writeAPIError(w, 400, "invalid JSON: "+err.Error(), "invalid_request_error")
 		return err
 	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values are not allowed")
+		}
+		writeAPIError(w, 400, "invalid JSON: "+err.Error(), "invalid_request_error")
+		return err
+	}
 	return nil
 }
 
 func (g *Gateway) UpsertAccount(account config.Account) error {
-	cfg := cloneConfig(g.state.Load().cfg)
-	found := false
-	for i := range cfg.Accounts {
-		if cfg.Accounts[i].ID != account.ID {
-			continue
-		}
-		if account.APIKey == "" && account.APIKeyEnv == "" {
-			account.APIKey, account.APIKeyEnv = cfg.Accounts[i].APIKey, cfg.Accounts[i].APIKeyEnv
-		}
-		if len(account.Capabilities) == 0 && len(cfg.Accounts[i].Capabilities) > 0 {
-			account.Capabilities = cfg.Accounts[i].Capabilities
-		}
-		for name, value := range account.Headers {
-			if value == "********" {
-				account.Headers[name] = cfg.Accounts[i].Headers[name]
+	return g.updateConfig(func(cfg *config.Config) (bool, error) {
+		found := false
+		for i := range cfg.Accounts {
+			if cfg.Accounts[i].ID != account.ID {
+				continue
 			}
+			if account.APIKey == "" && account.APIKeyEnv == "" {
+				account.APIKey, account.APIKeyEnv = cfg.Accounts[i].APIKey, cfg.Accounts[i].APIKeyEnv
+			}
+			if len(account.Capabilities) == 0 && len(cfg.Accounts[i].Capabilities) > 0 {
+				account.Capabilities = cfg.Accounts[i].Capabilities
+			}
+			for name, value := range account.Headers {
+				if value == "********" {
+					account.Headers[name] = cfg.Accounts[i].Headers[name]
+				}
+			}
+			cfg.Accounts[i] = account
+			found = true
+			break
 		}
-		cfg.Accounts[i] = account
-		found = true
-		break
-	}
-	if !found {
-		cfg.Accounts = append(cfg.Accounts, account)
-	}
-	return g.saveAndReload(cfg)
+		if !found {
+			cfg.Accounts = append(cfg.Accounts, account)
+		}
+		return true, nil
+	})
 }
 
 func (g *Gateway) DeleteAccount(id string) error {
-	cfg := cloneConfig(g.state.Load().cfg)
-	next := cfg.Accounts[:0]
-	found := false
-	for _, account := range cfg.Accounts {
-		if account.ID == id {
-			found = true
-			continue
-		}
-		next = append(next, account)
-	}
-	if !found {
-		return errors.New("account not found")
-	}
-	cfg.Accounts = next
-	for model, route := range cfg.Routes {
-		filtered := route.Accounts[:0]
-		for _, accountID := range route.Accounts {
-			if accountID != id {
-				filtered = append(filtered, accountID)
+	return g.updateConfig(func(cfg *config.Config) (bool, error) {
+		next := cfg.Accounts[:0]
+		found := false
+		for _, account := range cfg.Accounts {
+			if account.ID == id {
+				found = true
+				continue
 			}
+			next = append(next, account)
 		}
-		route.Accounts = filtered
-		filteredTargets := route.Targets[:0]
-		for _, target := range route.Targets {
-			if target.Account != id {
-				filteredTargets = append(filteredTargets, target)
+		if !found {
+			return false, errors.New("account not found")
+		}
+		cfg.Accounts = next
+		for model, route := range cfg.Routes {
+			hadExplicitTargets := len(route.Accounts) > 0 || len(route.Targets) > 0
+			filtered := route.Accounts[:0]
+			for _, accountID := range route.Accounts {
+				if accountID != id {
+					filtered = append(filtered, accountID)
+				}
 			}
+			route.Accounts = filtered
+			filteredTargets := route.Targets[:0]
+			for _, target := range route.Targets {
+				if target.Account != id {
+					filteredTargets = append(filteredTargets, target)
+				}
+			}
+			route.Targets = filteredTargets
+			if hadExplicitTargets && len(route.Accounts) == 0 && len(route.Targets) == 0 {
+				delete(cfg.Routes, model)
+				continue
+			}
+			cfg.Routes[model] = route
 		}
-		route.Targets = filteredTargets
-		cfg.Routes[model] = route
-	}
-	return g.saveAndReload(cfg)
+		return true, nil
+	})
 }
 
 func (g *Gateway) ReplaceRoutes(routes map[string]config.Route) error {
-	cfg := cloneConfig(g.state.Load().cfg)
-	cfg.Routes = routes
-	return g.saveAndReload(cfg)
+	return g.updateConfig(func(cfg *config.Config) (bool, error) {
+		cfg.Routes = make(map[string]config.Route, len(routes))
+		for alias, route := range routes {
+			cfg.Routes[alias] = cloneRoute(route)
+		}
+		return true, nil
+	})
 }
 
-func (g *Gateway) saveAndReload(cfg config.Config) error {
+var ErrConfigConflict = errors.New("configuration changed on disk")
+
+// updateConfig is the sole read-modify-write boundary for control-plane
+// changes. The latest on-disk document is loaded after taking reloadMu, so
+// concurrent admin, discovery and SIGHUP work cannot commit stale snapshots.
+func (g *Gateway) updateConfig(mutate func(*config.Config) (bool, error)) error {
 	g.reloadMu.Lock()
 	defer g.reloadMu.Unlock()
+	cfg, err := config.Load(g.configPath)
+	if err != nil {
+		return fmt.Errorf("load latest config: %w", err)
+	}
+	current := g.state.Load()
+	if current == nil || !sameEffectiveConfig(cfg, current.cfg) || !sameRuntimeEnvironment(cfg, current) {
+		return fmt.Errorf("%w; reload before retrying the update", ErrConfigConflict)
+	}
+	cfg = cloneConfig(cfg)
+	changed, err := mutate(&cfg)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
 	state, err := g.buildState(cfg)
 	if err != nil {
 		return err
 	}
-	if err := g.store.Save(cfg); err != nil {
-		return err
+	return g.commitStateLocked(state, func() error { return g.store.SaveEffective(cfg) })
+}
+
+func sameEffectiveConfig(left, right config.Config) bool {
+	// Both values are already normalized snapshots. Re-normalizing here would
+	// re-read the live environment and could make a changed environment overlay
+	// look identical to the older frozen runtime state.
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+func sameRuntimeEnvironment(cfg config.Config, state *runtimeState) bool {
+	if cfg.ResolvedAdminToken() != state.adminToken {
+		return false
 	}
-	g.swapState(state)
-	return nil
+	keyHashes := make(map[[sha256.Size]byte]struct{})
+	for _, key := range cfg.GatewayKeys() {
+		keyHashes[sha256.Sum256([]byte(key))] = struct{}{}
+	}
+	if !maps.Equal(keyHashes, state.legacyKeyHashes) {
+		return false
+	}
+	for _, account := range cfg.Accounts {
+		runtimeAccount := state.scheduler.Get(account.ID)
+		if runtimeAccount == nil || runtimeAccount.UpstreamKey != account.ResolvedAPIKey() ||
+			!maps.Equal(runtimeAccount.CustomHeaders, account.ResolvedHeaders()) {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneConfig(cfg config.Config) config.Config {

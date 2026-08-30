@@ -1,0 +1,8 @@
+{
+  "name": "lite2api-ci-browser",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "1.55.0"
+  }
+}

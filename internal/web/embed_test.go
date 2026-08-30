@@ -102,7 +102,7 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 		`function renderMonitor(`,
 		`function renderOAuthAccounts(`,
 		`function formatImportBytes(`,
-		`formatImportBytes(f.size)`,
+		`formatImportBytes(file.size)`,
 		`function createQuickKey(`,
 		`function createClientKey(`,
 		`function renderClientSetup(`,
@@ -240,6 +240,66 @@ func TestEmbeddedAdminPageStructure(t *testing.T) {
 	}
 }
 
+func TestEmbeddedAdminSafetyAndLifecycleContracts(t *testing.T) {
+	page := string(IndexHTML)
+	required := []string{
+		`globalThis.Lite2APIAdminCore`,
+		`function establishAdminSession(`,
+		`result.response.status===401||(`,
+		`invalid_csrf_token`,
+		`timeoutMs=15000`,
+		`oauthRuntime={timer:0,generation:0`,
+		`function stopOAuthPolling(`,
+		`oauthRuntime.controller?.abort()`,
+		`function accountDeleteImpact(`,
+		`AdminCore.accountDeleteImpact(`,
+		`function importFingerprint(`,
+		`fingerprint!==importRuntime.previewFingerprint`,
+		`id="applyImportBtn" type="button" class="primary" onclick="runImport(false)" disabled`,
+		`AdminCore.importRequest(`,
+		`function clearCreatedSecret(`,
+		`setTimeout(()=>clearCreatedSecret(false),300000)`,
+		`renderAccountsPreservingUI`,
+		`renderOAuthViewPreservingUI`,
+		`AdminCore.reconcileSelection(`,
+		`AdminCore.promptBudgetStatus(`,
+		`data-quality-test`,
+		`仅显示最新原始桶，不是时间范围 P95`,
+		`P95 不做错误合并`,
+		`oauthRoutingAttempted = false`,
+	}
+	for _, value := range required {
+		if !strings.Contains(page, value) {
+			t.Errorf("embedded admin page is missing safety contract %q", value)
+		}
+	}
+
+	forbidden := []string{
+		`onclick="v10TestChannel(`,
+		`v10TestChannel('${encodeURIComponent(account.id)}')`,
+		`group.p95.reduce(`,
+		`group.p95.push(`,
+		`trendRequestBusy`,
+		`lastCreatedSecret`,
+		`build.textContent = "UI build 2026.08.18-v5"`,
+		`build.textContent = "UI build 2026.08.18-v6"`,
+		`build.textContent = "UI build 2026.08.18-v7"`,
+		`<main class="v10-method-column">`,
+		`<main class="v10-config-column">`,
+	}
+	for _, value := range forbidden {
+		if strings.Contains(page, value) {
+			t.Errorf("unsafe or stale admin behavior remains in embedded page: %q", value)
+		}
+	}
+
+	core := strings.Index(page, `function installAdminCore`)
+	app := strings.Index(page, `const UI_BUILD='2026.08.24-v14'`)
+	if core < 0 || app < 0 || core > app {
+		t.Fatal("admin core contracts must be installed before the application controller")
+	}
+}
+
 func TestNativeLayoutIsCompileTimeMarkup(t *testing.T) {
 	page := string(IndexHTML)
 	master := strings.Index(page, `id="v5RouteList"`)
@@ -285,9 +345,26 @@ func TestReplaceRange(t *testing.T) {
 	if got != "beforenew\n<end>after" {
 		t.Fatalf("unexpected replacement: %q", got)
 	}
-	unchanged := string(replaceRange(base, []byte("missing"), []byte("<end>"), []byte("new")))
-	if unchanged != string(base) {
-		t.Fatal("missing anchors must leave the document unchanged")
+	t.Run("missing marker fails the build", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("missing anchors must fail the admin page build")
+			}
+		}()
+		_ = replaceRange(base, []byte("missing"), []byte("<end>"), []byte("new"))
+	})
+}
+
+func TestReplaceOnceRequiresUniqueMarker(t *testing.T) {
+	for _, base := range []string{"missing", "x marker marker y"} {
+		t.Run(base, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("non-unique replacement marker must fail the build")
+				}
+			}()
+			_ = replaceOnce([]byte(base), []byte("marker"), []byte("new"))
+		})
 	}
 }
 

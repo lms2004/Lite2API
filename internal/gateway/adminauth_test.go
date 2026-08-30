@@ -4,11 +4,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
+type blockingAdminBody struct {
+	reader  *strings.Reader
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingAdminBody) Read(data []byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return b.reader.Read(data)
+}
+
+func (*blockingAdminBody) Close() error { return nil }
+
 func TestAdminNetworkRejectsSpoofedForwardedIP(t *testing.T) {
-	allowed, _ := parseNetworks([]string{"127.0.0.0/8", "212.17.236.178/32"})
+	allowed, _ := parseNetworks([]string{"127.0.0.0/8", "203.0.113.10/32"})
 	trusted, _ := parseNetworks([]string{"127.0.0.0/8"})
 	untrusted := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	untrusted.RemoteAddr = "198.51.100.8:1234"
@@ -22,7 +39,7 @@ func TestAdminNetworkRejectsSpoofedForwardedIP(t *testing.T) {
 	if adminNetworkAllowed(proxied, allowed, trusted) {
 		t.Fatal("allowed a public client through the trusted proxy")
 	}
-	proxied.Header.Set("X-Real-IP", "212.17.236.178")
+	proxied.Header.Set("X-Real-IP", "203.0.113.10")
 	if !adminNetworkAllowed(proxied, allowed, trusted) {
 		t.Fatal("rejected configured VPN egress address")
 	}
@@ -89,6 +106,74 @@ func TestAdminAutoLoginRequiresExplicitConfigAndAllowedNetwork(t *testing.T) {
 	g.ServeAdminAPI(blockedW, blocked)
 	if blockedW.Code != http.StatusNotFound {
 		t.Fatalf("non-VPN auto login status=%d", blockedW.Code)
+	}
+}
+
+func TestAdminTokenRotationRevokesExistingCookieSessions(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	token, _, err := g.adminAuth.Login("127.0.0.1", "admin-secret", "admin-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/state", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: token})
+	if _, ok := g.adminAuth.Authenticate(req, "admin-secret"); !ok {
+		t.Fatal("session was not valid before token rotation")
+	}
+	cfg := g.Config()
+	cfg.Server.AdminToken = "rotated-admin-secret"
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g.adminAuth.Authenticate(req, "rotated-admin-secret"); ok {
+		t.Fatal("old cookie remained valid after admin token rotation")
+	}
+	if _, _, err := g.adminAuth.Login("127.0.0.1", "rotated-admin-secret", "rotated-admin-secret"); err != nil {
+		t.Fatalf("new admin token could not create a session: %v", err)
+	}
+}
+
+func TestAdminLoginStartedBeforeTokenRotationCannotIssueNewSession(t *testing.T) {
+	g := newTestGateway(t, nil, nil)
+	body := &blockingAdminBody{
+		reader:  strings.NewReader(`{"token":"admin-secret"}`),
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	request := httptest.NewRequest(http.MethodPost, "/admin/api/login", nil)
+	request.Body = body
+	request.ContentLength = -1
+	request.RemoteAddr = "127.0.0.1:1234"
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g.ServeAdminAPI(response, request)
+	}()
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("login did not block while decoding its old-generation body")
+	}
+
+	cfg := g.Config()
+	cfg.Server.AdminToken = "rotated-admin-secret"
+	if err := g.store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	close(body.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stale login did not finish")
+	}
+	if response.Code != http.StatusUnauthorized || len(response.Result().Cookies()) != 0 {
+		t.Fatalf("stale login issued a current-generation session: status=%d cookies=%v body=%s", response.Code, response.Result().Cookies(), response.Body.String())
 	}
 }
 

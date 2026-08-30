@@ -1,60 +1,20 @@
 package gateway
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 
 	"github.com/lms2004/lite2api/internal/config"
 )
 
-// routeExecutionProfileHandler applies request-level execution modes before the
-// normal gateway parser/scheduler. It does not choose an upstream; route
-// validation already guarantees that a Fast logical profile only targets
-// channels whose discovered capability catalog advertised Fast.
+// routeExecutionProfileHandler is intentionally body-agnostic. Execution
+// profiles are applied by ServeGateway after authentication and admission,
+// using the same decoded envelope that is forwarded upstream. Keeping this
+// wrapper makes the server wiring backwards-compatible without creating a
+// second request-body reader or a second runtime-state generation per request.
 func (g *Gateway) routeExecutionProfileHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			next.ServeHTTP(w, r)
-			return
-		}
-		operation, supported := operationForGatewayPath(r.URL.Path)
-		if !supported || (operation != config.OperationOpenAIChat && operation != config.OperationOpenAIResponses) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		state := g.state.Load()
-		if state == nil || r.Body == nil || !g.clientKeys.validCredential(apiBearerToken(r), state.legacyKeyHashes) {
-			// Keep authentication behavior centralized in ServeGateway. In
-			// particular, never consume an unauthenticated body in middleware.
-			next.ServeHTTP(w, r)
-			return
-		}
-		limit := state.cfg.Server.MaxBodyBytes
-		if limit <= 0 {
-			limit = config.DefaultMaxBodyBytes
-		}
-		if r.ContentLength > limit {
-			writeAPIError(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
-			return
-		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
-		_ = r.Body.Close()
-		if err != nil {
-			writeAPIError(w, http.StatusBadRequest, "unable to read request body", "invalid_request_error")
-			return
-		}
-		if int64(len(body)) > limit {
-			writeAPIError(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
-			return
-		}
-		updated := applyExecutionProfileToBody(body, state.cfg.Routes)
-		r.Body = io.NopCloser(bytes.NewReader(updated))
-		r.ContentLength = int64(len(updated))
-		next.ServeHTTP(w, r)
-	})
+	return next
 }
 
 func applyExecutionProfileToBody(body []byte, routes map[string]config.Route) []byte {
@@ -62,9 +22,23 @@ func applyExecutionProfileToBody(body []byte, routes map[string]config.Route) []
 	if json.Unmarshal(body, &envelope) != nil {
 		return body
 	}
+	if !applyExecutionProfile(envelope, routes) {
+		return body
+	}
+	updated, err := json.Marshal(envelope)
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
+// applyExecutionProfile mutates an already decoded request envelope and
+// reports whether it changed. It is deliberately free of I/O so callers can
+// enforce admission before allocating or reading a potentially large body.
+func applyExecutionProfile(envelope map[string]json.RawMessage, routes map[string]config.Route) bool {
 	var requestedModel string
 	if json.Unmarshal(envelope["model"], &requestedModel) != nil || strings.TrimSpace(requestedModel) == "" {
-		return body
+		return false
 	}
 	logicalModel := strings.TrimSpace(requestedModel)
 	if route, ok := routes[requestedModel]; ok && strings.TrimSpace(route.Model) != "" {
@@ -72,16 +46,12 @@ func applyExecutionProfileToBody(body []byte, routes map[string]config.Route) []
 	}
 	_, fast := config.ParseRouteModelProfile(logicalModel)
 	if !fast {
-		return body
+		return false
 	}
 	// OpenAI accepts both `priority` and the renamed `fast`. CLIProxy's current
 	// Codex translator intentionally preserves `priority`, so this compatibility
 	// spelling works for both official OpenAI and CLIProxy-backed Codex routes.
 	encoded, _ := json.Marshal("priority")
 	envelope["service_tier"] = encoded
-	updated, err := json.Marshal(envelope)
-	if err != nil {
-		return body
-	}
-	return updated
+	return true
 }

@@ -34,9 +34,11 @@ func TestParseModelIDs(t *testing.T) {
 func TestProbeAccountModelsUsesConfiguredAuthentication(t *testing.T) {
 	var observedPath string
 	var observedAuthorization string
+	var observedAPIVersion string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		observedPath = r.URL.Path
 		observedAuthorization = r.Header.Get("Authorization")
+		observedAPIVersion = r.URL.Query().Get("api-version")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
@@ -52,7 +54,7 @@ func TestProbeAccountModelsUsesConfiguredAuthentication(t *testing.T) {
 		ID:         "preview",
 		Name:       "Preview",
 		Type:       "openai",
-		BaseURL:    server.URL + "/v1",
+		BaseURL:    server.URL + "/v1?api-version=2026-01-01",
 		APIKey:     "secret-value",
 		AuthHeader: "Authorization",
 		AuthScheme: "Bearer",
@@ -68,6 +70,9 @@ func TestProbeAccountModelsUsesConfiguredAuthentication(t *testing.T) {
 	}
 	if observedAuthorization != "Bearer secret-value" {
 		t.Fatalf("Authorization = %q", observedAuthorization)
+	}
+	if observedAPIVersion != "2026-01-01" {
+		t.Fatalf("api-version = %q, configured query was dropped", observedAPIVersion)
 	}
 	if result.ModelCount != 2 || !reflect.DeepEqual(result.Models, []string{"fast-model", "quality-model"}) {
 		t.Fatalf("unexpected model catalog: %#v", result)

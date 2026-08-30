@@ -20,10 +20,11 @@ const adminSessionCookie = "lite2api_admin_session"
 var ErrAdminLoginLocked = errors.New("too many login attempts")
 
 type adminSession struct {
-	hash      [sha256.Size]byte
-	csrf      string
-	expiresAt time.Time
-	createdAt time.Time
+	hash       [sha256.Size]byte
+	csrf       string
+	expiresAt  time.Time
+	createdAt  time.Time
+	generation uint64
 }
 
 type loginAttempt struct {
@@ -38,10 +39,11 @@ type AdminPrincipal struct {
 }
 
 type AdminAuthenticator struct {
-	mu       sync.Mutex
-	sessions map[[sha256.Size]byte]adminSession
-	attempts map[string]loginAttempt
-	ttlNanos atomicDuration
+	mu         sync.Mutex
+	sessions   map[[sha256.Size]byte]adminSession
+	attempts   map[string]loginAttempt
+	ttlNanos   atomicDuration
+	generation uint64
 }
 
 type atomicDuration struct {
@@ -64,8 +66,9 @@ func (a *atomicDuration) Load() time.Duration {
 
 func NewAdminAuthenticator(ttl time.Duration) *AdminAuthenticator {
 	a := &AdminAuthenticator{
-		sessions: make(map[[sha256.Size]byte]adminSession),
-		attempts: make(map[string]loginAttempt),
+		sessions:   make(map[[sha256.Size]byte]adminSession),
+		attempts:   make(map[string]loginAttempt),
+		generation: 1,
 	}
 	a.ttlNanos.Store(ttl)
 	return a
@@ -73,9 +76,41 @@ func NewAdminAuthenticator(ttl time.Duration) *AdminAuthenticator {
 
 func (a *AdminAuthenticator) SetTTL(ttl time.Duration) { a.ttlNanos.Store(ttl) }
 
+// Reconfigure applies session policy atomically from the caller's point of
+// view. Authentication-boundary changes revoke every cookie immediately;
+// bearer authentication continues to use the current runtime token.
+func (a *AdminAuthenticator) Reconfigure(ttl time.Duration, revoke bool) uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ttlNanos.Store(ttl)
+	if revoke {
+		a.generation++
+		if a.generation == 0 {
+			a.generation = 1
+		}
+		clear(a.sessions)
+	}
+	return a.generation
+}
+
 func (a *AdminAuthenticator) Login(clientIP, candidate, expected string) (string, string, error) {
+	return a.login(clientIP, candidate, expected, 0)
+}
+
+// LoginAtGeneration binds credential verification and session issuance to the
+// runtime state captured by the request. A request that started before an
+// authentication-boundary reload cannot issue a cookie after that reload.
+func (a *AdminAuthenticator) LoginAtGeneration(clientIP, candidate, expected string, generation uint64) (string, string, error) {
+	return a.login(clientIP, candidate, expected, generation)
+}
+
+func (a *AdminAuthenticator) login(clientIP, candidate, expected string, generation uint64) (string, string, error) {
 	now := time.Now()
 	a.mu.Lock()
+	if generation != 0 && generation != a.generation {
+		a.mu.Unlock()
+		return "", "", errors.New("admin authentication generation changed")
+	}
 	attempt := a.attempts[clientIP]
 	if attempt.lockedUntil.After(now) {
 		a.mu.Unlock()
@@ -95,19 +130,31 @@ func (a *AdminAuthenticator) Login(clientIP, candidate, expected string) (string
 		return "", "", errors.New("invalid admin credentials")
 	}
 	delete(a.attempts, clientIP)
-	return a.issueSessionLocked(now)
+	return a.issueSessionLocked(now, a.generation)
 }
 
 // IssueSession creates a browser session after the caller has independently
 // authenticated the request, for example through the admin CIDR/VPN boundary.
 func (a *AdminAuthenticator) IssueSession(clientIP string) (string, string, error) {
-	now := time.Now()
-	a.mu.Lock()
-	delete(a.attempts, clientIP)
-	return a.issueSessionLocked(now)
+	return a.issueSession(clientIP, 0)
 }
 
-func (a *AdminAuthenticator) issueSessionLocked(now time.Time) (string, string, error) {
+func (a *AdminAuthenticator) IssueSessionAtGeneration(clientIP string, generation uint64) (string, string, error) {
+	return a.issueSession(clientIP, generation)
+}
+
+func (a *AdminAuthenticator) issueSession(clientIP string, generation uint64) (string, string, error) {
+	now := time.Now()
+	a.mu.Lock()
+	if generation != 0 && generation != a.generation {
+		a.mu.Unlock()
+		return "", "", errors.New("admin authentication generation changed")
+	}
+	delete(a.attempts, clientIP)
+	return a.issueSessionLocked(now, a.generation)
+}
+
+func (a *AdminAuthenticator) issueSessionLocked(now time.Time, generation uint64) (string, string, error) {
 	a.removeExpiredSessionsLocked(now)
 	if len(a.sessions) >= 32 {
 		var oldestHash [sha256.Size]byte
@@ -132,13 +179,26 @@ func (a *AdminAuthenticator) issueSessionLocked(now time.Time) (string, string, 
 	hash := sha256.Sum256([]byte(token))
 	a.sessions[hash] = adminSession{
 		hash: hash, csrf: csrf, createdAt: now,
-		expiresAt: now.Add(a.ttlNanos.Load()),
+		expiresAt: now.Add(a.ttlNanos.Load()), generation: generation,
 	}
 	a.mu.Unlock()
 	return token, csrf, nil
 }
 
 func (a *AdminAuthenticator) Authenticate(r *http.Request, expected string) (AdminPrincipal, bool) {
+	return a.authenticate(r, expected, 0)
+}
+
+func (a *AdminAuthenticator) AuthenticateAtGeneration(r *http.Request, expected string, generation uint64) (AdminPrincipal, bool) {
+	return a.authenticate(r, expected, generation)
+}
+
+func (a *AdminAuthenticator) authenticate(r *http.Request, expected string, generation uint64) (AdminPrincipal, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if generation != 0 && generation != a.generation {
+		return AdminPrincipal{}, false
+	}
 	if token := adminBearerToken(r); token != "" && expected != "" && config.SecureEqual(token, []string{expected}) {
 		return AdminPrincipal{}, true
 	}
@@ -148,14 +208,12 @@ func (a *AdminAuthenticator) Authenticate(r *http.Request, expected string) (Adm
 	}
 	hash := sha256.Sum256([]byte(cookie.Value))
 	now := time.Now()
-	a.mu.Lock()
 	session, ok := a.sessions[hash]
 	if ok && !session.expiresAt.After(now) {
 		delete(a.sessions, hash)
 		ok = false
 	}
-	a.mu.Unlock()
-	if !ok || subtle.ConstantTimeCompare(hash[:], session.hash[:]) != 1 {
+	if !ok || session.generation != a.generation || (generation != 0 && session.generation != generation) || subtle.ConstantTimeCompare(hash[:], session.hash[:]) != 1 {
 		return AdminPrincipal{}, false
 	}
 	return AdminPrincipal{Session: true, CSRF: session.csrf}, true

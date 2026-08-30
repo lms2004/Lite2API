@@ -99,6 +99,11 @@ type AccountImportError struct {
 	Message   string `json:"message"`
 }
 
+type indexedAccountImportItem struct {
+	Index int
+	Item  AccountImportItem
+}
+
 func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportRequest) (AccountImportResult, error) {
 	result := AccountImportResult{SourceFormat: normalizedImportType(request.Data.Type)}
 	if err := validateAccountImportHeader(request.Data); err != nil {
@@ -113,9 +118,8 @@ func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportReque
 	}
 
 	proxyURLs := validateImportProxies(request.Data.Proxies, &result)
-	candidate := cloneConfig(g.state.Load().cfg)
-	seen := make(map[string]struct{}, len(request.Data.Accounts))
 	oauthProviders := make(map[string]struct{})
+	accountItems := make([]indexedAccountImportItem, 0, len(request.Data.Accounts))
 	for index, item := range request.Data.Accounts {
 		// OAuth/cookie exports never become upstream API-key channels; their raw
 		// token bundle goes to the isolated CLIProxy pool instead.
@@ -123,52 +127,20 @@ func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportReque
 			g.importOAuthItem(ctx, index, item, request.DryRun, &result, oauthProviders)
 			continue
 		}
-		account, err := item.toAccount(index, proxyURLs)
-		if err != nil {
-			result.addError(index, item.ID, item.Name, err)
-			continue
-		}
-		if _, duplicate := seen[account.ID]; duplicate {
-			result.addError(index, account.ID, account.Name, errors.New("duplicate account id in import data"))
-			continue
-		}
-		seen[account.ID] = struct{}{}
-
-		existing := accountIndex(candidate.Accounts, account.ID)
-		if existing >= 0 && mode == "skip" {
-			result.AccountSkipped++
-			continue
-		}
-		trial := cloneConfig(candidate)
-		if existing >= 0 {
-			if account.APIKey == "" && account.APIKeyEnv == "" {
-				account.APIKey = trial.Accounts[existing].APIKey
-				account.APIKeyEnv = trial.Accounts[existing].APIKeyEnv
-			}
-			trial.Accounts[existing] = account
-		} else {
-			trial.Accounts = append(trial.Accounts, account)
-		}
-		trial = config.Normalize(trial)
-		if err := validateImportCandidate(trial, account.ID); err != nil {
-			result.addError(index, account.ID, account.Name, err)
-			continue
-		}
-		candidate = trial
-		if existing >= 0 {
-			result.AccountUpdated++
-		} else {
-			result.AccountCreated++
-		}
+		accountItems = append(accountItems, indexedAccountImportItem{Index: index, Item: item})
 	}
 	if request.DryRun {
+		candidate := cloneConfig(g.state.Load().cfg)
+		applyImportedAccounts(&candidate, accountItems, proxyURLs, mode, &result)
 		return result, nil
 	}
-	if result.AccountCreated+result.AccountUpdated > 0 {
-		if err := g.saveAndReload(candidate); err != nil {
+	if len(accountItems) > 0 {
+		if err := g.updateConfig(func(candidate *config.Config) (bool, error) {
+			return applyImportedAccounts(candidate, accountItems, proxyURLs, mode, &result), nil
+		}); err != nil {
 			return result, fmt.Errorf("apply account import: %w", err)
 		}
-		result.Applied = true
+		result.Applied = result.AccountCreated+result.AccountUpdated > 0
 	}
 	// Guarantee the shared CLIProxy OAuth pool account exists for every provider
 	// whose credentials were just uploaded. This is best-effort: the auth-files
@@ -189,6 +161,53 @@ func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportReque
 		}
 	}
 	return result, nil
+}
+
+func applyImportedAccounts(candidate *config.Config, items []indexedAccountImportItem, proxyURLs map[string]string, mode string, result *AccountImportResult) bool {
+	seen := make(map[string]struct{}, len(items))
+	changed := false
+	for _, indexed := range items {
+		index, item := indexed.Index, indexed.Item
+		account, err := item.toAccount(index, proxyURLs)
+		if err != nil {
+			result.addError(index, item.ID, item.Name, err)
+			continue
+		}
+		if _, duplicate := seen[account.ID]; duplicate {
+			result.addError(index, account.ID, account.Name, errors.New("duplicate account id in import data"))
+			continue
+		}
+		seen[account.ID] = struct{}{}
+
+		existing := accountIndex(candidate.Accounts, account.ID)
+		if existing >= 0 && mode == "skip" {
+			result.AccountSkipped++
+			continue
+		}
+		trial := cloneConfig(*candidate)
+		if existing >= 0 {
+			if account.APIKey == "" && account.APIKeyEnv == "" {
+				account.APIKey = trial.Accounts[existing].APIKey
+				account.APIKeyEnv = trial.Accounts[existing].APIKeyEnv
+			}
+			trial.Accounts[existing] = account
+		} else {
+			trial.Accounts = append(trial.Accounts, account)
+		}
+		trial = config.Normalize(trial)
+		if err := validateImportCandidate(trial, account.ID); err != nil {
+			result.addError(index, account.ID, account.Name, err)
+			continue
+		}
+		*candidate = trial
+		changed = true
+		if existing >= 0 {
+			result.AccountUpdated++
+		} else {
+			result.AccountCreated++
+		}
+	}
+	return changed
 }
 
 // importOAuthItem maps a Sub2API OAuth account to a CLIProxy auth-file and, on a

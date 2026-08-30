@@ -1,4 +1,29 @@
-.git
-data
-lite2api
-*.log
+# Allowlist the exact inputs used by the three repository-root build contexts.
+# Secrets, runtime state, backups, documentation, Git metadata and unrelated
+# third-party trees are excluded by default.
+**
+
+!Dockerfile
+!go.mod
+!config.example.json
+
+!cmd
+!cmd/**
+!internal
+!internal/**
+
+!channels
+!channels/cliproxyapi
+!channels/cliproxyapi/Dockerfile
+!channels/cliproxyapi/healthcheck.sh
+!channels/gemini-web2api
+!channels/gemini-web2api/Dockerfile
+
+!deploy
+!deploy/patches
+!deploy/patches/*.patch
+
+!third_party
+!third_party/gemini-web2api
+!third_party/gemini-web2api/gemini_web2api
+!third_party/gemini-web2api/gemini_web2api/**

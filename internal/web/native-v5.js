@@ -122,10 +122,13 @@
     const showConnections = name === "connections";
     accounts.hidden = showConnections;
     connections.hidden = !showConnections;
+    accounts.setAttribute("aria-hidden", String(showConnections));
+    connections.setAttribute("aria-hidden", String(!showConnections));
     all("[data-source-tab]").forEach(button => {
       const active = button.dataset.sourceTab === (showConnections ? "connections" : "accounts");
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
     });
     if (persist) localStorage.setItem(STORAGE.source, showConnections ? "connections" : "accounts");
   }
@@ -135,6 +138,15 @@
       if (button.dataset.bound === "1") return;
       button.dataset.bound = "1";
       button.addEventListener("click", () => selectSource(button.dataset.sourceTab));
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const tabs = all("[data-source-tab]");
+        const current = tabs.indexOf(button);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        selectSource(tabs[next].dataset.sourceTab);
+        tabs[next].focus();
+      });
     });
     selectSource(localStorage.getItem(STORAGE.source) || "accounts", false);
   }
@@ -193,13 +205,25 @@
         if (event.target === dialog) closeKeyDialog();
       });
     }
+    all("[data-key-preset]").forEach((button, index, buttons) => {
+      button.tabIndex = button.getAttribute("aria-checked") === "true" ? 0 : -1;
+      if (button.dataset.keyboardBound === "1") return;
+      button.dataset.keyboardBound = "1";
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + direction + buttons.length) % buttons.length;
+        if (typeof window.selectKeyPreset === "function") window.selectKeyPreset(buttons[next].dataset.keyPreset);
+        buttons.forEach((item, itemIndex) => { item.tabIndex = itemIndex === next ? 0 : -1; });
+        buttons[next].focus();
+      });
+    });
     syncCreatedKey();
   }
 
   function simplifyRuntimeLabels() {
     document.documentElement.dataset.ui = "native-v5";
-    const build = $("uiBuild");
-    if (build && !build.textContent.includes("2026.08.18-v5")) build.textContent = "UI build 2026.08.18-v5";
     const subtitle = $("viewSubtitle");
     if (subtitle) subtitle.hidden = true;
   }

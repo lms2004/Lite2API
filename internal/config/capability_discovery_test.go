@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFilterDiscoveredModelsScopesSharedCLIProxy(t *testing.T) {
 	models := []string{
@@ -137,6 +140,50 @@ func TestInferCodexCapabilitiesPrefersCanonicalModelID(t *testing.T) {
 		if !containsString(caps[0].ReasoningEfforts, effort) {
 			t.Fatalf("missing effort %q in %v", effort, caps[0].ReasoningEfforts)
 		}
+	}
+}
+
+func TestDiscoveredCapabilitiesPreserveEffortToUpstreamMapping(t *testing.T) {
+	account := Account{
+		ID: "antigravity", Type: "openai", AdapterID: "cli-proxy-api",
+		BaseURL: "http://127.0.0.1:8317/v1",
+	}
+	caps := InferDiscoveredCapabilities(account, []string{
+		"antigravity/model-low",
+		"antigravity/model-high",
+	})
+	account.Models = []string{"antigravity/model-low", "antigravity/model-high"}
+	account.Capabilities = caps
+	matching := 0
+	for _, capability := range caps {
+		if capability.Model == "model" {
+			matching++
+		}
+	}
+	if matching != 2 {
+		t.Fatalf("logical model mappings were collapsed: %+v", caps)
+	}
+	route := Route{Model: "model", ReasoningEffort: "low"}
+	model, _, ok := ResolveRouteTarget(account, route, RouteTarget{Account: account.ID})
+	if !ok || model != "antigravity/model-low" {
+		t.Fatalf("low mapping=(%q,%v), capabilities=%+v", model, ok, caps)
+	}
+	route.ReasoningEffort = "high"
+	model, _, ok = ResolveRouteTarget(account, route, RouteTarget{Account: account.ID})
+	if !ok || model != "antigravity/model-high" {
+		t.Fatalf("high mapping=(%q,%v), capabilities=%+v", model, ok, caps)
+	}
+}
+
+func TestFilterDiscoveredCatalogAppliesRoutingBudgets(t *testing.T) {
+	account := Account{}
+	catalog := []DiscoveredModel{
+		{ID: strings.Repeat("x", MaxModelIDBytes+1)},
+		{ID: "safe-model"},
+	}
+	got := FilterDiscoveredCatalog(account, catalog)
+	if len(got) != 1 || got[0].ID != "safe-model" {
+		t.Fatalf("filtered catalog=%+v", got)
 	}
 }
 

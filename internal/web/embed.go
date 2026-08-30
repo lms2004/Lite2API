@@ -9,6 +9,9 @@ import (
 //go:embed index.html
 var legacyIndexHTML []byte
 
+//go:embed admin-core.js
+var adminCoreJS []byte
+
 //go:embed native-v5.css
 var nativeV5CSS []byte
 
@@ -117,8 +120,9 @@ func buildNativeIndexHTML(base []byte) []byte {
 	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
 	page = replaceRange(page, []byte(`<dialog id="quickAuthDialog"`), []byte(`<dialog id="exportDialog"`), bytes.TrimSpace(nativeV10AccountDialogs))
 
-	page = bytes.Replace(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.24-v14'`), 1)
-	page = bytes.Replace(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`), 1)
+	page = replaceOnce(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.24-v14'`))
+	page = replaceOnce(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`))
+	page = replaceOnce(page, []byte(`const UI_BUILD='2026.08.24-v14'`), bytes.Join([][]byte{bytes.TrimSpace(adminCoreJS), []byte(`const UI_BUILD='2026.08.24-v14'`)}, []byte("\n")))
 
 	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS, nativeV12CSS}, []byte("\n"))
 	// Account controls load first so they remain available even if a later
@@ -144,14 +148,14 @@ func gzipBytes(data []byte) []byte {
 }
 
 func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {
+	if bytes.Count(page, startMarker) != 1 {
+		panic("admin page build: start marker must occur exactly once")
+	}
 	start := bytes.Index(page, startMarker)
-	if start < 0 {
-		return page
+	if bytes.Count(page[start:], endMarker) != 1 {
+		panic("admin page build: end marker must occur exactly once after start marker")
 	}
 	endOffset := bytes.Index(page[start:], endMarker)
-	if endOffset < 0 {
-		return page
-	}
 	end := start + endOffset
 	next := make([]byte, 0, len(page)-(end-start)+len(replacement)+1)
 	next = append(next, page[:start]...)
@@ -161,26 +165,40 @@ func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {
 	return next
 }
 
+func replaceOnce(page, old, replacement []byte) []byte {
+	if bytes.Count(page, old) != 1 {
+		panic("admin page build: replacement marker must occur exactly once")
+	}
+	return bytes.Replace(page, old, replacement, 1)
+}
+
 // buildIndexHTML keeps the final document self-contained: one canonical style
 // element and one enhancement script inserted before </body>.
 func buildIndexHTML(base, css, js []byte) []byte {
 	page := append([]byte(nil), base...)
 
+	if bytes.Count(page, []byte("<style>")) != 1 || bytes.Count(page, []byte("</style>")) != 1 {
+		panic("admin page build: canonical style element must occur exactly once")
+	}
 	styleOpen := bytes.Index(page, []byte("<style>"))
 	styleClose := bytes.Index(page, []byte("</style>"))
-	if styleOpen >= 0 && styleClose > styleOpen {
-		contentStart := styleOpen + len("<style>")
-		next := make([]byte, 0, len(page)-styleClose+contentStart+len(css)+2)
-		next = append(next, page[:contentStart]...)
-		next = append(next, '\n')
-		next = append(next, bytes.TrimSpace(css)...)
-		next = append(next, '\n')
-		next = append(next, page[styleClose:]...)
-		page = next
+	if styleClose <= styleOpen {
+		panic("admin page build: canonical style markers are out of order")
 	}
+	contentStart := styleOpen + len("<style>")
+	nextStyle := make([]byte, 0, len(page)-styleClose+contentStart+len(css)+2)
+	nextStyle = append(nextStyle, page[:contentStart]...)
+	nextStyle = append(nextStyle, '\n')
+	nextStyle = append(nextStyle, bytes.TrimSpace(css)...)
+	nextStyle = append(nextStyle, '\n')
+	nextStyle = append(nextStyle, page[styleClose:]...)
+	page = nextStyle
 
+	if bytes.Count(page, []byte("</body>")) != 1 {
+		panic("admin page build: body close marker must occur exactly once")
+	}
 	bodyClose := bytes.LastIndex(page, []byte("</body>"))
-	if bodyClose < 0 || len(bytes.TrimSpace(js)) == 0 {
+	if len(bytes.TrimSpace(js)) == 0 {
 		return page
 	}
 

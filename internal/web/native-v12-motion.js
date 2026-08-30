@@ -331,9 +331,14 @@
     points.forEach(point => {
       if (point._time < plotStart || point._time > plotEnd + displayBucketMS) return;
       const index = Math.min(buckets - 1, Math.max(0, Math.floor((point._time - plotStart) / displayBucketMS)));
-      if (!groups[index]) groups[index] = { requests: 0, failed: 0, p95: [] };
+      if (!groups[index]) groups[index] = { requests: 0, failed: 0, p95: null, p95Time: -Infinity };
       groups[index].requests += Number(point.requests) || 0; groups[index].failed += Number(point.failed) || 0;
-      if (finite(point.p95_latency_ms)) groups[index].p95.push(Number(point.p95_latency_ms));
+      // Bucket percentiles are not mergeable. Keep the latest original bucket
+      // in each display interval and label that contract explicitly in the UI.
+      if (finite(point.p95_latency_ms) && point._time >= groups[index].p95Time) {
+        groups[index].p95 = Math.round(Number(point.p95_latency_ms));
+        groups[index].p95Time = point._time;
+      }
     });
     // Trend storage only materializes minutes that saw traffic. For count
     // metrics an absent bucket therefore means zero requests, not unknown data.
@@ -341,7 +346,7 @@
     // stays null because a P95 value cannot exist when no request was observed.
     const requests = points.length ? groups.map(group => group?.requests || 0) : groups.map(() => null);
     const failures = points.length ? groups.map(group => group?.failed || 0) : groups.map(() => null);
-    const p95 = groups.map(group => group?.p95.length ? Math.round(group.p95.reduce((sum, value) => sum + value, 0) / group.p95.length) : null);
+    const p95 = groups.map(group => group?.p95 ?? null);
     const rangeLabel = chartRangeLabel(chartRange);
     const sampleCount = points.reduce((sum, point) => sum + (Number(point.requests) || 0), 0);
     const failedCount = points.reduce((sum, point) => sum + (Number(point.failed) || 0), 0);
@@ -353,12 +358,12 @@
       { values: requests, displayValues: smoothCountSeries(requests), color: cssColor('--blue', '#5a9dff'), label: '请求' },
       { values: failures, displayValues: smoothCountSeries(failures), color: cssColor('--red', '#ff7185'), label: '失败' }
     ], `${rangeLabel}没有请求数据点`, timing);
-    drawChart(latencyCanvas, [{ values: p95, color: cssColor('--blue', '#5a9dff'), label: 'P95', unit: ' ms' }], `${rangeLabel}没有延迟数据点`, timing);
+    drawChart(latencyCanvas, [{ values: p95, color: cssColor('--blue', '#5a9dff'), label: '末个原始桶 P95', unit: ' ms' }], `${rangeLabel}没有延迟数据点`, timing);
     const dataLabel = sampleCount ? `${formatNumber(sampleCount)} 次真实请求 · ${formatNumber(points.length)} 个原始点` : '没有真实请求';
     $('chartWindowLabel').textContent = `${rangeLabel} · ${dataLabel}`;
-    $('chartWindow').textContent = points.length ? `${formatNumber(points.length)} 个原始点 · 按 ${displayBucketLabel} 聚合` : '无数据点';
-    $('chartRetention').textContent = `本地趋势保留 ${chartDurationLabel(retentionSeconds)} · 原始 ${durationLabel(bucketSeconds)} · 显示 ${displayBucketLabel} · 加权平滑，总量与悬停值保持真实`;
-    $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，图表按 ${displayBucketLabel} 聚合展示，其中 ${failedCount} 次失败；调用曲线经过总量归一的视觉平滑，悬停值保持原始聚合值，P95 缺失时保持断开。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
+    $('chartWindow').textContent = points.length ? `${formatNumber(points.length)} 个原始点 · ${displayBucketLabel}内取末个 P95` : '无数据点';
+    $('chartRetention').textContent = `本地趋势保留 ${chartDurationLabel(retentionSeconds)} · 原始 ${durationLabel(bucketSeconds)} · 调用量按 ${displayBucketLabel} 聚合 · P95 不做错误合并`;
+    $('chartSummary').textContent = sampleCount ? `${rangeLabel}包含 ${sampleCount} 次真实请求和 ${points.length} 个原始数据点，其中 ${failedCount} 次失败；调用量按 ${displayBucketLabel} 聚合，延迟线只显示每个显示区间的末个原始桶 P95，不声称为整个范围 P95。` : `${rangeLabel}没有真实请求数据，图表保持空白；趋势数据保留 ${chartDurationLabel(retentionSeconds)}。`;
   }
 
   function syncActiveNav() {

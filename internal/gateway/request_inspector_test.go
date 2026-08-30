@@ -1,12 +1,17 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lms2004/lite2api/internal/config"
 )
 
 func TestInspectRequestDetectsTextAndImage(t *testing.T) {
@@ -64,6 +69,10 @@ func TestRequestLogRotatesWithinBound(t *testing.T) {
 		}
 		logger.Enqueue(RequestRecord{RequestID: strings.Repeat("x", 64), Model: "model", Error: strings.Repeat("e", 256)})
 	}
+	for len(logger.queue) == cap(logger.queue) {
+		time.Sleep(time.Millisecond)
+	}
+	logger.Enqueue(RequestRecord{RequestID: "oversized", Model: strings.Repeat("m", 1<<20), Error: strings.Repeat("e", 1<<20)})
 	logger.Close()
 	for _, name := range []string{"request.log", "request.log.1"} {
 		info, err := os.Stat(filepath.Join(filepath.Dir(path), name))
@@ -72,6 +81,15 @@ func TestRequestLogRotatesWithinBound(t *testing.T) {
 		}
 		if info.Size() > 64<<10 {
 			t.Fatalf("%s size=%d exceeds max", name, info.Size())
+		}
+		contents, err := os.ReadFile(filepath.Join(filepath.Dir(path), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+			if line != "" && !json.Valid([]byte(line)) {
+				t.Fatalf("%s contains a corrupt JSON line: %.80q", name, line)
+			}
 		}
 	}
 }
@@ -101,6 +119,90 @@ func TestLoadLatestRequestRecordAcrossBackups(t *testing.T) {
 	}
 	if got == nil || got.RequestID != newer.RequestID {
 		t.Fatalf("latest=%+v want %q", got, newer.RequestID)
+	}
+}
+
+func TestRequestLogRecoveryKeepsBoundedNewestSetAndPerRouteLatest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "request.log")
+	fingerprints := map[string]string{"hot": "hot-fingerprint", "cold": "cold-fingerprint"}
+	base := time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)
+	var contents strings.Builder
+	for index := 0; index < 100; index++ {
+		model := "hot"
+		if index == 3 {
+			model = "cold"
+		}
+		record := RequestRecord{
+			Time:      base.Add(time.Duration(index) * time.Second).Format(time.RFC3339Nano),
+			RequestID: fmt.Sprintf("request-%03d", index), Model: model, AccountID: "upstream",
+			Status: http.StatusOK, Outcome: "success", RouteFingerprint: fingerprints[model],
+		}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents.Write(encoded)
+		contents.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(contents.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	records, routeLatest, err := loadRequestState(path, 0, 10, fingerprints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 10 || records[0].RequestID != "request-090" || records[9].RequestID != "request-099" {
+		t.Fatalf("bounded recovery returned wrong newest set: len=%d first=%+v last=%+v", len(records), records[0], records[len(records)-1])
+	}
+	if cold := routeLatest[routeObservationKey("cold", "")]; cold.RequestID != "request-003" {
+		t.Fatalf("low-volume route latest observation was lost: %+v", cold)
+	}
+}
+
+func TestGatewayRecoversFullCurrentLogBeforeZeroBackupRotation(t *testing.T) {
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, "config.json")
+	logPath := filepath.Join(directory, "request.log")
+	cfg := config.Defaults()
+	cfg.Server.APIKeys = []string{"gateway-secret"}
+	cfg.Server.AdminToken = "admin-secret"
+	cfg.Server.AllowPrivateHTTPUpstream = true
+	cfg.Server.RequestLogPath = "request.log"
+	cfg.Server.RequestLogMaxBytes = 64 << 10
+	cfg.Server.RequestLogBackups = 0
+	cfg.Accounts = []config.Account{{
+		ID: "main", Type: "openai", BaseURL: "https://api.example.com/v1", APIKey: "test",
+		Models: []string{"real"}, Enabled: true, Weight: 1,
+		Capabilities: []config.ChannelCapability{{Model: "real", UpstreamModel: "real", ReasoningEfforts: []string{"auto"}}},
+	}}
+	cfg.Routes = map[string]config.Route{
+		"alias": {Model: "real", Targets: []config.RouteTarget{{Account: "main"}}},
+	}
+	if err := config.NewStore(configPath).Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	normalized := config.Normalize(cfg)
+	record := RequestRecord{
+		Time: time.Now().UTC().Format(time.RFC3339Nano), RequestID: "before-startup-rotation",
+		Model: "alias", AccountID: "main", Status: http.StatusOK, Outcome: "success",
+		RouteFingerprint: buildRouteFingerprints(normalized)["alias"],
+	}
+	line, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := append(append(line, '\n'), bytes.Repeat([]byte("x"), int(cfg.Server.RequestLogMaxBytes)-len(line)-1)...)
+	if err := os.WriteFile(logPath, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	latest := g.Stats().RouteLatest
+	if len(latest) != 1 || latest[0].RequestID != record.RequestID {
+		t.Fatalf("startup rotation destroyed readiness recovery: %+v", latest)
 	}
 }
 

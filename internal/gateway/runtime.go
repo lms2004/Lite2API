@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -21,29 +23,149 @@ type AccountRuntime struct {
 	state         *accountRuntimeState
 }
 
+type accountCapacityState struct {
+	active atomic.Int64
+}
+
+// accountCapacityRegistry is shared by every scheduler generation. Entries
+// intentionally survive temporary account removal: an old request may still
+// hold (or acquire from its pinned runtime generation) a lease, and a later
+// re-add of the same account ID must observe that lease rather than creating a
+// second independent concurrency counter.
+type accountCapacityRegistry struct {
+	mu     sync.Mutex
+	states map[string]*accountCapacityState
+}
+
+func newAccountCapacityRegistry() *accountCapacityRegistry {
+	return &accountCapacityRegistry{states: make(map[string]*accountCapacityState)}
+}
+
+func (r *accountCapacityRegistry) getOrCreate(id string) *accountCapacityState {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if capacity := r.states[id]; capacity != nil {
+		return capacity
+	}
+	capacity := &accountCapacityState{}
+	r.states[id] = capacity
+	return capacity
+}
+
 type accountRuntimeState struct {
-	active       atomic.Int64
-	failures     atomic.Int64
+	capacity     *accountCapacityState
+	identity     [sha256.Size]byte
 	total        atomic.Int64
 	success      atomic.Int64
 	latencyNanos atomic.Int64
-	circuitUntil atomic.Int64
-	lastError    atomic.Value
-	lastUpstream atomic.Pointer[cachedUpstreamFailure]
+	breakers     sync.Map
 }
 
-type cachedUpstreamFailure struct {
-	Model     string
-	Operation string
-	AccountID string
-	Response  *bufferedResponse
+type breakerRuntime struct {
+	resultMu            sync.Mutex
+	failures            atomic.Int64
+	circuitUntil        atomic.Int64
+	lastError           atomic.Value
+	attemptSeq          atomic.Uint64
+	latestFailureSeq    uint64
+	latestNonFailureSeq uint64
 }
 
-func newAccountRuntime(account config.Account, state *accountRuntimeState) *AccountRuntime {
+type healthAttempt struct {
+	breaker  *breakerRuntime
+	sequence uint64
+}
+
+func newAccountRuntime(account config.Account, state *accountRuntimeState, capacity *accountCapacityState) *AccountRuntime {
 	if state == nil {
-		state = &accountRuntimeState{}
+		if capacity == nil {
+			capacity = &accountCapacityState{}
+		}
+		state = &accountRuntimeState{capacity: capacity, identity: accountIdentity(account)}
+	} else if state.capacity == nil {
+		state.capacity = &accountCapacityState{}
 	}
 	return &AccountRuntime{Config: account, UpstreamKey: account.ResolvedAPIKey(), CustomHeaders: account.ResolvedHeaders(), state: state}
+}
+
+// accountIdentity separates health history from capacity history. Active
+// leases must survive a reload, but a changed endpoint, credential or adapter
+// must not inherit a circuit opened by the previous logical upstream.
+func accountIdentity(account config.Account) [sha256.Size]byte {
+	identity := struct {
+		Type, AdapterID, InstanceID, BaseURL, APIKey, AuthHeader, AuthScheme, ProxyURL string
+		Headers                                                                        map[string]string
+	}{
+		Type: account.Type, AdapterID: account.AdapterID, InstanceID: account.InstanceID,
+		BaseURL: account.BaseURL, APIKey: account.ResolvedAPIKey(), AuthHeader: account.AuthHeader,
+		AuthScheme: account.AuthScheme, ProxyURL: account.ProxyURL, Headers: account.ResolvedHeaders(),
+	}
+	encoded, _ := json.Marshal(identity)
+	return sha256.Sum256(encoded)
+}
+
+// buildRouteFingerprints creates a credential-safe identity for readiness
+// evidence. The hash covers authored routing plus every selectable account's
+// resolved endpoint/credential identity and model/operation resolution data.
+// Only the hash is written to request logs.
+func buildRouteFingerprints(cfg config.Config) map[string]string {
+	type routeAccountIdentity struct {
+		ID           string
+		Identity     [sha256.Size]byte
+		Enabled      bool
+		Models       []string
+		ModelMap     map[string]string
+		Capabilities []config.ChannelCapability
+		Operations   []string
+	}
+	accounts := make(map[string]config.Account, len(cfg.Accounts))
+	for _, account := range cfg.Accounts {
+		accounts[account.ID] = account
+	}
+	fingerprints := make(map[string]string, len(cfg.Routes))
+	for alias, route := range cfg.Routes {
+		selectedIDs := make(map[string]struct{})
+		if len(route.Targets) > 0 {
+			for _, target := range route.Targets {
+				selectedIDs[target.Account] = struct{}{}
+			}
+		} else if route.AllAccounts {
+			for id := range accounts {
+				selectedIDs[id] = struct{}{}
+			}
+		} else {
+			for _, id := range route.Accounts {
+				selectedIDs[id] = struct{}{}
+			}
+		}
+		ids := make([]string, 0, len(selectedIDs))
+		for id := range selectedIDs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		routeAccounts := make([]routeAccountIdentity, 0, len(ids))
+		for _, id := range ids {
+			account, exists := accounts[id]
+			if !exists {
+				// A missing target is still part of the authored Route below. If it
+				// appears on a later reload, the populated identity changes the hash.
+				continue
+			}
+			routeAccounts = append(routeAccounts, routeAccountIdentity{
+				ID: id, Identity: accountIdentity(account), Enabled: account.Enabled,
+				Models: account.Models, ModelMap: account.ModelMap,
+				Capabilities: account.Capabilities, Operations: account.Operations,
+			})
+		}
+		encoded, _ := json.Marshal(struct {
+			Alias    string
+			Route    config.Route
+			Accounts []routeAccountIdentity
+		}{Alias: alias, Route: route, Accounts: routeAccounts})
+		fingerprint := sha256.Sum256(encoded)
+		fingerprints[alias] = fmt.Sprintf("%x", fingerprint[:])
+	}
+	return fingerprints
 }
 
 type AccountSnapshot struct {
@@ -71,24 +193,58 @@ type AccountSnapshot struct {
 func (a *AccountRuntime) tryAcquire() bool {
 	limit := int64(a.Config.Concurrency)
 	if limit <= 0 {
-		a.state.active.Add(1)
+		a.state.capacity.active.Add(1)
 		return true
 	}
 	for {
-		current := a.state.active.Load()
+		current := a.state.capacity.active.Load()
 		if current >= limit {
 			return false
 		}
-		if a.state.active.CompareAndSwap(current, current+1) {
+		if a.state.capacity.active.CompareAndSwap(current, current+1) {
 			return true
 		}
 	}
 }
 
-func (a *AccountRuntime) release() { a.state.active.Add(-1) }
+func (a *AccountRuntime) release() { a.state.capacity.active.Add(-1) }
 
-func (a *AccountRuntime) available(now time.Time) bool {
-	return a.Config.Enabled && a.state.circuitUntil.Load() <= now.UnixNano()
+const maxWildcardBreakerBuckets = 64
+
+func breakerKey(operation, model string) string { return operation + "\x00" + model }
+
+func (a *AccountRuntime) breakerModelKey(model string) string {
+	for _, candidate := range a.Config.Models {
+		if candidate == model {
+			return model
+		}
+	}
+	for _, candidate := range a.Config.ModelMap {
+		if candidate == model {
+			return model
+		}
+	}
+	for _, capability := range a.Config.Capabilities {
+		if capability.UpstreamModel == model {
+			return model
+		}
+	}
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(model))
+	return fmt.Sprintf("wildcard:%02d", hash.Sum32()%maxWildcardBreakerBuckets)
+}
+
+func (a *AccountRuntime) breaker(operation, model string) *breakerRuntime {
+	value, _ := a.state.breakers.LoadOrStore(breakerKey(operation, a.breakerModelKey(model)), &breakerRuntime{})
+	return value.(*breakerRuntime)
+}
+
+func (a *AccountRuntime) available(now time.Time, operation, model string) bool {
+	if !a.Config.Enabled {
+		return false
+	}
+	value, exists := a.state.breakers.Load(breakerKey(operation, a.breakerModelKey(model)))
+	return !exists || value.(*breakerRuntime).circuitUntil.Load() <= now.UnixNano()
 }
 
 func (a *AccountRuntime) supports(model string) bool {
@@ -123,41 +279,56 @@ func (a *AccountRuntime) upstreamModel(requested, routeModel string) string {
 	return requested
 }
 
-func (a *AccountRuntime) reportSuccess(elapsed time.Duration) {
+func (a *AccountRuntime) beginAttempt(operation, model string) healthAttempt {
+	breaker := a.breaker(operation, model)
+	return healthAttempt{breaker: breaker, sequence: breaker.attemptSeq.Add(1)}
+}
+
+func (a *AccountRuntime) reportSuccess(attempt healthAttempt, elapsed time.Duration) {
 	a.state.total.Add(1)
 	a.state.success.Add(1)
 	a.state.latencyNanos.Add(elapsed.Nanoseconds())
-	a.state.failures.Store(0)
-	a.state.circuitUntil.Store(0)
-	a.state.lastError.Store("")
-	a.state.lastUpstream.Store(nil)
-}
-
-func (a *AccountRuntime) reportFailure(message string, threshold int, cooldown time.Duration, forceCircuit bool) {
-	a.state.total.Add(1)
-	failures := a.state.failures.Add(1)
-	a.state.lastError.Store(message)
-	a.state.lastUpstream.Store(nil)
-	if failures >= int64(threshold) || forceCircuit {
-		a.state.circuitUntil.Store(time.Now().Add(cooldown).UnixNano())
-	}
-}
-
-func (a *AccountRuntime) rememberUpstreamFailure(model, operation string, response *bufferedResponse) {
-	if response == nil {
+	if attempt.breaker == nil {
 		return
 	}
-	a.state.lastUpstream.Store(&cachedUpstreamFailure{
-		Model: model, Operation: operation, AccountID: a.Config.ID, Response: response,
-	})
+	attempt.breaker.resultMu.Lock()
+	defer attempt.breaker.resultMu.Unlock()
+	if attempt.sequence <= attempt.breaker.latestFailureSeq {
+		return
+	}
+	if attempt.sequence > attempt.breaker.latestNonFailureSeq {
+		attempt.breaker.latestNonFailureSeq = attempt.sequence
+	}
+	attempt.breaker.failures.Store(0)
+	attempt.breaker.circuitUntil.Store(0)
+	attempt.breaker.lastError.Store("")
 }
 
-func (a *AccountRuntime) cachedUpstreamFailure(model, operation string) *cachedUpstreamFailure {
-	failure := a.state.lastUpstream.Load()
-	if failure == nil || failure.Model != model || failure.Operation != operation {
-		return nil
+func (a *AccountRuntime) reportNeutral(attempt healthAttempt) {
+	a.state.total.Add(1)
+	// Neutral client/status responses are deliberately not health evidence and
+	// therefore do not fence older concurrent failures or close a circuit.
+}
+
+func (a *AccountRuntime) reportFailure(attempt healthAttempt, message string, threshold int, cooldown time.Duration, forceCircuit bool) {
+	a.state.total.Add(1)
+	if attempt.breaker == nil {
+		return
 	}
-	return failure
+	message = truncate(message, 1024)
+	attempt.breaker.resultMu.Lock()
+	defer attempt.breaker.resultMu.Unlock()
+	if attempt.sequence <= attempt.breaker.latestNonFailureSeq {
+		return
+	}
+	if attempt.sequence > attempt.breaker.latestFailureSeq {
+		attempt.breaker.latestFailureSeq = attempt.sequence
+	}
+	failures := attempt.breaker.failures.Add(1)
+	attempt.breaker.lastError.Store(message)
+	if failures >= int64(threshold) || forceCircuit {
+		attempt.breaker.circuitUntil.Store(time.Now().Add(cooldown).UnixNano())
+	}
 }
 
 func (a *AccountRuntime) Snapshot() AccountSnapshot {
@@ -168,30 +339,73 @@ func (a *AccountRuntime) Snapshot() AccountSnapshot {
 		value := a.state.latencyNanos.Load() / success / int64(time.Millisecond)
 		avg = &value
 	}
+	var failures int64
 	var lastError string
-	if v := a.state.lastError.Load(); v != nil {
-		lastError, _ = v.(string)
-	}
 	var circuit string
-	if until := a.state.circuitUntil.Load(); until > time.Now().UnixNano() {
-		circuit = time.Unix(0, until).UTC().Format(time.RFC3339)
+	var circuitUntil int64
+	a.state.breakers.Range(func(_, value any) bool {
+		breaker := value.(*breakerRuntime)
+		if current := breaker.failures.Load(); current > failures {
+			failures = current
+			if value := breaker.lastError.Load(); value != nil {
+				lastError, _ = value.(string)
+			}
+		}
+		if until := breaker.circuitUntil.Load(); until > circuitUntil {
+			circuitUntil = until
+			if value := breaker.lastError.Load(); value != nil {
+				lastError, _ = value.(string)
+			}
+		}
+		return true
+	})
+	if circuitUntil > time.Now().UnixNano() {
+		circuit = time.Unix(0, circuitUntil).UTC().Format(time.RFC3339)
 	}
 	return AccountSnapshot{
 		ID: a.Config.ID, Name: a.Config.Name, Type: a.Config.Type,
 		AdapterID: a.Config.AdapterID, InstanceID: a.Config.InstanceID, BaseURL: a.Config.BaseURL,
 		Models: append([]string(nil), a.Config.Models...), Operations: append([]string(nil), a.Config.Operations...), Priority: a.Config.Priority, Weight: a.Config.Weight,
-		Concurrency: a.Config.Concurrency, Active: a.state.active.Load(), Enabled: a.Config.Enabled,
-		Failures: a.state.failures.Load(), Total: total, Success: success, AverageLatencyMS: avg,
+		Concurrency: a.Config.Concurrency, Active: a.state.capacity.active.Load(), Enabled: a.Config.Enabled,
+		Failures: failures, Total: total, Success: success, AverageLatencyMS: avg,
 		CircuitOpenUntil: circuit, LastError: lastError,
 	}
 }
 
 type Scheduler struct {
-	mu         sync.RWMutex
-	accounts   map[string]*AccountRuntime
-	routes     map[string]config.Route
-	roundRobin sync.Map
-	notify     chan struct{}
+	mu               sync.RWMutex
+	accounts         map[string]*AccountRuntime
+	routes           map[string]config.Route
+	roundRobin       sync.Map
+	notify           *schedulerNotifier
+	capacityRegistry *accountCapacityRegistry
+}
+
+// schedulerNotifier is a generation-based broadcast signal. Closing the
+// current channel wakes every waiter, and schedulers created by hot reload
+// share the same notifier so releases from old leases wake new-generation
+// requests as well.
+type schedulerNotifier struct {
+	mu      sync.Mutex
+	changed chan struct{}
+}
+
+func newSchedulerNotifier() *schedulerNotifier {
+	return &schedulerNotifier{changed: make(chan struct{})}
+}
+
+func (n *schedulerNotifier) subscribe() <-chan struct{} {
+	n.mu.Lock()
+	changed := n.changed
+	n.mu.Unlock()
+	return changed
+}
+
+func (n *schedulerNotifier) broadcast() {
+	n.mu.Lock()
+	close(n.changed)
+	n.changed = make(chan struct{})
+	n.mu.Unlock()
 }
 
 type Selection struct {
@@ -201,6 +415,7 @@ type Selection struct {
 	Key             string
 	Targeted        bool
 	release         func()
+	releaseOnce     sync.Once
 }
 
 type routeTargetCandidate struct {
@@ -213,7 +428,7 @@ type routeTargetCandidate struct {
 
 func (s *Selection) Release() {
 	if s != nil && s.release != nil {
-		s.release()
+		s.releaseOnce.Do(s.release)
 	}
 }
 
@@ -222,17 +437,31 @@ func NewScheduler(cfg config.Config) *Scheduler {
 }
 
 func NewSchedulerWithPrevious(cfg config.Config, previous *Scheduler) *Scheduler {
-	s := &Scheduler{accounts: make(map[string]*AccountRuntime), routes: cfg.Routes, notify: make(chan struct{}, 1)}
+	notify := newSchedulerNotifier()
+	capacityRegistry := newAccountCapacityRegistry()
+	if previous != nil && previous.notify != nil {
+		notify = previous.notify
+		if previous.capacityRegistry != nil {
+			capacityRegistry = previous.capacityRegistry
+		}
+	}
+	s := &Scheduler{
+		accounts: make(map[string]*AccountRuntime), routes: cfg.Routes,
+		notify: notify, capacityRegistry: capacityRegistry,
+	}
 	for _, account := range cfg.Accounts {
 		var shared *accountRuntimeState
+		capacity := capacityRegistry.getOrCreate(account.ID)
 		if previous != nil {
 			previous.mu.RLock()
 			if old := previous.accounts[account.ID]; old != nil {
-				shared = old.state
+				if old.state.identity == accountIdentity(account) {
+					shared = old.state
+				}
 			}
 			previous.mu.RUnlock()
 		}
-		s.accounts[account.ID] = newAccountRuntime(account, shared)
+		s.accounts[account.ID] = newAccountRuntime(account, shared, capacity)
 	}
 	return s
 }
@@ -311,7 +540,7 @@ func (s *Scheduler) routeEnabled(route config.Route) bool {
 		}
 		return false
 	}
-	if len(route.Accounts) == 0 {
+	if route.AllAccounts {
 		for _, account := range s.accounts {
 			if account.Config.Enabled {
 				return true
@@ -319,8 +548,66 @@ func (s *Scheduler) routeEnabled(route config.Route) bool {
 		}
 		return false
 	}
+	if len(route.Accounts) == 0 {
+		return false
+	}
 	for _, id := range route.Accounts {
 		if account := s.accounts[id]; account != nil && account.Config.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// RouteAvailable reports structural, scoped readiness without acquiring a
+// lease. Unlike AccountSnapshot's legacy worst-case aggregate, this checks the
+// actual (operation, upstream model) breaker used by request selection.
+func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	route, exists := s.routes[alias]
+	if !exists {
+		return false
+	}
+	availableForAnyOperation := func(account *AccountRuntime, upstreamModel string) bool {
+		if account == nil || !account.Config.Enabled {
+			return false
+		}
+		operations := account.Config.Operations
+		if len(operations) == 0 {
+			operations = config.DefaultOperations(account.Config.Type)
+		}
+		for _, operation := range operations {
+			if account.available(now, operation, upstreamModel) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(route.Targets) > 0 {
+		for _, target := range route.Targets {
+			account := s.accounts[target.Account]
+			if account == nil {
+				continue
+			}
+			upstreamModel, _, compatible := config.ResolveRouteTarget(account.Config, route, target)
+			if compatible && availableForAnyOperation(account, upstreamModel) {
+				return true
+			}
+		}
+		return false
+	}
+	allowed := make(map[string]struct{}, len(route.Accounts))
+	for _, id := range route.Accounts {
+		allowed[id] = struct{}{}
+	}
+	for id, account := range s.accounts {
+		if !route.AllAccounts {
+			if _, ok := allowed[id]; !ok {
+				continue
+			}
+		}
+		if availableForAnyOperation(account, account.upstreamModel(alias, route.UpstreamModel)) {
 			return true
 		}
 	}
@@ -342,6 +629,9 @@ func (s *Scheduler) AttemptLimit(model string, legacyLimit int) int {
 func (s *Scheduler) Select(ctx context.Context, model, operation, session string, excluded map[string]struct{}, wait time.Duration) (*Selection, error) {
 	deadline := time.Now().Add(wait)
 	for {
+		// Subscribe before inspecting capacity so a release between the failed
+		// selection and the select below cannot be lost.
+		changed := s.notify.subscribe()
 		selection, eligible, capacityBlocked := s.trySelect(model, operation, session, excluded)
 		if selection != nil {
 			// Claude Code may send or select a reasoning effort while using the
@@ -371,7 +661,7 @@ func (s *Scheduler) Select(ctx context.Context, model, operation, session string
 			return nil, ctx.Err()
 		case <-timer.C:
 			return nil, ErrNoCapacity
-		case <-s.notify:
+		case <-changed:
 			timer.Stop()
 		}
 	}
@@ -414,7 +704,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		orderRouteTargetCandidates(candidates, route.Strategy, model, session, counter)
 		for _, candidate := range candidates {
 			account := candidate.account
-			available := account.available(now)
+			available := account.available(now, operation, candidate.model)
 			if !available || !account.tryAcquire() {
 				if available {
 					capacityBlocked = true
@@ -433,10 +723,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 				Account: selected, Model: candidate.model, ReasoningEffort: candidate.reasoningEffort,
 				Key: candidate.key, Targeted: true, release: func() {
 					selected.release()
-					select {
-					case s.notify <- struct{}{}:
-					default:
-					}
+					s.notify.broadcast()
 				},
 			}, eligible, capacityBlocked
 		}
@@ -461,7 +748,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		if !config.AccountSupportsOperation(account.Config, operation) {
 			continue
 		}
-		if routed && len(allowed) > 0 {
+		if routed && !route.AllAccounts {
 			if _, ok := allowed[id]; !ok {
 				continue
 			}
@@ -470,7 +757,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 			continue
 		}
 		eligible = true
-		if !account.available(now) {
+		if !account.available(now, operation, account.upstreamModel(model, route.UpstreamModel)) {
 			continue
 		}
 		candidates = append(candidates, account)
@@ -479,7 +766,11 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		s.mu.RUnlock()
 		return nil, eligible, false
 	}
-	orderCandidates(candidates, strategy, model, session, s.counter(model))
+	counter := uint64(0)
+	if strategy == "round_robin" {
+		counter = s.counter(model)
+	}
+	orderCandidates(candidates, strategy, model, session, counter)
 	var selected *AccountRuntime
 	for _, candidate := range candidates {
 		if candidate.tryAcquire() {
@@ -493,83 +784,19 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 	}
 	return &Selection{Account: selected, Model: selected.upstreamModel(model, route.UpstreamModel), Key: selected.Config.ID, release: func() {
 		selected.release()
-		select {
-		case s.notify <- struct{}{}:
-		default:
-		}
+		s.notify.broadcast()
 	}}, eligible, false
 }
 
-// CachedUpstreamFailure returns the most recent matching upstream response for
-// an account that is currently circuit-open. It is used to fail fast instead
-// of converting a known upstream error into a queue timeout followed by a
-// generic 503.
-func (s *Scheduler) CachedUpstreamFailure(model, operation string, excluded map[string]struct{}) *cachedUpstreamFailure {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	route, routed := s.routes[model]
-	now := time.Now()
-	if routed && len(route.Targets) > 0 {
-		candidates := make([]routeTargetCandidate, 0, len(route.Targets))
-		for index, target := range route.Targets {
-			key := routeTargetKey(index, target)
-			if _, skip := excluded[key]; skip {
-				continue
-			}
-			account := s.accounts[target.Account]
-			if account == nil || !account.Config.Enabled || !config.AccountSupportsOperation(account.Config, operation) {
-				continue
-			}
-			if _, _, compatible := config.ResolveRouteTarget(account.Config, route, target); !compatible || account.available(now) {
-				continue
-			}
-			candidates = append(candidates, routeTargetCandidate{index: index, account: account, key: key})
-		}
-		orderRouteTargetCandidates(candidates, route.Strategy, model, "", 0)
-		for _, candidate := range candidates {
-			account := candidate.account
-			if failure := account.cachedUpstreamFailure(model, operation); failure != nil {
-				return failure
-			}
-		}
-		return nil
+// releaseAccount is used by direct diagnostic leases that bypass Select.
+// Normal and diagnostic traffic must share the same capacity notification
+// contract or a prompt test can leave queued requests asleep until timeout.
+func (s *Scheduler) releaseAccount(account *AccountRuntime) {
+	if account == nil {
+		return
 	}
-
-	ids := make([]string, 0, len(s.accounts))
-	for id := range s.accounts {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		if _, skip := excluded[id]; skip {
-			continue
-		}
-		account := s.accounts[id]
-		if !account.Config.Enabled || !config.AccountSupportsOperation(account.Config, operation) {
-			continue
-		}
-		if routed {
-			allowed := false
-			for _, routeID := range route.Accounts {
-				if routeID == id {
-					allowed = true
-					break
-				}
-			}
-			if len(route.Accounts) > 0 && !allowed {
-				continue
-			}
-		} else if !account.supports(model) {
-			continue
-		}
-		if account.available(now) {
-			continue
-		}
-		if failure := account.cachedUpstreamFailure(model, operation); failure != nil {
-			return failure
-		}
-	}
-	return nil
+	account.release()
+	s.notify.broadcast()
 }
 
 func routeTargetKey(index int, target config.RouteTarget) string {
@@ -667,7 +894,10 @@ func orderCandidates(accounts []*AccountRuntime, strategy, model, session string
 		return a.Config.ID < b.Config.ID
 	})
 	if strategy == "round_robin" && len(accounts) > 1 {
-		offset := int(counter % uint64(len(accounts)))
+		offset := 0
+		if counter > 0 {
+			offset = int((counter - 1) % uint64(len(accounts)))
+		}
 		rotated := append([]*AccountRuntime(nil), accounts[offset:]...)
 		rotated = append(rotated, accounts[:offset]...)
 		copy(accounts, rotated)
@@ -676,9 +906,9 @@ func orderCandidates(accounts []*AccountRuntime, strategy, model, session string
 
 func load(a *AccountRuntime) float64 {
 	if a.Config.Concurrency <= 0 {
-		return float64(a.state.active.Load()) / float64(max(a.Config.Weight, 1))
+		return float64(a.state.capacity.active.Load()) / float64(max(a.Config.Weight, 1))
 	}
-	return float64(a.state.active.Load()) / float64(a.Config.Concurrency) / float64(max(a.Config.Weight, 1))
+	return float64(a.state.capacity.active.Load()) / float64(a.Config.Concurrency) / float64(max(a.Config.Weight, 1))
 }
 
 func rendezvousScore(session, model string, account *AccountRuntime) uint64 {

@@ -20,8 +20,8 @@
     <aside class="v10-account-nav">
       <div class="v10-nav-heading"><span class="v10-eyebrow">Inventory</span><strong>查看内容</strong></div>
       <div class="source-segment" role="tablist" aria-label="账号与连接视图">
-        <button type="button" class="active" data-source-tab="accounts" role="tab" aria-selected="true"><span>认证账号</span><small>额度、套餐、冷却与凭据状态</small></button>
-        <button type="button" data-source-tab="connections" role="tab" aria-selected="false"><span>API 连接</span><small>Base URL、协议、模型与并发</small></button>
+        <button type="button" class="active" data-source-tab="accounts" role="tab" aria-selected="true" aria-controls="v5SourceAccounts" tabindex="0"><span>认证账号</span><small>额度、套餐、冷却与凭据状态</small></button>
+        <button type="button" data-source-tab="connections" role="tab" aria-selected="false" aria-controls="v5SourceConnections" tabindex="-1"><span>API 连接</span><small>Base URL、协议、模型与并发</small></button>
       </div>
       <div class="v10-account-tip"><strong>账号 ≠ 连接</strong><span>账号是真实订阅或凭据；连接是路由使用的稳定入口。一个连接可以承载多个账号。</span></div>
       <button class="v10-import-shortcut" type="button" onclick="openImport()"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg><span><strong>从文件导入</strong><small>支持 Lite2API 与 Sub2API v1 JSON</small></span></button>

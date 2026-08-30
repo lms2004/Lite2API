@@ -1,159 +1,117 @@
 # Server Operations Guide
 
-Last verified: 2026-08-16 UTC
+Last verified: 2026-08-30 UTC
 
-This directory documents the production deployment on `64.83.25.68`. It is
-kept outside the Lite2API Git repository so host-specific details and secret
-file locations are not mixed into application source control.
+This directory contains host-neutral production checks. Public hostnames, IP
+addresses, certificate paths and VPN policy belong in the host's protected
+environment/configuration management, not in this repository.
 
 ## Architecture
 
 ```text
 Internet
-  |
-  +-- TCP 80  -> Nginx -> HTTPS redirect / ACME challenge
-  +-- TCP 443 -> Nginx TLS
-  |               +-- /relay-<private-path> -> V2Fly VLESS/WS on 127.0.0.1:10086
-  |               +-- /lite/v1/*          -> Lite2API on 127.0.0.1:45679
-  |               +-- /lite-admin/*       -> Lite2API admin (allowlisted only)
-  |                                              |
-  |                                              +-> OAuth adapter on 127.0.0.1:45682
-  +-- TCP 39264 -> SSH
+  -> TLS reverse proxy
+       -> public /v1 data plane -> Lite2API 127.0.0.1:45679
+       -> allowlisted admin      -> Lite2API 127.0.0.1:45679
+                                      -> CLIProxyAPI 127.0.0.1:45682
 ```
 
-Public hostname: `sub2api.foresights.top`
+Lite2API and CLIProxyAPI are independent, unprivileged systemd services. The
+reverse proxy is the only public listener. The application repeats the admin
+CIDR check, so a reverse-proxy mistake does not silently expose the admin API.
 
-- Lite2API base URL: `https://sub2api.foresights.top/lite/v1`
-- Admin URL: `https://sub2api.foresights.top/lite-admin/`
-- Health URL: `https://sub2api.foresights.top/health`
-- VLESS share URL: `/root/v2ray-share.txt` (credential material, mode `0600`)
-
-The admin page is intentionally available only from loopback or through the
-server-side VLESS proxy. A normal public request must receive HTTP 403.
-
-## Services and important files
-
-| Component | Service | Configuration |
-|---|---|---|
-| Nginx/TLS | `nginx.service` | `/etc/nginx/sites-available/sub2api.conf` |
-| V2Fly | `v2ray.service` | `/etc/v2ray/config.json` |
-| Lite2API | `lite2api.service` | `/etc/lite2api/config.json` |
-| CLIProxyAPI OAuth adapter | `cliproxyapi.service` | `/etc/cliproxyapi/config.yaml` |
-| Certificate renewal | `certbot.timer` | `/etc/letsencrypt/renewal/sub2api.foresights.top.conf` |
-
-CLIProxyAPI 的首次安装和固定版本升级统一使用：
+## Rebuildable installation
 
 ```bash
-cd /root/Lite2API
+cd /path/to/Lite2API
+git submodule sync --recursive
 git submodule update --init third_party/cliproxyapi
-./deploy/install-cliproxyapi-systemd.sh
+sudo ./deploy/install-lite2api-systemd.sh
+sudo ./deploy/install-cliproxyapi-systemd.sh
+sudo ./deploy/render-nginx-admin-allowlist.sh
+sudo systemctl reload nginx
+sudo ./deploy/server-ops/check-services.sh
 ```
 
-安装器校验固定提交，幂等应用仓库维护的额度快照补丁，保留既有密钥与 OAuth 凭据，更新二进制、配置和 systemd 单元，然后验证回环健康、管理鉴权与模型鉴权。不要直接从第三方 `main` 分支构建生产版本。安装过程不创建备份。
+The Lite2API installer provisions a missing service user, `/etc/lite2api`, a
+private environment file and an initial configuration. Both installers build
+from detached worktrees at selected commits; dirty and untracked checkout files
+cannot enter a labeled release. CLIProxyAPI additionally reapplies the three
+maintained patches to its fixed upstream revision. Each installer snapshots the
+files it will replace and automatically restores them if health validation
+fails. Successful installs print the local rollback snapshot path.
 
-Lite2API 本体统一使用：
+Sensitive state remains outside Git:
+
+- `/etc/lite2api/`: `root:lite2api 1770`; sticky ownership permits atomic service-owned config/key/log updates while protecting the root-owned environment entry.
+- `/etc/lite2api/lite2api.env`: gateway, admin and upstream keys.
+- `/etc/lite2api/config.json`: desired routing configuration.
+- `/etc/cliproxyapi/cliproxyapi.env`: adapter management credential.
+- `/var/lib/cliproxyapi/auths/`: OAuth account credentials.
+- `/var/lib/lite2api-rollbacks/` and `/var/lib/cliproxyapi-rollbacks/`: root-only, short-lived local upgrade snapshots kept outside service-writable state.
+
+Local rollback snapshots are not backups. Use encrypted off-host storage and
+regular restore drills as described in `docs/OPERATIONS.md`.
+
+For systemd state, `backup-configs.sh OUTPUT_DIRECTORY AGE_RECIPIENT` streams
+the selected files directly into age encryption; `verify-systemd-backup.sh`
+checks the encrypted archive without writing a plaintext tar. Copy the snapshot
+off-host and apply retention in the destination system.
+
+## One-source admin allowlist
+
+Maintain admin networks only in
+`/etc/lite2api/lite2api.env`:
+
+```text
+LITE2API_ADMIN_ALLOWED_CIDRS=127.0.0.0/8,::1/128,VPN_EGRESS/32
+```
+
+`render-nginx-admin-allowlist.sh` parses that value without sourcing the file,
+rejects `/0`, symlinks and missing loopback networks, atomically renders the
+Nginx snippet, and runs `nginx -t`. The operator reviews the result before
+reloading Nginx. `check-services.sh` then requires an exact set match between
+the snippet and application environment.
+
+## Portable service verification
+
+The check script always validates local service/config/authentication and
+redaction contracts. Public DNS, TLS and transport tuning are optional inputs:
 
 ```bash
-cd /root/Lite2API
-./deploy/install-lite2api-systemd.sh
-./deploy/server-ops/check-services.sh
+sudo env \
+  LITE2API_PUBLIC_ORIGIN=https://api.example.com \
+  LITE2API_PUBLIC_API_BASE=https://api.example.com/lite/v1 \
+  LITE2API_EXPECTED_PUBLIC_IP=203.0.113.10 \
+  LITE2API_TLS_CERTIFICATE=/etc/letsencrypt/live/api.example.com/cert.pem \
+  LITE2API_REQUIRE_BBR=true \
+  LITE2API_REQUIRE_DATA_PLANE_READY=true \
+  LITE2API_REQUIRE_OAUTH_READY=true \
+  ./deploy/server-ops/check-services.sh
 ```
 
-安装器使用 Go 1.23+ 构建临时二进制，先执行 `-check-config`，再同步 systemd 单元并重启。按本轮明确要求，该流程不创建配置、凭据或旧二进制备份。
+Omit an optional variable when that component is intentionally absent. A fresh,
+fail-closed Lite2API install is live while all example accounts remain disabled;
+only `LITE2API_REQUIRE_DATA_PLANE_READY=true` requires traffic-ready routes. A
+fresh OAuth adapter may likewise be healthy with an empty credential pool; only
+`LITE2API_REQUIRE_OAUTH_READY=true` requires at least one ready credential.
+Long-lived keys are passed to curl through `0600` header files, never command
+arguments.
 
-Sensitive files:
-
-- `/etc/lite2api/lite2api.env`: API key, admin token and upstream variables.
-- `/etc/cliproxyapi/cliproxyapi.env`: OAuth adapter management credential.
-- `/var/lib/cliproxyapi/auths/`: OAuth account credentials created by completed logins.
-- `/root/v2ray-client.json`: full VLESS client configuration.
-- `/root/v2ray-share.txt`: importable VLESS URL.
-- `/etc/letsencrypt/live/sub2api.foresights.top/privkey.pem`: TLS private key.
-
-Do not copy these files into Git, tickets, chat rooms or public backups.
-
-## Routine commands
+Routine diagnostics:
 
 ```bash
-/root/server-ops/check-services.sh
-journalctl -u v2ray -u nginx -u lite2api -u cliproxyapi --since today
-systemctl restart v2ray
-systemctl reload nginx
-systemctl reload lite2api
-systemctl restart cliproxyapi
+systemctl status lite2api cliproxyapi
+journalctl -u lite2api -u cliproxyapi --since today
+ss -lntp
+curl -fsS http://127.0.0.1:45679/health
 ```
 
-升级后运行完整检查脚本；它同时验证配置、目录操作类型、按需运行探针、两条适配器鉴权路径、多形态额度快照 schema 与脱敏边界、监听端口、资源占用和关键端点延迟。Codex 与 Google 系官方额度查询只在账号页读取时异步触发，成功后缓存 10 分钟；授权链接生成成功不代表账号已完成登录，`/v1/models` 为空时应先检查 `/var/lib/cliproxyapi/auths/` 是否已有有效凭据。
+## V2Fly helper
 
-Upgrade V2Fly to the latest official GitHub release:
-
-```bash
-/root/server-ops/update-v2ray-core.sh
-```
-
-Install a specific release:
-
-```bash
-/root/server-ops/update-v2ray-core.sh v5.52.0
-```
-
-The updater verifies the official SHA-256 digest, validates the production
-configuration with the new binary, switches a versioned symlink, and rolls
-back automatically if the service does not start.
-
-## Security and networking
-
-- UFW permits only TCP `39264`, `80`, and `443`.
-- V2Fly, Lite2API and CLIProxyAPI bind only to loopback.
-- TLS certificates renew through `certbot.timer`; the deploy hook validates and
-  reloads Nginx.
-- Network tuning lives in `/etc/sysctl.d/90-v2ray-network.conf`.
-- Congestion control is `bbr` with the `fq` queue discipline.
-- A 1 GiB `/swapfile` is enabled and listed in `/etc/fstab`.
-
-## Browser workload guard
-
-This small production host must not run concurrent Chromium process trees.
-`/usr/local/bin/chromium` and `/usr/local/bin/chromium-browser` are installed
-from `chromium-guard`: non-headless use passes through, while headless runs are
-serialized, wait at most 15 seconds for the lock, and have a 180-second hard
-runtime limit.
-
-Snap Chromium scopes run under the root user manager's `app.slice`. The
-`app-slice-resource-guard.conf` drop-in limits that slice to one CPU, 384 MiB
-memory, 128 MiB swap, and 256 tasks. The command wrapper also runs Chromium at
-`nice=10` and idle I/O priority. Production services remain in `system.slice`
-and are not charged to these limits.
-
-Verify the guard with:
-
-```bash
-command -v chromium
-systemctl --user show app.slice \
-  -p CPUQuotaPerSecUSec -p MemoryHigh -p MemoryMax -p MemorySwapMax \
-  -p TasksMax
-journalctl -t chromium-guard --since today
-```
-
-## Known application state
-
-Lite2API has three enabled logical routing profiles backed by the local
-CLIProxyAPI instance and four stable aliases: `gpt`, `gemini`, `claude` and
-`grok`. All three accounts explicitly support Chat Completions, Responses and
-Anthropic Messages; unsupported operations fail locally without waiting for the
-queue timeout. OAuth credentials are displayed separately as a sanitized
-authentication pool; adding Antigravity or another login does not duplicate a
-routing profile. CLIProxyAPI is `ready` with 26 discovered models. AtomCode2API,
-Grok2API and Gemini Web2API are installed catalog entries but currently stopped
-and cannot receive traffic. They remain stopped until credentials are configured
-to avoid wasting server memory.
-
-Ubuntu kernel `6.8.0-137-generic` is installed but the host was last verified
-running `6.8.0-48-generic`. A controlled reboot is required to load the newer
-OS kernel; this is separate from the V2Fly 5.x application-core upgrade.
-
-## Alternate admin egress
-
-The admin allowlist includes `64.83.25.68/32` and `70.39.198.196/32`.
-Both Nginx and Lite2API enforce the same list. If the alternate server IP
-changes, update both layers; access fails closed until they match.
+`update-v2ray-core.sh` is optional and independent of Lite2API. It accepts an
+explicit semantic release tag or resolves the latest official release, verifies
+the published SHA-256 digest, validates the existing V2Fly configuration and
+any same-version directory byte-for-byte, serializes concurrent updates,
+switches a versioned symlink, and restores the prior pointer if restart fails.
+Do not treat it as a prerequisite for hosts using another VPN or no VPN.

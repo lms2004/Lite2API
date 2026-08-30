@@ -126,6 +126,9 @@
       const response = await api('/oauth/routing');
       syncOAuthRouting(response);
     } catch (error) {
+      // A transient adapter/session failure must not permanently suppress every
+      // later read. The next normal render may retry without a page reload.
+      oauthRoutingAttempted = false;
       if (select) select.disabled = true;
       const hint = byId('oauthRoutingHint');
       if (hint) hint.textContent = `账号选择策略暂不可读：${error.message || '适配器未连接'}`;
@@ -209,6 +212,7 @@
   }
 
   function routeAccountID(row) {
+    if (row?.dataset?.uiKey) return row.dataset.uiKey;
     const input = row.querySelector('input[type="checkbox"][onchange*="toggleAccount("]');
     const match = input?.getAttribute('onchange')?.match(/toggleAccount\('([^']+)'/);
     if (!match) return '';
@@ -238,6 +242,7 @@
       cell.append(button);
     }
     button.classList.toggle('enable', !account.enabled);
+    button.dataset.uiAction = 'toggle';
     button.textContent = account.enabled ? '停用' : '启用';
     button.title = account.enabled ? '停用此路由连接' : '启用此路由连接';
     button.setAttribute('aria-label', `${button.title}：${account.name || id}`);
@@ -251,6 +256,7 @@
   }
 
   function oauthAccountID(card) {
+    if (card?.dataset?.uiKey) return card.dataset.uiKey;
     const text = card.querySelector('.channel-account-id span')?.textContent || '';
     return text.split(' · ')[0].trim();
   }
@@ -274,6 +280,7 @@
       status.append(priorityButton);
     }
     const priority = Number.isInteger(Number(account.priority)) ? Number(account.priority) : 0;
+    priorityButton.dataset.uiAction = 'priority';
     priorityButton.textContent = `优先级 ${priority}`;
     priorityButton.title = '设置认证池选号优先级；数值越大越优先';
     priorityButton.setAttribute('aria-label', `${priorityButton.title}：${account.identity || id}，当前 ${priority}`);
@@ -291,6 +298,7 @@
       status.append(refreshButton);
     }
     refreshButton.textContent = '刷新';
+    refreshButton.dataset.uiAction = 'refresh';
     refreshButton.title = '刷新此认证账号的凭据状态并重新读取已观测额度';
     refreshButton.setAttribute('aria-label', `${refreshButton.title}：${account.identity || id}`);
 
@@ -307,6 +315,7 @@
       status.append(button);
     }
     button.classList.toggle('enable', Boolean(account.disabled));
+    button.dataset.uiAction = 'toggle';
     button.textContent = account.disabled ? '启用' : '停用';
     button.title = account.disabled ? '启用此认证账号' : '停用此认证账号';
     button.setAttribute('aria-label', `${button.title}：${account.identity || id}`);
@@ -325,6 +334,7 @@
       status.append(deleteButton);
     }
     deleteButton.textContent = '删除';
+    deleteButton.dataset.uiAction = 'delete';
     deleteButton.title = '删除此认证账号及其 OAuth 凭据';
     deleteButton.setAttribute('aria-label', `${deleteButton.title}：${account.identity || id}`);
 
