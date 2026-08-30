@@ -143,7 +143,7 @@ config_template="$build_tree/config.example.json"
 
 (
     cd "$build_tree"
-    GOTOOLCHAIN=local "$go_bin" build -trimpath \
+    GOTOOLCHAIN=local "$go_bin" build -buildvcs=false -trimpath \
         -ldflags="-s -w -X main.version=$version" \
         -o "$binary_tmp" ./cmd/lite2api
 )

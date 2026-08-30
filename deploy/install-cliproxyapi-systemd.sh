@@ -253,7 +253,7 @@ done
 git -C "$build_tree" diff --check
 (
     cd "$build_tree"
-    GOTOOLCHAIN=local "$go_bin" build -trimpath \
+    GOTOOLCHAIN=local "$go_bin" build -buildvcs=false -trimpath \
         -ldflags="-s -w -X main.Version=$version -X main.Commit=$commit -X main.BuildDate=$build_date" \
         -o "$binary_tmp" ./cmd/server/
 )
