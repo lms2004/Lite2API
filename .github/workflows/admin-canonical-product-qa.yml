@@ -1,0 +1,138 @@
+name: Canonical admin product acceptance
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "internal/web/**"
+      - "internal/gateway/**"
+      - ".github/qa/**"
+      - ".github/workflows/admin-canonical-product-qa.yml"
+  pull_request:
+    paths:
+      - "internal/web/**"
+      - "internal/gateway/**"
+      - ".github/qa/**"
+      - ".github/workflows/admin-canonical-product-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-admin-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-acceptance:
+    name: Verify onboarding, routing, usage, quality, and import
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: 1.26.5
+          cache: false
+
+      - name: Test, build, and validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go test ./... 2>&1 | tee evidence/go-test.log
+          node --test internal/web/app-core.test.js 2>&1 | tee evidence/app-core-test.log
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
+          cp .github/qa/canonical-preview-config.json "$RUNNER_TEMP/lite2api-canonical-preview.json"
+          "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-canonical-preview.json" -check-config | tee evidence/config-check.txt
+          git rev-parse HEAD | tee evidence/source-commit.txt
+
+      - name: Start deterministic model and quota fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python3 -u .github/qa/canonical_fixtures.py > evidence/fixtures.log 2>&1 &
+          echo $! > evidence/fixtures.pid
+          for port in 45678 45680 45681 45683; do
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl --silent --show-error --fail "http://127.0.0.1:${port}/v1/models" > "evidence/models-${port}.json"; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          done
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --fail http://127.0.0.1:45682/v0/management/auth-files > evidence/oauth-accounts.json; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+      - name: Deploy Lite2API and seed real usage
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup env \
+            LITE2API_API_KEYS="preview-client-key" \
+            LITE2API_ADMIN_TOKEN="preview-admin-token" \
+            LITE2API_ADMIN_AUTO_LOGIN="false" \
+            LITE2API_ADMIN_ALLOWED_CIDRS="127.0.0.0/8,::1/128" \
+            LITE2API_TRUSTED_PROXY_CIDRS="127.0.0.0/8,::1/128" \
+            PREVIEW_FAST_KEY="preview" \
+            PREVIEW_CLAUDE_KEY="preview" \
+            PREVIEW_GEMINI_KEY="preview" \
+            PREVIEW_GROK_KEY="preview" \
+            CLIPROXYAPI_MANAGEMENT_KEY="preview-management-key" \
+            "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-canonical-preview.json" \
+            > evidence/lite2api.log 2>&1 &
+          echo $! > evidence/lite2api.pid
+          ready=0
+          for attempt in $(seq 1 60); do
+            status="$(curl --silent --show-error --output evidence/health.json --write-out '%{http_code}' http://127.0.0.1:45679/health || true)"
+            if [ "$status" = "200" ] || [ "$status" = "503" ]; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          seed() {
+            local model="$1"
+            local index="$2"
+            curl --silent --show-error --fail \
+              --output "evidence/seed-${model}-${index}.json" \
+              http://127.0.0.1:45679/v1/chat/completions \
+              -H 'Authorization: Bearer preview-client-key' \
+              -H 'Content-Type: application/json' \
+              --data "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Usage seed ${index}\"}],\"stream\":false}"
+          }
+          for index in $(seq 1 14); do seed fast "$index"; done
+          for index in $(seq 1 9); do seed claude "$index"; done
+          for index in $(seq 1 6); do seed vision "$index"; done
+
+      - name: Install browser support
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk > evidence/font-install.log
+          fc-cache -f
+          fc-match 'Noto Sans CJK SC' | tee evidence/font-match.txt
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf '%s\n' "$CHROME" > evidence/browser.txt
+          cd .github/qa
+          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee "$GITHUB_WORKSPACE/evidence/playwright-install.log"
+
+      - name: Exercise canonical product workflows sequentially
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(cat evidence/browser.txt)" \
+            OUTPUT_DIR="$GITHUB_WORKSPACE/evidence" \
+            NODE_PATH="$GITHUB_WORKSPACE/.github/qa/node_modules" \
+            node .github/qa/canonical_capture.js 2>&1 | tee evidence/playwright.log
+          file evidence/*.png | tee evidence/screenshots.txt
+          sha256sum evidence/*.png | tee evidence/SHA256SUMS.txt

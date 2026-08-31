@@ -3,132 +3,94 @@ package web
 import (
 	"bytes"
 	"compress/gzip"
-	_ "embed"
+	"crypto/sha256"
+	"embed"
+	"encoding/base64"
 )
 
-//go:embed index.html
-var legacyIndexHTML []byte
+//go:embed app.html
+var appHTML []byte
 
-//go:embed admin-core.js
-var adminCoreJS []byte
+//go:embed app.css
+var appCSS []byte
 
-//go:embed native-v5.css
-var nativeV5CSS []byte
+//go:embed app-core.js
+var appCoreJS []byte
 
-//go:embed native-v6.css
-var nativeV6CSS []byte
+//go:embed app.js
+var appJS []byte
 
-//go:embed native-v7.css
-var nativeV7CSS []byte
+//go:embed assets/model-icons/*.svg assets/model-icons/*.png
+var modelIconFS embed.FS
 
-//go:embed native-v8.css
-var nativeV8CSS []byte
+type officialIconAsset struct {
+	token string
+	path  string
+	mime  string
+}
 
-//go:embed native-v9.css
-var nativeV9CSS []byte
+var officialIconAssets = []officialIconAsset{
+	{token: "__OFFICIAL_ICON_OPENAI__", path: "assets/model-icons/openai.svg", mime: "image/svg+xml"},
+	{token: "__OFFICIAL_ICON_CLAUDE__", path: "assets/model-icons/claude.svg", mime: "image/svg+xml"},
+	{token: "__OFFICIAL_ICON_GEMINI__", path: "assets/model-icons/gemini-api-logo.svg", mime: "image/svg+xml"},
+	{token: "__OFFICIAL_ICON_ANTIGRAVITY__", path: "assets/model-icons/antigravity.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_6_SOL__", path: "assets/model-icons/gpt-5.6-sol.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_6_TERRA__", path: "assets/model-icons/gpt-5.6-terra.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_6_LUNA__", path: "assets/model-icons/gpt-5.6-luna.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_5__", path: "assets/model-icons/gpt-5.5.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_4__", path: "assets/model-icons/gpt-5.4.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_4_MINI__", path: "assets/model-icons/gpt-5.4-mini.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_5_3_CODEX__", path: "assets/model-icons/gpt-5.3-codex.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_IMAGE_2__", path: "assets/model-icons/gpt-image-2.png", mime: "image/png"},
+	{token: "__OFFICIAL_ICON_GPT_OSS_120B__", path: "assets/model-icons/gpt-oss-120b.png", mime: "image/png"},
+}
 
-//go:embed native-v9-refine.css
-var nativeV9RefineCSS []byte
+var canonicalCSS = injectOfficialIcons(appCSS)
+var canonicalScript = bytes.Join([][]byte{bytes.TrimSpace(appCoreJS), bytes.TrimSpace(appJS)}, []byte("\n"))
 
-//go:embed native-v10.css
-var nativeV10CSS []byte
-
-//go:embed native-v10-dialog-polish.css
-var nativeV10DialogPolishCSS []byte
-
-//go:embed native-theme.css
-var nativeThemeCSS []byte
-
-//go:embed native-v12.css
-var nativeV12CSS []byte
-
-//go:embed native-v5.js
-var nativeV5JS []byte
-
-//go:embed native-v6.js
-var nativeV6JS []byte
-
-//go:embed native-v7.js
-var nativeV7JS []byte
-
-//go:embed native-v9.js
-var nativeV9JS []byte
-
-//go:embed native-v10.js
-var nativeV10JS []byte
-
-//go:embed native-v10-quota.js
-var nativeV10QuotaJS []byte
-
-//go:embed native-v10-provider-fixes.js
-var nativeV10ProviderFixesJS []byte
-
-//go:embed native-v10-provider-methods.js
-var nativeV10ProviderMethodsJS []byte
-
-//go:embed native-theme.js
-var nativeThemeJS []byte
-
-//go:embed native-v12-motion.js
-var nativeV12MotionJS []byte
-
-//go:embed native-account-status.js
-var nativeAccountStatusJS []byte
-
-//go:embed native-route-compat.js
-var nativeRouteCompatJS []byte
-
-//go:embed native-render-perf.js
-var nativeRenderPerfJS []byte
-
-//go:embed native-adapter-clarity.js
-var nativeAdapterClarityJS []byte
-
-//go:embed native-v5-shell.html
-var nativeV5Shell []byte
-
-//go:embed native-v5-monitor.html
-var nativeV5Monitor []byte
-
-//go:embed native-v5-routes.html
-var nativeV5Routes []byte
-
-//go:embed native-v5-accounts.html
-var nativeV5Accounts []byte
-
-//go:embed native-v5-keys.html
-var nativeV5Keys []byte
-
-//go:embed native-v10-account-dialogs.html
-var nativeV10AccountDialogs []byte
-
-// IndexHTML is the complete self-contained admin page served by Lite2API.
-// Stable gateway handlers remain in the legacy document. Compile-time native
-// markup replaces the task surfaces before embedding. Native v12 keeps quota,
-// call volume, speed, channel quality, and provider-specific account onboarding
-// the primary product workflows and applies one coherent console design.
-var IndexHTML = buildNativeIndexHTML(legacyIndexHTML)
+// IndexHTML is the complete canonical Lite2API management application. The
+// server still ships a self-contained document, but every runtime surface now
+// comes from the app sources above rather than ordered native-v* overrides.
+var IndexHTML = buildApp(appHTML, canonicalCSS, canonicalScript)
 var IndexHTMLGzip = gzipBytes(IndexHTML)
 
-func buildNativeIndexHTML(base []byte) []byte {
-	page := append([]byte(nil), base...)
+// ScriptCSPSource pins the exact embedded controller. Dynamic HTML can never
+// opt itself into script execution because the server no longer needs
+// script-src 'unsafe-inline'.
+var ScriptCSPSource = cspHash(canonicalScript)
 
-	page = replaceRange(page, []byte(`<div class="app-shell">`), []byte(`<section id="view-accounts"`), bytes.TrimSpace(nativeV5Shell))
-	page = replaceRange(page, []byte(`<section id="view-accounts"`), []byte(`<section id="view-keys"`), bytes.TrimSpace(nativeV5Accounts))
-	page = replaceRange(page, []byte(`<section id="view-keys"`), []byte(`<section id="view-routes"`), bytes.TrimSpace(nativeV5Keys))
-	page = replaceRange(page, []byte(`<section id="view-routes"`), []byte(`<section id="view-monitor"`), bytes.TrimSpace(nativeV5Routes))
-	page = replaceRange(page, []byte(`<section id="view-monitor"`), []byte(`<section id="view-prompt-test"`), bytes.TrimSpace(nativeV5Monitor))
-	page = replaceRange(page, []byte(`<dialog id="quickAuthDialog"`), []byte(`<dialog id="exportDialog"`), bytes.TrimSpace(nativeV10AccountDialogs))
+func injectOfficialIcons(css []byte) []byte {
+	result := append([]byte(nil), css...)
+	for _, asset := range officialIconAssets {
+		token := []byte(asset.token)
+		if bytes.Count(result, token) != 1 {
+			panic("canonical stylesheet must reference each official icon exactly once: " + asset.token)
+		}
+		data, err := modelIconFS.ReadFile(asset.path)
+		if err != nil {
+			panic("read official icon " + asset.path + ": " + err.Error())
+		}
+		uri := []byte("data:" + asset.mime + ";base64," + base64.StdEncoding.EncodeToString(data))
+		result = bytes.Replace(result, token, uri, 1)
+	}
+	return result
+}
 
-	page = replaceOnce(page, []byte(`const UI_BUILD='2026.08.16-r11'`), []byte(`const UI_BUILD='2026.08.24-v14'`))
-	page = replaceOnce(page, []byte(`<meta name="theme-color" content="#080c12">`), []byte(`<meta name="theme-color" content="#071421">`))
-	page = replaceOnce(page, []byte(`const UI_BUILD='2026.08.24-v14'`), bytes.Join([][]byte{bytes.TrimSpace(adminCoreJS), []byte(`const UI_BUILD='2026.08.24-v14'`)}, []byte("\n")))
+func buildApp(html, css, script []byte) []byte {
+	page := append([]byte(nil), html...)
+	cssSlot := []byte("/*__APP_CSS__*/")
+	jsSlot := []byte("/*__APP_JS__*/")
+	if bytes.Count(page, cssSlot) != 1 || bytes.Count(page, jsSlot) != 1 {
+		panic("canonical admin page must contain exactly one CSS and JavaScript slot")
+	}
+	page = bytes.Replace(page, cssSlot, bytes.TrimSpace(css), 1)
+	page = bytes.Replace(page, jsSlot, bytes.TrimSpace(script), 1)
+	return page
+}
 
-	css := bytes.Join([][]byte{nativeV5CSS, nativeV6CSS, nativeV7CSS, nativeV8CSS, nativeV9CSS, nativeV9RefineCSS, nativeV10CSS, nativeV10DialogPolishCSS, nativeThemeCSS, nativeV12CSS}, []byte("\n"))
-	// Account controls load first so they remain available even if a later
-	// visual enhancement is unavailable in an older browser.
-	js := bytes.Join([][]byte{nativeAccountStatusJS, nativeRouteCompatJS, nativeRenderPerfJS, nativeV5JS, nativeV6JS, nativeV7JS, nativeV9JS, nativeV10JS, nativeV10QuotaJS, nativeV10ProviderFixesJS, nativeV10ProviderMethodsJS, nativeAdapterClarityJS, nativeThemeJS, nativeV12MotionJS}, []byte("\n"))
-	return buildIndexHTML(page, css, js)
+func cspHash(script []byte) string {
+	digest := sha256.Sum256(bytes.TrimSpace(script))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
 }
 
 func gzipBytes(data []byte) []byte {
@@ -145,71 +107,4 @@ func gzipBytes(data []byte) []byte {
 		return nil
 	}
 	return buffer.Bytes()
-}
-
-func replaceRange(page, startMarker, endMarker, replacement []byte) []byte {
-	if bytes.Count(page, startMarker) != 1 {
-		panic("admin page build: start marker must occur exactly once")
-	}
-	start := bytes.Index(page, startMarker)
-	if bytes.Count(page[start:], endMarker) != 1 {
-		panic("admin page build: end marker must occur exactly once after start marker")
-	}
-	endOffset := bytes.Index(page[start:], endMarker)
-	end := start + endOffset
-	next := make([]byte, 0, len(page)-(end-start)+len(replacement)+1)
-	next = append(next, page[:start]...)
-	next = append(next, replacement...)
-	next = append(next, '\n')
-	next = append(next, page[end:]...)
-	return next
-}
-
-func replaceOnce(page, old, replacement []byte) []byte {
-	if bytes.Count(page, old) != 1 {
-		panic("admin page build: replacement marker must occur exactly once")
-	}
-	return bytes.Replace(page, old, replacement, 1)
-}
-
-// buildIndexHTML keeps the final document self-contained: one canonical style
-// element and one enhancement script inserted before </body>.
-func buildIndexHTML(base, css, js []byte) []byte {
-	page := append([]byte(nil), base...)
-
-	if bytes.Count(page, []byte("<style>")) != 1 || bytes.Count(page, []byte("</style>")) != 1 {
-		panic("admin page build: canonical style element must occur exactly once")
-	}
-	styleOpen := bytes.Index(page, []byte("<style>"))
-	styleClose := bytes.Index(page, []byte("</style>"))
-	if styleClose <= styleOpen {
-		panic("admin page build: canonical style markers are out of order")
-	}
-	contentStart := styleOpen + len("<style>")
-	nextStyle := make([]byte, 0, len(page)-styleClose+contentStart+len(css)+2)
-	nextStyle = append(nextStyle, page[:contentStart]...)
-	nextStyle = append(nextStyle, '\n')
-	nextStyle = append(nextStyle, bytes.TrimSpace(css)...)
-	nextStyle = append(nextStyle, '\n')
-	nextStyle = append(nextStyle, page[styleClose:]...)
-	page = nextStyle
-
-	if bytes.Count(page, []byte("</body>")) != 1 {
-		panic("admin page build: body close marker must occur exactly once")
-	}
-	bodyClose := bytes.LastIndex(page, []byte("</body>"))
-	if len(bytes.TrimSpace(js)) == 0 {
-		return page
-	}
-
-	script := make([]byte, 0, len(js)+22)
-	script = append(script, []byte("\n<script>\n")...)
-	script = append(script, bytes.TrimSpace(js)...)
-	script = append(script, []byte("\n</script>\n")...)
-
-	next := make([]byte, 0, len(page)+len(script))
-	next = append(next, page[:bodyClose]...)
-	next = append(next, script...)
-	next = append(next, page[bodyClose:]...)
-	return next
 }

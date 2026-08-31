@@ -166,21 +166,21 @@
 | UI-01 | 已修复 | 动态 inline handler 改 data attribute + 委托，结构测试禁止旧注入形态 |
 | UI-02 | 已修复 | 统一 timeout/abort/session single-flight/401-CSRF 恢复 |
 | UI-03 | 已修复 | 删除 impact preview、route 列表和最后目标二次确认 |
-| UI-04 | **延期** | v5—v12 CSS/JS 仍叠加，尚未完成单一 canonical bundle 迁移 |
-| UI-05 | 已修复 | `replaceRange/replaceOnce` 和 style/body anchor 必须唯一，否则构建失败 |
-| UI-06 | **延期** | 仍存在大量 inline handler，CSP 仍需 `unsafe-inline` |
+| UI-04 | 已修复 | 删除 v5—v12 叠加层，收敛为 `app.html` / `app.css` / `app-core.js` / `app.js` 单一应用 |
+| UI-05 | 已修复 | 构建只接受唯一 CSS/JS slot，缺失或歧义立即 panic；不再依赖 DOM range 替换 |
+| UI-06 | **已缓解** | 动态 inline handler 已全部删除，脚本由 CSP SHA-256 精确授权；自包含样式和动态进度条仍需 inline style |
 | UI-07 | 已修复 | OAuth generation/controller 与完整 teardown |
 | UI-08 | 已修复 | Cookie/API key/OAuth/file refs 统一清理，新 Key 5 分钟 TTL |
 | UI-09 | 已修复 | preview fingerprint 绑定 data+mode，apply 默认禁用 |
 | UI-10 | 已修复 | 真实范围 P95 或准确标注最新原始桶，不再平均 percentile |
-| UI-11 | **已缓解** | 保存 open/focus/scroll 和 stable identity；数据变化仍会整块替换 DOM |
+| UI-11 | **已缓解** | 只渲染当前视图，轮询时保护路由、账号池与客户端焦点；活动区域的数据变化仍会局部整块替换 DOM |
 | UI-12 | 已修复 | selection 与现存 ID 求交，route draft 避免双 RAF 覆盖 |
 | UI-13 | 已修复 | routing/quota 失败不永久缓存，可重试 |
 | UI-14 | **已缓解** | 调用数、token、单次/整批超时与取消已限制；仍缺任意子集选择和按渠道价格估算 |
 | UI-15 | 已修复 | trend generation + AbortController，删除共享 busy boolean |
 | UI-16 | 已修复 | 64 条/256 KiB/90 秒/128 KiB 响应与增量 transcript |
 | UI-17 | 已修复 | 按最终 wrapper JSON UTF-8 body 校验 1 MiB |
-| UI-18 | **已缓解** | 已拆多个 runtime owner；仍保留大型全局 state 和跨文件 `window` override |
+| UI-18 | **已缓解** | 单一 controller + 纯 domain core，已删除跨文件 `window` override；controller 仍偏大，尚未采用 keyed renderer |
 | UI-19 | 已修复 | canonical build 单点渲染，旧 v5/v6/v7 不再覆盖 |
 | UI-20 | 已修复 | 移除嵌套 main，补齐 Tab/Radio 键盘语义 |
 
@@ -220,8 +220,8 @@
 | `gofmt -l cmd internal` | 无输出 |
 | `git diff --check` | PASS |
 | 全部 `internal/web/*.js` 的 `node --check` | PASS |
-| `admin-core.test.js`、迁移测试 | PASS |
-| `index.html` 两个 inline script 的 `new Function` 解析 | PASS |
+| `app-core.test.js`、迁移测试 | PASS |
+| canonical script CSP SHA-256 与最终嵌入文档一致 | PASS |
 | 全量 Bash/sh 语法与 ShellCheck | PASS |
 | bootstrap、备份正常/恶意归档契约 | PASS |
 | 所有 workflow + Compose YAML parse | PASS |
@@ -251,7 +251,7 @@
 ### 优先级 A：下一个发布周期
 
 1. **CORE-08**：实现明确 `closed -> open -> half-open -> closed/open` 状态机，cooldown 后每个 operation/model 仅允许一个 probe；同时让 `/health` 快照不再聚合最坏 bucket。
-2. **UI-04/UI-06**：冻结 v5—v12 增强层，迁移到单一 module/controller；移除 inline handler 和动态 HTML，最终删除 CSP `unsafe-inline`。
+2. **UI-18**：把当前单一 controller 继续拆成按视图 owner，并引入 keyed renderer，减少活动区域的整块 DOM 替换。
 3. **CORE-28**：把 legacy env Key 标为可审计 break-glass，支持 models/RPM/concurrency/expiry，完成迁移后允许禁用。
 4. **CORE-23**：将 capability 扩展为 model + operation + feature + effort + upstream model，路由编译和 `/v1/models` 使用同一矩阵。
 
@@ -259,7 +259,7 @@
 
 1. **CORE-20**：建立 typed domain errors 与中央 protocol mapper，删除调用点手写 status/kind/code。
 2. **CORE-26**：把 discovery 移到有 TTL、provenance、generation 的 observed store，只有显式 promotion 才写 desired config。
-3. **UI-11/UI-18**：改为真正 keyed DOM patch 与单向状态 owner，删除跨文件 `window` override。
+3. **UI-06/UI-11**：把动态进度样式迁到受控 CSS class，并对高频列表采用 keyed DOM patch。
 4. **UI-14**：增加测试子集选择、渠道价格元数据与货币成本预估，而不只是硬上限。
 5. request-log 增加持久化失败告警/指标；prompt-test 增加独立 response idle timeout。
 
@@ -273,6 +273,6 @@
 
 从核心数据面、控制面事务、部署一致性和供应链门禁看，本轮已经消除基线中的全部 P0，并闭合已识别的发布阻断故障；最终非缓存 race 与独立红队均通过。
 
-但这不等于“架构债务归零”。仍保留三个历史 P1 级成熟度问题：CORE-08 的 half-open 单探针、UI-04 的多版本叠层、UI-06 的 `unsafe-inline`。其中后两项没有继续保留已确认的账号 ID XSS 注入路径，但会持续提高回归概率并削弱 CSP 防御纵深。生产发布应把这三项记录为显式风险接受，并把上述优先级 A 设为下一阶段退出条件。
+但这不等于“架构债务归零”。CORE-08 的 half-open 单探针仍是主要历史 P1；前端多版本叠层和任意内联脚本授权已经移除。剩余前端债务集中在 controller 体积、活动区域 keyed patch，以及为自包含样式保留的 `style-src 'unsafe-inline'`，应按上述顺序继续收敛。
 
 本次只完成代码、测试、文档和本地交付验证；**没有执行生产部署、commit 或 push**。

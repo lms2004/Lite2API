@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           for javascript in internal/web/*.js; do node --check "$javascript"; done
-          node --test internal/web/admin-core.test.js
+          node --test internal/web/app-core.test.js
           node --check deploy/migrate-sub2api-auths.mjs
           node --test deploy/migrate-sub2api-auths.test.mjs
           bash deploy/bootstrap.test.sh

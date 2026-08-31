@@ -2,9 +2,7 @@ name: UI quality
 
 on:
   push:
-    branches:
-      - main
-      - "feat/**"
+    branches: [main, "feat/**"]
     paths:
       - "internal/web/**"
       - "internal/config/**"
@@ -28,11 +26,11 @@ concurrency:
 
 jobs:
   test:
-    name: Go tests, discovery, and native UI contract
+    name: Canonical UI contracts
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout without persisted credentials
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -43,83 +41,42 @@ jobs:
           go-version: 1.26.5
           cache: false
 
-      - name: Check formatting
-        run: |
-          files=$(gofmt -l internal/web internal/config internal/gateway)
-          if [ -n "$files" ]; then
-            echo "The following Go files require gofmt:"
-            echo "$files"
-            exit 1
-          fi
-
-      - name: Run tests
-        run: go test ./...
-
-      - name: Verify capability and native source assets
+      - name: Verify formatting and Go contracts
         shell: bash
         run: |
           set -euo pipefail
-          test -s internal/config/capability_discovery.go
-          test -s internal/gateway/capabilitysync.go
-          test -s internal/gateway/accounttest.go
-          grep -Fq -- 'capabilityDiscoveryInterval' internal/gateway/capabilitysync.go
-          grep -Fq -- 'InferDiscoveredCapabilities' internal/config/capability_discovery.go
-          grep -Fq -- 'serveAccountTest' internal/gateway/admin.go
-          grep -Fq -- 'probeAccountModels' internal/gateway/accounttest.go
+          mapfile -t unformatted < <(gofmt -l internal/web internal/config internal/gateway)
+          if ((${#unformatted[@]})); then
+            printf 'gofmt required: %s\n' "${unformatted[@]}" >&2
+            exit 1
+          fi
+          go test ./internal/web ./internal/config ./internal/gateway
 
-          for file in \
-            internal/web/native-v5.css \
-            internal/web/native-v5.js \
-            internal/web/native-v6.css \
-            internal/web/native-v6.js \
-            internal/web/native-v7.css \
-            internal/web/native-v7.js \
-            internal/web/native-v8.css \
-            internal/web/native-v9.css \
-            internal/web/native-v9-refine.css \
-            internal/web/native-v9.js \
-            internal/web/native-v10.css \
-            internal/web/native-v12.css \
-            internal/web/native-v10.js \
-            internal/web/native-v12-motion.js \
-            internal/web/native-v10-account-dialogs.html \
-            internal/web/native-v5-shell.html \
-            internal/web/native-v5-monitor.html \
-            internal/web/native-v5-routes.html \
-            internal/web/native-v5-accounts.html \
-            internal/web/native-v5-keys.html; do
-            test -s "$file"
-          done
-
-          grep -Fq -- '--canvas:#f5f5f7' internal/web/native-v5.css
-          grep -Fq -- '.grouped-surface,.grouped-section' internal/web/native-v6.css
-          grep -Fq -- '.v7-model-dialog' internal/web/native-v7.css
-          grep -Fq -- 'Native v8' internal/web/native-v8.css
-          grep -Fq -- 'Native v9' internal/web/native-v9.css
-          grep -Fq -- 'Native v10' internal/web/native-v10.css
-          grep -Fq -- 'Native v12' internal/web/native-v12.css
-          grep -Fq -- 'window.Lite2APINativeV12Motion' internal/web/native-v12-motion.js
-          grep -Fq -- '.v10-kpi-strip' internal/web/native-v10.css
-          grep -Fq -- '.v10-onboarding-body' internal/web/native-v10.css
-          grep -Fq -- 'window.Lite2APINativeV10' internal/web/native-v10.js
-          grep -Fq -- 'id="v10ProviderGrid"' internal/web/native-v10-account-dialogs.html
-          grep -Fq -- 'id="v10TestAccountBtn"' internal/web/native-v10-account-dialogs.html
-          grep -Fq -- 'id="resultOAuthImported"' internal/web/native-v10-account-dialogs.html
-          grep -Fq -- 'class="v9-route-studio"' internal/web/native-v5-routes.html
-          grep -Fq -- 'class="v10-account-workspace"' internal/web/native-v5-accounts.html
-          grep -Fq -- 'id="v10QuotaBoard"' internal/web/native-v5-monitor.html
-          grep -Fq -- 'id="v10QualityRows"' internal/web/native-v5-monitor.html
-          grep -Fq -- 'id="v6KeyList"' internal/web/native-v5-keys.html
-          grep -Fq -- 'id="v6ClientBaseURL"' internal/web/native-v5-keys.html
-
-      - name: Check JavaScript syntax
+      - name: Verify the single canonical source tree
+        shell: bash
         run: |
-          node --check internal/web/admin-core.js
-          node --check internal/web/native-v5.js
-          node --check internal/web/native-v6.js
-          node --check internal/web/native-v7.js
-          node --check internal/web/native-v9.js
-          node --check internal/web/native-v10.js
-          node --check internal/web/native-v12-motion.js
-          node --check internal/web/native-theme.js
-          node --test internal/web/admin-core.test.js
+          set -euo pipefail
+          for file in app.html app.css app-core.js app-core.test.js app.js embed.go embed_test.go; do
+            test -s "internal/web/$file"
+          done
+          test ! -e internal/web/index.html
+          test -z "$(find internal/web -maxdepth 1 -name 'native-*' -print -quit)"
+          grep -Fq 'data-ui="canonical-usage-console"' internal/web/app.html
+          grep -Fq 'function testManualAccount(' internal/web/app.js
+          grep -Fq 'function validateAndRenderRoutes(' internal/web/app.js
+          grep -Fq 'function discardRouteChanges(' internal/web/app.js
+          grep -Fq 'function showOnboardingResult(' internal/web/app.js
+          if grep -Eq 'onclick[[:space:]]*=' internal/web/app.html; then
+            echo 'Inline click handlers are forbidden' >&2
+            exit 1
+          fi
+          if grep -Rq 'MutationObserver\|window\.render\|window\.save' internal/web; then
+            echo 'Runtime patch layers or global overrides are forbidden' >&2
+            exit 1
+          fi
+
+      - name: Check JavaScript domain contracts
+        run: |
+          node --check internal/web/app-core.js
+          node --check internal/web/app.js
+          node --test internal/web/app-core.test.js

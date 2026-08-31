@@ -30,15 +30,14 @@ capture() {
 
 # This list is intentionally sequential. The production host has 1 GiB RAM;
 # parallel Chromium process trees can exhaust RAM and swap in under a minute.
-capture monitor 1440 1000 monitor
+capture usage 1440 1000 usage
 capture routes 1440 1000 routes
 capture accounts 1440 1000 accounts
-capture keys 1440 1000 keys
-capture adapters 1440 1000 adapters
-capture prompt-test 1440 1000 prompt-test
-capture monitor-mobile 390 844 monitor
+capture clients 1440 1000 clients
+capture diagnostics 1440 1000 diagnostics
+capture usage-mobile 390 844 usage
 capture routes-mobile 390 844 routes
 capture accounts-mobile 390 844 accounts
-capture keys-mobile 390 844 keys
+capture clients-mobile 390 844 clients
 
 echo "screenshots written to $OUTPUT_DIR"

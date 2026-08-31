@@ -3,325 +3,111 @@ package web
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"io"
 	"strings"
 	"testing"
 )
 
-func TestEmbeddedAdminPageStructure(t *testing.T) {
+func TestCanonicalAdminDocument(t *testing.T) {
 	page := string(IndexHTML)
 	required := []string{
-		`dataset.ui = "native-v5"`,
-		`dataset.ui = "native-v6"`,
-		`dataset.ui = "native-v7"`,
-		`window.Lite2APINativeV5`,
-		`window.Lite2APINativeV6`,
-		`window.Lite2APINativeV7`,
-		`window.Lite2APINativeV10`,
-		`v7ModelDialog`,
-		`v7-model-trigger`,
-		`v7-effort-control`,
-		`搜索模型、上游或真实模型 ID`,
-		`id="view-monitor"`,
-		`id="view-routes"`,
-		`id="view-accounts"`,
-		`id="view-keys"`,
-		`id="view-prompt-test"`,
-		`id="view-adapters"`,
-		`id="v10CallCount"`,
-		`id="v10SuccessRate"`,
-		`id="v10P95Latency"`,
-		`id="v10FailoverCount"`,
-		`id="v10QuotaBoard"`,
-		`id="v10QualityRows"`,
-		`id="v10TestAllChannels"`,
-		`id="v10ChannelUsageRows"`,
-		`id="requestSearch"`,
-		`id="requestChart"`,
-		`id="latencyChart"`,
-		`id="v5RouteList"`,
-		`class="v9-route-studio"`,
-		`id="routeRows"`,
-		`id="routeSaveBtn"`,
-		`id="routeChangeSummary"`,
-		`data-route-key=`,
-		`function routeEditorBusy(`,
-		`function flushRouteAliasDrafts(`,
-		`function routeEditorIsBusy(`,
-		`activeRouteKey`,
-		`function legacyRoutePayload(`,
-		`function invalidateLoads(`,
-		`id="oauthAccounts"`,
-		`id="oauthChannelRail"`,
-		`id="oauthAccountSearch"`,
-		`id="oauthAccountStatus"`,
-		`id="oauthRefreshBtn"`,
-		`id="oauthRoutingStrategy"`,
-		`id="oauthRoutingHint"`,
-		`id="v5SourceAccounts"`,
-		`id="v5SourceConnections"`,
-		`class="v10-account-workspace"`,
-		`id="selectAllAccounts"`,
-		`<tbody id="accounts">`,
-		`id="v10ProviderGrid"`,
-		`id="v10MethodGrid"`,
-		`id="v10OnboardingChecklist"`,
-		`id="v10TestAccountBtn"`,
-		`id="v10AccountTestResult"`,
-		`id="themeMode"`,
-		`setThemeMode`,
-		`lite2api_theme_mode`,
-		`data-theme-resolved`,
-		`theme-control`,
-		`class="v10-import-body"`,
-		`id="resultOAuthImported"`,
-		`id="resultOAuthSkipped"`,
-		`id="resultOAuthFailed"`,
-		`id="v5KeyDialog"`,
-		`id="quickCreateKeyBtn"`,
-		`data-key-preset="personal"`,
-		`data-key-preset="temporary"`,
-		`data-key-preset="service"`,
-		`id="createdKeyCard"`,
-		`id="copyCreatedKeyBtn"`,
-		`id="clientSetup"`,
-		`id="v6ClientBaseURL"`,
-		`id="v6KeyList"`,
-		`class="table-wrap v6-key-data" hidden`,
-		`id="setupBaseURL"`,
-		`id="setupModel"`,
-		`id="setupCode"`,
-		`id="keyAdvanced"`,
-		`id="quickAuthDialog"`,
-		`id="accountDialog"`,
-		`id="importDialog"`,
-		`id="exportDialog"`,
-		`id="routeJSONDialog"`,
-		`function showView(`,
-		`function renderRoutes(`,
-		`function renderMonitor(`,
-		`function renderOAuthAccounts(`,
-		`function formatImportBytes(`,
-		`formatImportBytes(file.size)`,
-		`function createQuickKey(`,
-		`function createClientKey(`,
-		`function renderClientSetup(`,
-		`function openQuickAdd(`,
-		`function startOAuth(`,
-		`function runImport(`,
-		`function runExport(`,
-		`function targetOperationalState(`,
-		`if(!rows.length)return{label:'未知',tone:'unknown'`,
-		`const UI_BUILD='2026.08.24-v14'`,
-		`window.Lite2APIAccountStatus`,
-		`window.Lite2APIRouteCompat`,
-		`window.Lite2APIRenderPerf`,
-		`window.Lite2APIAdapterClarity`,
-		`function directUpstreamModel(`,
-		`const mapped = String(mappings[requested] || "").trim();`,
-		`if (mapped) return mapped;`,
-		`function saveRoutePayload(`,
-		`function updateRouteStrategy(`,
-		`账号策略`,
-		`账号优先级`,
-		`const routeStrategies`,
-		`function setupModelsCompat(`,
-		`function renderActiveView(`,
-		`case "monitor":`,
-		`modelCatalogEntries`,
-		`return [alias, normalizeRouteCompat(route, alias)];`,
-		`account-toggle`,
-		`account-toggle:not(.account-delete)`,
-		`account-delete`,
-		`account-refresh`,
-		`account-priority`,
-		`function refreshOAuthAccounts(`,
-		`function setOAuthAccountPriority(`,
-		`function setOAuthRoutingStrategy(`,
-		`/oauth/accounts/refresh`,
-		`/oauth/accounts/priority`,
-		`/oauth/routing`,
-		`method: 'DELETE'`,
-		`/oauth/accounts/status`,
-		`.nav{grid-template-columns:repeat(4,1fr)}`,
-		`.channel-account:not([open]) .quota-strip .quota-window:nth-child(n+3)`,
-		`.key-setting-row`,
-		`Native v8`,
-		`--v8-caret`,
-		`Native v9`,
-		`--v9-radius`,
-		`.v9-route-studio`,
-		`Native v10`,
-		`.v10-kpi-strip`,
-		`.v10-usage.active`,
-		`id="v12QuotaUsed"`,
-		`id="v12OverviewSummary"`,
-		`id="v12InsightList"`,
-		`data-overview-metric="calls"`,
-		`data-overview-metric="latency"`,
-		`aria-keyshortcuts="ArrowLeft ArrowRight Home End Escape"`,
-		`data-v12-insight-target`,
-		`v12-chart-announcer`,
-		`.v10-onboarding-body`,
-		`.v10-import-body`,
-		`Native v12`,
-		`--v12-sidebar-w`,
-		`.adapter-state-grid`,
-		`scroll-snap-type:x proximity`,
-		`flex:0 0 64px`,
-		`window.Lite2APINativeV12Motion`,
-		`function syncActiveNav(`,
-		`showViewWithNativeNavSync`,
-		`function monotonePath(`,
-		`prefers-reduced-motion: reduce`,
-		`const requestedView=location.hash.slice(1)`,
-		`data-view="adapters"`,
-		`data-view="prompt-test"`,
-		`v10TestAccountConnection`,
-		`v10TestAllChannels`,
-		`entry.tags.add("直连")`,
-		`目录 / 安装`,
-		`运行 / 鉴权`,
-		`承载流量`,
-		`const reasoningOrder=['auto','none','minimal','low','medium','high','max','xhigh','ultra']`,
-		`ultra:'Ultra'`,
-		`来自趋势桶`,
-		`进程累计 `,
-		`请求明细来自当前保留样本`,
-		`有成功记录`,
+		`data-ui="canonical-usage-console"`, `rel="icon"`, `id="view-usage"`, `id="view-accounts"`,
+		`id="view-routes"`, `id="view-clients"`, `id="quotaBoard"`, `id="usageChart"`,
+		`id="qualityRows"`, `id="testAllChannels"`, `id="openChannelChatButton"`, `id="addAccountDialog"`,
+		`id="manualAccountDialog"`, `id="connectionTestSteps"`, `id="importDialog"`,
+		`id="channelChatDialog"`, `id="channelChatMessages"`, `id="channelChatForm"`,
+		`id="onboardingResultDialog"`, `id="routeCreateDialog"`, `id="discardRoutesButton"`,
+		`id="routeEditor"`, `id="clientConfig"`, `globalThis.Lite2APIAppCore`,
+		`function runQuality(`, `function testManualAccount(`, `function runImport(`,
+		`function startOAuth(`, `function saveRoutes(`, `function createKey(`,
+		`function finishCredentialOnboarding(`, `function validateAndRenderRoutes(`,
+		`function connectionTestRequired(`, `function deleteSelectedRoute(`,
+		`function openChannelChat(`, `function sendChannelChat(`, `function channelChatResponse(`,
+		`/accounts/test`, `/accounts/import`, `/prompt-test`, `/oauth/start`,
+		`data-quick-oauth="codex"`, `测试、保存并建路由`, `创建并启用`,
+		`关键连接信息变化后必须重新直测`, `固定命中指定连接，不经过 fallback`, `渠道聊天测试`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
-			t.Errorf("embedded admin page is missing %q", value)
+			t.Errorf("canonical admin page is missing %q", value)
 		}
 	}
-
 	forbidden := []string{
-		"Lite2API Quiet Control v3",
-		"window.Lite2APIQuietControl",
-		"Apple Simple 4.0",
-		"window.Lite2APIAppleSimple",
-		"UI build 2026.08.16-r11",
-		`class="route-chain-explain"`,
-		`id="token"`,
-		`placeholder="管理员 Token"`,
-		`seenBuild===UI_BUILD&&`,
-		`account-toggle account-delete`,
-		`function deleteOAuthAccount(encodedID`,
-		`picker.activeRoute = select.closest(".route-card")?.querySelector(".route-alias")`,
+		"native-v5", "native-v6", "native-v7", "native-v8", "native-v9", "native-v10", "native-v12",
+		"class=\"app-shell native-shell\"", "/*__APP_CSS__*/", "/*__APP_JS__*/", "onclick=\"",
+		"MutationObserver", "window.selectAccountTemplate", "window.renderRoutes",
+		"class=\"segmented account-tabs\"", "创建路由草稿",
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {
-			t.Errorf("obsolete or unsafe UI surface leaked into native v10: %q", value)
+			t.Errorf("obsolete layered UI leaked into canonical application: %q", value)
 		}
 	}
-
-	headEnd := strings.Index(page, "</head>")
-	if headEnd < 0 || strings.LastIndex(page, "</style>") > headEnd {
-		t.Error("all styles must remain inside the document head")
+	if strings.Count(page, "<style>") != 1 || strings.Count(page, "</style>") != 1 {
+		t.Fatal("canonical application must contain one style element")
 	}
-	if strings.Count(page, `<style>`) != 1 || strings.Count(page, `</style>`) != 1 {
-		t.Error("native v10 must expose one final style element")
+	if strings.Count(page, "<script>") != 1 || strings.Count(page, "</script>") != 1 {
+		t.Fatal("canonical application must contain one script element")
 	}
-	if strings.Count(page, "</html>") != 1 || !strings.HasSuffix(strings.TrimSpace(page), "</body></html>") {
-		t.Error("admin page must have exactly one final document closing tag")
-	}
-	if strings.Count(page, `function formatBytes(`) != 1 {
-		t.Error("admin page must avoid duplicate global formatBytes definitions")
-	}
-	if strings.Contains(page, `Promise.all([api('/state'),api('/client-keys'),api('/adapters'),oauthRequest])`) {
-		t.Error("inactive pages must not poll all secondary resources every five seconds")
-	}
-	if strings.Contains(page, `models:[],rpm:0,concurrency:0,expires_at:''`) || strings.Contains(page, `不限速率 · 永不过期`) {
-		t.Error("quick key creation must not default to unlimited, non-expiring access")
-	}
-	if strings.Contains(page, `for(const account of compatible){`) {
-		t.Error("route intent changes must not silently append every compatible upstream")
+	if !strings.HasSuffix(strings.TrimSpace(page), "</html>") {
+		t.Fatal("canonical document must end with </html>")
 	}
 }
 
-func TestEmbeddedAdminSafetyAndLifecycleContracts(t *testing.T) {
-	page := string(IndexHTML)
-	required := []string{
-		`globalThis.Lite2APIAdminCore`,
-		`function establishAdminSession(`,
-		`result.response.status===401||(`,
-		`invalid_csrf_token`,
-		`timeoutMs=15000`,
-		`oauthRuntime={timer:0,generation:0`,
-		`function stopOAuthPolling(`,
-		`oauthRuntime.controller?.abort()`,
-		`function accountDeleteImpact(`,
-		`AdminCore.accountDeleteImpact(`,
-		`function importFingerprint(`,
-		`fingerprint!==importRuntime.previewFingerprint`,
-		`id="applyImportBtn" type="button" class="primary" onclick="runImport(false)" disabled`,
-		`AdminCore.importRequest(`,
-		`function clearCreatedSecret(`,
-		`setTimeout(()=>clearCreatedSecret(false),300000)`,
-		`renderAccountsPreservingUI`,
-		`renderOAuthViewPreservingUI`,
-		`AdminCore.reconcileSelection(`,
-		`AdminCore.promptBudgetStatus(`,
-		`data-quality-test`,
-		`仅显示最新原始桶，不是时间范围 P95`,
-		`P95 不做错误合并`,
-		`oauthRoutingAttempted = false`,
-	}
-	for _, value := range required {
-		if !strings.Contains(page, value) {
-			t.Errorf("embedded admin page is missing safety contract %q", value)
+func TestOfficialModelIconsAreEmbeddedUnchanged(t *testing.T) {
+	for _, asset := range officialIconAssets {
+		if bytes.Contains(IndexHTML, []byte(asset.token)) {
+			t.Fatalf("official icon placeholder leaked into page: %s", asset.token)
 		}
-	}
-
-	forbidden := []string{
-		`onclick="v10TestChannel(`,
-		`v10TestChannel('${encodeURIComponent(account.id)}')`,
-		`group.p95.reduce(`,
-		`group.p95.push(`,
-		`trendRequestBusy`,
-		`lastCreatedSecret`,
-		`build.textContent = "UI build 2026.08.18-v5"`,
-		`build.textContent = "UI build 2026.08.18-v6"`,
-		`build.textContent = "UI build 2026.08.18-v7"`,
-		`<main class="v10-method-column">`,
-		`<main class="v10-config-column">`,
-	}
-	for _, value := range forbidden {
-		if strings.Contains(page, value) {
-			t.Errorf("unsafe or stale admin behavior remains in embedded page: %q", value)
+		data, err := modelIconFS.ReadFile(asset.path)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-
-	core := strings.Index(page, `function installAdminCore`)
-	app := strings.Index(page, `const UI_BUILD='2026.08.24-v14'`)
-	if core < 0 || app < 0 || core > app {
-		t.Fatal("admin core contracts must be installed before the application controller")
+		encoded := base64.StdEncoding.EncodeToString(data)
+		if !bytes.Contains(IndexHTML, []byte(encoded)) {
+			t.Errorf("official icon was not embedded byte-for-byte: %s", asset.path)
+		}
 	}
 }
 
-func TestNativeLayoutIsCompileTimeMarkup(t *testing.T) {
-	page := string(IndexHTML)
-	master := strings.Index(page, `id="v5RouteList"`)
-	detail := strings.Index(page, `id="routeRows"`)
-	if master < 0 || detail < 0 || master > detail {
-		t.Fatal("route master list must exist before the route detail in final HTML")
+func TestBuildAppReplacesOnlyCanonicalSlots(t *testing.T) {
+	html := []byte(`<html><head><style>/*__APP_CSS__*/</style></head><body><script>/*__APP_JS__*/</script></body></html>`)
+	result := buildApp(html, []byte("body{color:black}"), []byte("core()\nboot()"))
+	for _, required := range [][]byte{[]byte("body{color:black}"), []byte("core()"), []byte("boot()")} {
+		if !bytes.Contains(result, required) {
+			t.Fatalf("canonical slot replacement lost %q", required)
+		}
 	}
-	if !strings.Contains(page, `<div id="metrics" class="metric-grid upstream-metrics">`) {
-		t.Fatal("account quota metrics must remain visible in the primary account layout")
-	}
-	if !strings.Contains(page, `<dialog id="v5KeyDialog"`) {
-		t.Fatal("key creation must remain progressive disclosure")
-	}
-	if !strings.Contains(page, `id="v6KeyList"`) || !strings.Contains(page, `id="v6ClientBaseURL"`) {
-		t.Fatal("client page must expose the endpoint and settings-like key list")
-	}
-	if !strings.Contains(page, `id="v10ProviderGrid"`) || !strings.Contains(page, `id="v10TestAccountBtn"`) {
-		t.Fatal("account onboarding must expose provider selection and pre-save testing")
+	if bytes.Index(result, []byte("core()")) > bytes.Index(result, []byte("boot()")) {
+		t.Fatal("domain core must load before the application controller")
 	}
 }
 
-func TestEmbeddedAdminPageGzipMatchesHTML(t *testing.T) {
+func TestBuildAppRejectsAmbiguousSlots(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("ambiguous canonical slots must fail closed")
+		}
+	}()
+	buildApp([]byte(`/*__APP_CSS__*/`), nil, nil)
+}
+
+func TestCanonicalScriptCSPHashMatchesDocument(t *testing.T) {
+	startMarker := []byte("<script>")
+	endMarker := []byte("</script>")
+	start := bytes.Index(IndexHTML, startMarker)
+	end := bytes.Index(IndexHTML, endMarker)
+	if start < 0 || end <= start {
+		t.Fatal("canonical script element is missing")
+	}
+	script := IndexHTML[start+len(startMarker) : end]
+	if got := cspHash(script); got != ScriptCSPSource {
+		t.Fatalf("script CSP source does not match embedded document: got %s want %s", got, ScriptCSPSource)
+	}
+}
+
+func TestCanonicalGzipMatchesHTML(t *testing.T) {
 	if len(IndexHTMLGzip) == 0 || len(IndexHTMLGzip) >= len(IndexHTML) {
 		t.Fatalf("precompressed admin page size=%d original=%d", len(IndexHTMLGzip), len(IndexHTML))
 	}
@@ -334,47 +120,7 @@ func TestEmbeddedAdminPageGzipMatchesHTML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(IndexHTML) {
-		t.Fatal("precompressed admin page must decompress to IndexHTML")
-	}
-}
-
-func TestReplaceRange(t *testing.T) {
-	base := []byte("before<start>old<end>after")
-	got := string(replaceRange(base, []byte("<start>"), []byte("<end>"), []byte("new")))
-	if got != "beforenew\n<end>after" {
-		t.Fatalf("unexpected replacement: %q", got)
-	}
-	t.Run("missing marker fails the build", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("missing anchors must fail the admin page build")
-			}
-		}()
-		_ = replaceRange(base, []byte("missing"), []byte("<end>"), []byte("new"))
-	})
-}
-
-func TestReplaceOnceRequiresUniqueMarker(t *testing.T) {
-	for _, base := range []string{"missing", "x marker marker y"} {
-		t.Run(base, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Fatal("non-unique replacement marker must fail the build")
-				}
-			}()
-			_ = replaceOnce([]byte(base), []byte("marker"), []byte("new"))
-		})
-	}
-}
-
-func TestBuildIndexHTMLReplacesStyleAndInjectsBehavior(t *testing.T) {
-	base := []byte("<html><head><style>old</style></head><body><main>stable</main></body></html>")
-	got := string(buildIndexHTML(base, []byte("new"), []byte("enhance()")))
-	if strings.Contains(got, "old") || !strings.Contains(got, "<style>\nnew\n</style>") {
-		t.Fatalf("canonical style replacement failed: %s", got)
-	}
-	if !strings.Contains(got, "<script>\nenhance()\n</script>\n</body>") {
-		t.Fatalf("behavior injection failed: %s", got)
+	if !bytes.Equal(data, IndexHTML) {
+		t.Fatal("precompressed canonical page must decompress to IndexHTML")
 	}
 }
