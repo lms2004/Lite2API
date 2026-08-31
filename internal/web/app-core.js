@@ -27,7 +27,8 @@
     if (model.includes('gpt-5.4-mini')) return 'gpt-5-4-mini';
     if (model.includes('gpt-5.5')) return 'gpt-5-5';
     if (model.includes('gpt-5.4')) return 'gpt-5-4';
-    if (model.includes('gpt-5.3-codex') || model === 'codex-auto-review') return 'gpt-5-3-codex';
+    if (model.includes('gpt-5.3-codex')) return 'gpt-5-3-codex';
+    if (model === 'codex-auto-review') return 'openai';
     if (/claude|opus|sonnet|haiku|fable|mythos/.test(model)) return 'claude';
     if (/gemini|nano[-_ ]?banana/.test(model)) return 'gemini';
     if (model === 'antigravity') return 'antigravity';

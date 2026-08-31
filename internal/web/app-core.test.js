@@ -85,7 +85,7 @@ test('official model icon mapping follows effective upstream models and aliases'
     'gpt-5.4': 'gpt-5-4',
     'gpt-5.4-mini': 'gpt-5-4-mini',
     'gpt-5.3-codex-spark': 'gpt-5-3-codex',
-    'codex-auto-review': 'gpt-5-3-codex',
+    'codex-auto-review': 'openai',
     'gpt-image-2': 'gpt-image-2',
     'antigravity/gpt-oss-120b-medium': 'gpt-oss-120b',
     'claude-code/claude-opus-4-6': 'claude',
