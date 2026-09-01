@@ -55,6 +55,28 @@ func TestCanonicalAdminDocument(t *testing.T) {
 	}
 }
 
+func TestCanonicalUITrustAndAccessibility(t *testing.T) {
+	page := string(IndexHTML)
+	required := []string{
+		`data-range="3d"`, `aria-pressed="true"`, `aria-current="page"`,
+		`id="oauthServiceState"`, `id="retryOAuthAccounts"`, `function oauthErrorPresentation(`,
+		`id="chartA11ySummary"`, `id="chartDataRows"`, `function chartKeyboard(`,
+		`class="clean-table responsive-table"`, `aria-label="搜索最近请求"`,
+		`function usageEvidence(`, "request(`/trends?range=${APP.range}`",
+	}
+	for _, value := range required {
+		if !strings.Contains(page, value) {
+			t.Errorf("canonical UI trust/accessibility contract is missing %q", value)
+		}
+	}
+	forbidden := []string{`data-range="30d"`, `APP.range==='30d'`, `role="tabpanel"`}
+	for _, value := range forbidden {
+		if strings.Contains(page, value) {
+			t.Errorf("canonical UI still contains obsolete or misleading markup %q", value)
+		}
+	}
+}
+
 func TestOfficialModelIconsAreEmbeddedUnchanged(t *testing.T) {
 	for _, asset := range officialIconAssets {
 		if bytes.Contains(IndexHTML, []byte(asset.token)) {

@@ -25,7 +25,7 @@
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark">L2</div><div><strong>Lite2API</strong><span>Access console</span></div></div>
       <nav class="primary-nav" aria-label="主导航">
-        <button class="active" type="button" data-view="usage"><span class="nav-symbol">◫</span><span>使用</span></button>
+        <button class="active" type="button" data-view="usage" aria-current="page"><span class="nav-symbol">◫</span><span>使用</span></button>
         <button type="button" data-view="accounts"><span class="nav-symbol">◎</span><span>账号</span></button>
         <button type="button" data-view="routes"><span class="nav-symbol">⌁</span><span>路由</span></button>
         <button type="button" data-view="clients"><span class="nav-symbol">⌘</span><span>客户端</span></button>
@@ -46,9 +46,9 @@
         <header class="page-heading usage-heading">
           <div><span class="eyebrow">Usage</span><h1>使用</h1><p id="usageHeadline">正在读取真实额度、调用记录与响应速度。</p></div>
           <div class="range-control" role="group" aria-label="时间范围">
-            <button type="button" data-range="24h" class="active">24 小时</button>
-            <button type="button" data-range="7d">7 天</button>
-            <button type="button" data-range="30d">30 天</button>
+            <button type="button" data-range="24h" class="active" aria-pressed="true">24 小时</button>
+            <button type="button" data-range="3d" aria-pressed="false">3 天</button>
+            <button type="button" data-range="7d" aria-pressed="false">7 天</button>
           </div>
         </header>
 
@@ -56,7 +56,7 @@
           <article><span>最紧张额度</span><strong id="quotaKpi">—</strong><small id="quotaKpiNote">等待上游观测</small></article>
           <article><span>调用次数</span><strong id="callsKpi">—</strong><small id="callsKpiNote">当前时间范围</small></article>
           <article><span>成功率</span><strong id="successKpi">—</strong><small id="successKpiNote">没有真实请求</small></article>
-          <article><span>P95 响应耗时</span><strong id="latencyKpi">—</strong><small id="latencyKpiNote">没有延迟样本</small></article>
+          <article><span>最近样本 P95</span><strong id="latencyKpi">—</strong><small id="latencyKpiNote">没有延迟样本</small></article>
         </section>
 
         <section class="trend-section">
@@ -74,9 +74,10 @@
             </div>
           </div>
           <div class="chart-layout">
-            <div class="chart-stage"><canvas id="usageChart" role="img" aria-label="使用变化曲线"></canvas><div id="chartTooltip" class="chart-tooltip" hidden></div></div>
+            <div class="chart-stage"><canvas id="usageChart" role="img" tabindex="0" aria-label="使用变化曲线" aria-describedby="chartA11ySummary" aria-keyshortcuts="ArrowLeft ArrowRight Home End"></canvas><div id="chartTooltip" class="chart-tooltip" hidden></div><p id="chartA11ySummary" class="sr-only" aria-live="polite"></p></div>
             <aside id="usageInsights" class="insight-list"><div class="empty-copy">积累真实请求后生成结论。</div></aside>
           </div>
+          <details class="chart-data-disclosure"><summary><span>查看图表数据</span><small id="chartDataSummary">0 个数据点</small></summary><div class="table-scroll"><table class="clean-table chart-data-table"><caption id="chartDataCaption">使用变化曲线数据</caption><thead><tr><th scope="col">时间</th><th scope="col">指标</th><th scope="col">样本</th></tr></thead><tbody id="chartDataRows"></tbody></table></div></details>
         </section>
 
         <section class="section-block">
@@ -86,13 +87,13 @@
 
         <section class="section-block quality-section">
           <div class="section-head"><div><h2>渠道质量</h2><p>每次连续直测 3 轮，固定命中指定连接，不经过 fallback。</p></div><div class="heading-actions"><button id="openChannelChatButton" class="primary" type="button">渠道聊天测试</button><button id="testAllChannels" class="secondary" type="button">测试全部渠道</button></div></div>
-          <div class="table-scroll"><table class="clean-table"><thead><tr><th>渠道</th><th>最近使用</th><th>成功率</th><th>平均 / P95</th><th>三轮直测</th><th>质量结论</th><th></th></tr></thead><tbody id="qualityRows"></tbody></table></div>
+          <div class="table-scroll"><table class="clean-table responsive-table"><caption class="sr-only">渠道质量与三轮直测结果</caption><thead><tr><th scope="col">渠道</th><th scope="col">最近使用</th><th scope="col">成功率</th><th scope="col">平均 / P95</th><th scope="col">三轮直测</th><th scope="col">质量结论</th><th scope="col">操作</th></tr></thead><tbody id="qualityRows"></tbody></table></div>
         </section>
 
         <details class="request-disclosure">
           <summary><span>最近请求证据</span><small id="requestSummary">0 条</small></summary>
-          <div class="request-toolbar"><input id="requestSearch" placeholder="搜索模型、账号或错误"><select id="requestStatus"><option value="">全部结果</option><option value="success">成功</option><option value="error">失败</option></select></div>
-          <div class="table-scroll"><table class="clean-table request-table"><thead><tr><th>时间</th><th>客户端模型</th><th>真实上游</th><th>Token</th><th>结果</th><th>耗时</th><th>错误</th></tr></thead><tbody id="requestRows"></tbody></table></div>
+          <div class="request-toolbar"><input id="requestSearch" aria-label="搜索最近请求" placeholder="搜索模型、账号或错误"><select id="requestStatus" aria-label="筛选请求结果"><option value="">全部结果</option><option value="success">成功</option><option value="error">失败</option></select></div>
+          <div class="table-scroll"><table class="clean-table request-table responsive-table"><caption class="sr-only">最近请求证据</caption><thead><tr><th scope="col">时间</th><th scope="col">客户端模型</th><th scope="col">真实上游</th><th scope="col">Token</th><th scope="col">结果</th><th scope="col">耗时</th><th scope="col">错误</th></tr></thead><tbody id="requestRows"></tbody></table></div>
         </details>
       </section>
 
@@ -112,8 +113,9 @@
         </section>
         <div id="sourceOverview" class="source-overview" aria-label="上游拓扑概览"></div>
 
-        <section id="authAccountPane" class="account-pane" role="tabpanel">
-          <div class="section-head account-section-head"><div><h2>认证账号</h2><p>新账号加入后会自动参与现有账号池，无需重复配置模型路由。</p></div></div>
+        <section id="authAccountPane" class="account-pane" aria-labelledby="authAccountTitle">
+          <div class="section-head account-section-head"><div><h2 id="authAccountTitle">认证账号</h2><p>新账号加入后会自动参与现有账号池，无需重复配置模型路由。</p></div></div>
+          <div id="oauthServiceState" class="service-state" role="alert" hidden><div><strong id="oauthErrorTitle">认证账号暂时不可读</strong><p id="oauthErrorMessage">其他控制台功能仍可继续使用。</p><details><summary>技术详情</summary><code id="oauthErrorTechnical"></code></details></div><button id="retryOAuthAccounts" class="secondary" type="button">重新读取</button></div>
           <details id="poolSettings" class="compact-settings">
             <summary><span>账号池设置</span><small>选号策略、优先值与手动刷新</small></summary>
             <div class="pool-policy">
@@ -121,14 +123,14 @@
               <div class="heading-actions"><label>同级账号<select id="oauthRoutingStrategy" disabled><option value="round-robin">轮询</option><option value="fill-first">固定首选</option></select></label><button id="refreshOAuthAccounts" class="secondary" type="button">刷新全部</button></div>
             </div>
           </details>
-          <div id="authAccountToolbar" class="list-toolbar"><input id="authAccountSearch" placeholder="搜索账号、渠道或套餐"><select id="authAccountStatus"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
+          <div id="authAccountToolbar" class="list-toolbar"><input id="authAccountSearch" aria-label="搜索认证账号" placeholder="搜索账号、渠道或套餐"><select id="authAccountStatus" aria-label="筛选认证账号状态"><option value="">全部状态</option><option value="ready">可用</option><option value="attention">需关注</option><option value="quota">额度预警</option></select></div>
           <div id="authAccounts" class="account-list"><div class="empty-copy">正在读取认证账号</div></div>
         </section>
 
-        <section id="connectionPane" class="account-pane" role="tabpanel">
-          <div class="section-head account-section-head"><div><h2>API 连接</h2><p>仅在使用 API Key 或本机适配器时管理；日常添加 OAuth 账号不需要进入这里。</p></div><button type="button" class="secondary" data-quick-manual="custom">添加 API 连接</button></div>
-          <div id="connectionToolbar" class="list-toolbar"><input id="connectionSearch" placeholder="搜索名称、ID、地址或模型"><select id="connectionStatus"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select></div>
-          <div class="table-scroll"><table class="clean-table connection-table"><thead><tr><th>连接</th><th>地址 / 协议</th><th>模型能力</th><th>路由使用</th><th>调用</th><th>速度</th><th>状态</th><th></th></tr></thead><tbody id="connectionRows"></tbody></table></div>
+        <section id="connectionPane" class="account-pane" aria-labelledby="connectionTitle">
+          <div class="section-head account-section-head"><div><h2 id="connectionTitle">API 连接</h2><p>仅在使用 API Key 或本机适配器时管理；日常添加 OAuth 账号不需要进入这里。</p></div><button type="button" class="secondary" data-quick-manual="custom">添加 API 连接</button></div>
+          <div id="connectionToolbar" class="list-toolbar"><input id="connectionSearch" aria-label="搜索 API 连接" placeholder="搜索名称、ID、地址或模型"><select id="connectionStatus" aria-label="筛选 API 连接状态"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select></div>
+          <div class="table-scroll"><table class="clean-table connection-table responsive-table"><caption class="sr-only">API 连接状态与操作</caption><thead><tr><th scope="col">连接</th><th scope="col">地址 / 协议</th><th scope="col">模型能力</th><th scope="col">路由使用</th><th scope="col">调用</th><th scope="col">速度</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody id="connectionRows"></tbody></table></div>
         </section>
       </section>
 
@@ -136,13 +138,13 @@
         <header class="page-heading"><div><span class="eyebrow">Routing</span><h1>模型路由</h1><p>选择连接和模型即可创建并立即启用；高级调度设置按需展开。</p></div><div class="heading-actions"><span id="routeStatus" class="edit-status" hidden>已同步</span><button id="discardRoutesButton" class="secondary" type="button" disabled hidden>放弃更改</button><button id="addRouteButton" class="primary" type="button">添加路由</button><button id="saveRoutesButton" class="primary" type="button" disabled hidden>保存修改</button></div></header>
         <div id="routeChangeBar" class="change-bar" hidden><div><strong>存在未保存的路由更改</strong><span id="routeChangeSummary"></span></div><button id="reloadRoutesButton" class="text-button" type="button" hidden>服务器配置已变化，重新载入</button></div>
         <details class="route-reuse-tip"><summary>多入口与 fallback</summary><p>不同客户端入口用“复制路由”；容灾、轮询或负载分配则在同一路由里多选上游。</p></details>
-        <div class="route-workspace"><aside><div class="rail-title">客户端别名</div><div id="routeList" class="route-list"></div></aside><section id="routeEditor" class="route-editor"><div class="empty-copy">选择一条路由进行编辑</div></section></div>
+        <div class="route-workspace"><aside aria-label="路由选择"><div class="rail-title">客户端别名</div><div id="routeList" class="route-list"></div></aside><section id="routeEditor" class="route-editor"><div class="empty-copy">选择一条路由进行编辑</div></section></div>
       </section>
 
       <section id="view-clients" class="view">
         <header class="page-heading"><div><span class="eyebrow">Clients</span><h1>客户端</h1><p>创建安全 Key，并复制 Claude Code、Codex、OpenAI SDK 或通用兼容配置。</p></div><button id="openCreateKey" class="primary" type="button">创建 Key</button></header>
         <section id="createdSecret" class="secret-banner" hidden><div><strong>新 Key 仅显示一次</strong><span id="createdSecretName"></span></div><div><input id="createdSecretValue" readonly><button id="copyCreatedSecret" class="primary" type="button">复制</button><button id="verifyCreatedSecret" class="secondary" type="button">验证</button></div><p id="createdSecretResult"></p></section>
-        <div class="client-grid"><section class="client-setup"><div class="section-head"><div><h2>接入配置</h2><p>选择客户端与默认模型，生成可直接复制的配置。</p></div></div><div class="client-chooser" id="clientChooser"><button class="active" data-client="claude">Claude Code</button><button data-client="codex">Codex CLI</button><button data-client="openai">OpenAI SDK</button><button data-client="curl">通用 cURL</button></div><label>默认模型<select id="clientModel"></select></label><div class="code-block"><button id="copyClientConfig" type="button">复制全部</button><pre id="clientConfig"></pre></div></section><section><div class="section-head"><div><h2>已创建 Key</h2><p>明文不会再次显示。</p></div></div><div id="clientKeyRows" class="key-list"></div></section></div>
+        <div class="client-grid"><section class="client-setup"><div class="section-head"><div><h2>接入配置</h2><p>选择客户端与默认模型，生成可直接复制的配置。</p></div></div><div class="client-chooser" id="clientChooser" role="group" aria-label="客户端类型"><button class="active" type="button" data-client="claude" aria-pressed="true">Claude Code</button><button type="button" data-client="codex" aria-pressed="false">Codex CLI</button><button type="button" data-client="openai" aria-pressed="false">OpenAI SDK</button><button type="button" data-client="curl" aria-pressed="false">通用 cURL</button></div><label>默认模型<select id="clientModel"></select></label><div class="code-block"><button id="copyClientConfig" type="button">复制全部</button><pre id="clientConfig"></pre></div></section><section><div class="section-head"><div><h2>已创建 Key</h2><p>明文不会再次显示。</p></div></div><div id="clientKeyRows" class="key-list"></div></section></div>
       </section>
 
       <section id="view-diagnostics" class="view">
@@ -155,7 +157,7 @@
   <dialog id="addAccountDialog" class="onboarding-dialog" aria-labelledby="onboardingTitle">
     <div class="dialog-shell">
       <header class="dialog-head"><div><span class="eyebrow">Other methods</span><h2 id="onboardingTitle">其他添加方式</h2><p id="onboardingSubtitle">用于 API Key、Setup Token、本机适配器和不常用平台。</p></div><button class="close-button" data-close-dialog="addAccountDialog" type="button" aria-label="关闭">×</button></header>
-      <div class="onboarding-progress" aria-label="接入进度"><span class="active" data-onboarding-progress="provider"><b>1</b>选择平台</span><span data-onboarding-progress="method"><b>2</b>接入方式</span><span data-onboarding-progress="action"><b>3</b>完成接入</span></div>
+      <div class="onboarding-progress" aria-label="接入进度"><span class="active" data-onboarding-progress="provider" aria-current="step"><b>1</b>选择平台</span><span data-onboarding-progress="method"><b>2</b>接入方式</span><span data-onboarding-progress="action"><b>3</b>完成接入</span></div>
       <div class="onboarding-stage">
         <section id="providerStep"><div class="stage-heading"><h3>你要接入哪个平台？</h3><p>后续只展示该平台真正支持的认证和连接方式。</p></div><div id="providerList" class="provider-list"></div></section>
         <section id="methodStep" hidden><div class="stage-heading"><span class="eyebrow" id="providerEyebrow">Selected provider</span><h3 id="providerName"></h3><p id="providerSummary" class="provider-summary"></p></div><div id="providerMethods" class="method-list"></div><div id="providerChecklist" class="check-list"></div></section>
@@ -207,9 +209,9 @@
 
   <dialog id="importDialog" class="import-dialog" aria-labelledby="importTitle"><div class="dialog-shell"><header class="dialog-head"><div><span class="eyebrow">Dry-run import</span><h2 id="importTitle">批量导入</h2><p>先解析和预检查，确认每条账号的预计操作后才写入。</p></div><button class="close-button" data-close-dialog="importDialog" type="button" aria-label="关闭">×</button></header><div class="import-layout"><section><div class="step-title"><b>1</b><span>选择文件</span></div><label id="importDropzone" class="dropzone"><strong>拖入或选择 JSON 文件</strong><span>Lite2API、Sub2API 账号数据或单账号 JSON</span><input id="importFilesInput" type="file" accept=".json,application/json" multiple hidden></label><div id="importFileList" class="file-list"></div></section><section><div class="step-title"><b>2</b><span>导入策略</span></div><label>重复账号<select id="importMode"><option value="skip">跳过已有账号</option><option value="upsert">覆盖配置并保留空缺密钥</option></select></label><div class="security-note">文件可能包含敏感凭据。解析在浏览器内完成，只通过已认证管理接口提交。</div><button id="downloadImportTemplate" class="text-button" type="button">下载标准模板</button></section><section><div class="step-title"><b>3</b><span>预检查结果</span></div><div id="importTotals" class="import-totals"><span>等待预检查</span></div><div id="importPreviewRows" class="import-preview"><div class="empty-copy">选择文件后执行预检查</div></div></section></div><footer class="dialog-foot"><button class="secondary" data-close-dialog="importDialog" type="button">取消</button><button id="previewImport" class="secondary" type="button">预检查</button><button id="applyImport" class="primary" type="button" disabled>确认导入</button></footer></div></dialog>
 
-  <dialog id="createKeyDialog" class="small-dialog" aria-labelledby="createKeyTitle"><form id="createKeyForm" class="dialog-shell"><header class="dialog-head"><div><span class="eyebrow">Client key</span><h2 id="createKeyTitle">创建 API Key</h2><p>默认使用有期限、有速率与并发上限的安全预设。</p></div><button class="close-button" data-close-dialog="createKeyDialog" type="button" aria-label="关闭">×</button></header><div class="key-form"><div class="segmented" id="keyPreset"><button class="active" type="button" data-key-preset="personal">个人开发</button><button type="button" data-key-preset="temporary">临时测试</button><button type="button" data-key-preset="service">可信服务</button></div><label>名称<input name="name" placeholder="自动生成"></label><label>允许模型<input name="models" placeholder="留空表示全部路由"></label><div class="form-grid three"><label>RPM<input name="rpm" type="number" min="0" value="120"></label><label>并发<input name="concurrency" type="number" min="0" value="2"></label><label>有效天数<input name="days" type="number" min="1" value="30"></label></div></div><footer class="dialog-foot"><button class="secondary" data-close-dialog="createKeyDialog" type="button">取消</button><button class="primary" type="submit">创建并显示一次</button></footer></form></dialog>
+  <dialog id="createKeyDialog" class="small-dialog" aria-labelledby="createKeyTitle"><form id="createKeyForm" class="dialog-shell"><header class="dialog-head"><div><span class="eyebrow">Client key</span><h2 id="createKeyTitle">创建 API Key</h2><p>默认使用有期限、有速率与并发上限的安全预设。</p></div><button class="close-button" data-close-dialog="createKeyDialog" type="button" aria-label="关闭">×</button></header><div class="key-form"><div class="segmented" id="keyPreset" role="group" aria-label="Key 安全预设"><button class="active" type="button" data-key-preset="personal" aria-pressed="true">个人开发</button><button type="button" data-key-preset="temporary" aria-pressed="false">临时测试</button><button type="button" data-key-preset="service" aria-pressed="false">可信服务</button></div><label>名称<input name="name" placeholder="自动生成"></label><label>允许模型<input name="models" placeholder="留空表示全部路由"></label><div class="form-grid three"><label>RPM<input name="rpm" type="number" min="0" value="120"></label><label>并发<input name="concurrency" type="number" min="0" value="2"></label><label>有效天数<input name="days" type="number" min="1" value="30"></label></div></div><footer class="dialog-foot"><button class="secondary" data-close-dialog="createKeyDialog" type="button">取消</button><button class="primary" type="submit">创建并显示一次</button></footer></form></dialog>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script>/*__APP_JS__*/</script>
 </body>
 </html>
