@@ -568,7 +568,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		bodyLease.Release()
 	}
 	var last *bufferedResponse
-	var lastAccountID, lastUpstreamModel, lastReasoningEffort string
+	var lastAccountID, lastCredentialID, lastUpstreamModel, lastReasoningEffort string
 	maxAttempts := min(state.cfg.Server.MaxFailoverAttempts, len(state.cfg.Accounts))
 	maxAttempts = state.scheduler.AttemptLimit(model, maxAttempts)
 	if maxAttempts <= 0 {
@@ -588,6 +588,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 				releaseRetainedBody()
 				_ = last.write(w, state.cfg.Server.StreamIdleTimeout.Duration)
 				record.AccountID = lastAccountID
+				record.CredentialID = lastCredentialID
 				record.UpstreamModel = lastUpstreamModel
 				record.ReasoningEffort = lastReasoningEffort
 				record.Status = last.status
@@ -606,6 +607,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		}
 		excluded[selection.Key] = struct{}{}
 		record.AccountID = selection.Account.Config.ID
+		record.CredentialID = selection.Credential
 		record.UpstreamModel = selection.Model
 		record.ReasoningEffort = selection.ReasoningEffort
 		rewriteReserved := requestRewriteRequired(body, model, selection.Model, selection.ReasoningEffort)
@@ -643,8 +645,8 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			bodyLease.ShrinkTo(baseBodyReservation + int64(len(attemptBody)))
 		}
 		attemptStart := time.Now()
-		attemptHealth := selection.Account.beginAttempt(operation, selection.Model)
-		resp, err := g.doUpstream(r.Context(), state, selection.Account, r, attemptBody, requestID)
+		attemptHealth := selection.Account.beginAttempt(operation, selection.Model, selection.Credential)
+		resp, err := g.doUpstream(r.Context(), state, selection.Account, r, attemptBody, requestID, selection.Credential)
 		bodyLease.ShrinkTo(baseBodyReservation)
 		if err != nil {
 			selection.Release()
@@ -677,6 +679,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 				releaseRetainedBody()
 				_ = last.write(w, state.cfg.Server.StreamIdleTimeout.Duration)
 				record.AccountID = lastAccountID
+				record.CredentialID = lastCredentialID
 				record.UpstreamModel = lastUpstreamModel
 				record.ReasoningEffort = lastReasoningEffort
 				record.Status = last.status
@@ -691,6 +694,9 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			writeError(http.StatusBadGateway, "upstream request failed", "upstream_error", "upstream_error")
 			record.Status = http.StatusBadGateway
 			return
+		}
+		if selectedCredential := strings.TrimSpace(resp.Header.Get(credentialSelectedHeader)); selectedCredential != "" {
+			record.CredentialID = selectedCredential
 		}
 		statusRetryable, uncertainStatus := retryableStatusForOperation(operation, resp.StatusCode)
 		targetedMissingRetryable := selection.Targeted && resp.StatusCode == http.StatusNotFound
@@ -715,6 +721,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			selection.Release()
 			last = buffered
 			lastAccountID = selection.Account.Config.ID
+			lastCredentialID = record.CredentialID
 			lastUpstreamModel = selection.Model
 			lastReasoningEffort = selection.ReasoningEffort
 			cooldown := cooldownFor(resp, state.cfg.Server.CircuitCooldown.Duration)
@@ -970,7 +977,7 @@ func awaitRequestBodyClose(body *ownedRequestBody, contextDone <-chan struct{}) 
 	}
 }
 
-func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *AccountRuntime, inbound *http.Request, body []byte, requestID string) (*http.Response, error) {
+func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *AccountRuntime, inbound *http.Request, body []byte, requestID string, credential ...string) (*http.Response, error) {
 	upstreamURL, err := buildUpstreamURL(account.Config.BaseURL, inbound.URL.Path, inbound.URL.RawQuery)
 	if err != nil {
 		return nil, err
@@ -1026,6 +1033,11 @@ func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *
 	}
 	for name, value := range account.CustomHeaders {
 		req.Header.Set(name, value)
+	}
+	if strings.EqualFold(strings.TrimSpace(account.Config.AdapterID), "cli-proxy-api") && len(credential) > 0 {
+		if publicID := strings.TrimSpace(credential[0]); publicID != "" {
+			req.Header.Set(credentialPinHeader, publicID)
+		}
 	}
 	response, err := state.clients[account.Config.ID].Do(req)
 	if err != nil {
@@ -1421,7 +1433,12 @@ func buildUpstreamURL(base, requestPath, rawQuery string) (string, error) {
 	return u.String(), nil
 }
 
-var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "host": {}}
+const (
+	credentialPinHeader      = "X-Lite2API-Auth-Index"
+	credentialSelectedHeader = "X-Lite2API-Selected-Auth-Index"
+)
+
+var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "host": {}, strings.ToLower(credentialPinHeader): {}, strings.ToLower(credentialSelectedHeader): {}}
 
 func copyRequestHeaders(dst, src http.Header) {
 	connectionBlocked := connectionHeaderNames(src)

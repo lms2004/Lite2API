@@ -1293,6 +1293,42 @@ func TestConnectionNamedHeadersAreNotForwarded(t *testing.T) {
 	}
 }
 
+func TestCredentialPinIsTrustedAndSelectedCredentialIsRecorded(t *testing.T) {
+	const configuredCredential = "0123456789abcdef"
+	const selectedCredential = "fedcba9876543210"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(credentialPinHeader); got != configuredCredential {
+			t.Errorf("credential pin header = %q, want %q", got, configuredCredential)
+		}
+		w.Header().Set(credentialSelectedHeader, selectedCredential)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	g := newTestGateway(t, []config.Account{{
+		ID: "pool", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: upstream.URL + "/v1", APIKey: "test",
+		Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true,
+	}}, map[string]config.Route{
+		"alias": {Targets: []config.RouteTarget{{Account: "pool", Credential: configuredCredential, Model: "m"}}},
+	})
+	request := gatewayRequest(`{"model":"alias","messages":[{"role":"user","content":"ping"}]}`)
+	request.Header.Set(credentialPinHeader, "client-spoofed")
+	request.Header.Set(credentialSelectedHeader, "client-spoofed")
+	recorder := httptest.NewRecorder()
+	g.ServeGateway(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get(credentialSelectedHeader) != "" {
+		t.Fatal("internal selected credential header leaked downstream")
+	}
+	recent := g.stats.Snapshot().Recent
+	if len(recent) != 1 || recent[0].CredentialID != selectedCredential {
+		t.Fatalf("recent credential observation = %+v", recent)
+	}
+}
+
 func TestReloadReusesUnchangedRequestLogWriter(t *testing.T) {
 	g := newTestGateway(t, nil, nil)
 	before := g.requestLog.Load()

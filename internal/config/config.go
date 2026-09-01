@@ -111,6 +111,7 @@ type ChannelCapability struct {
 
 type RouteTarget struct {
 	Account         string `json:"account"`
+	Credential      string `json:"credential,omitempty"`
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
@@ -695,12 +696,16 @@ func (c Config) Validate() error {
 			if accountID == "" {
 				return fmt.Errorf("route %q target %d requires an account", model, index+1)
 			}
-			if accountID != target.Account || strings.TrimSpace(target.Model) != target.Model || len(accountID) > MaxAccountIDBytes || len(target.Model) > MaxModelIDBytes {
-				return fmt.Errorf("route %q target %d contains an oversized account or model", model, index+1)
+			credential := strings.TrimSpace(target.Credential)
+			if accountID != target.Account || credential != target.Credential || strings.TrimSpace(target.Model) != target.Model || len(accountID) > MaxAccountIDBytes || len(credential) > MaxAccountIDBytes || len(target.Model) > MaxModelIDBytes {
+				return fmt.Errorf("route %q target %d contains an untrimmed or oversized account, credential, or model", model, index+1)
 			}
 			account, ok := accountByID(c.Accounts, accountID)
 			if !ok {
 				return fmt.Errorf("route %q target %d references unknown account %q", model, index+1, accountID)
+			}
+			if credential != "" && !strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
+				return fmt.Errorf("route %q target %d: credential pinning requires a cli-proxy-api account", model, index+1)
 			}
 			if route.Model != "" {
 				if _, _, ok := ResolveRouteTarget(account, route, target); !ok {

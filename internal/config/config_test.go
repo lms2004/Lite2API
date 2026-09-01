@@ -82,6 +82,26 @@ func TestValidateOrderedRouteTargets(t *testing.T) {
 	}
 }
 
+func TestValidateCredentialPinRequiresCLIProxyAccount(t *testing.T) {
+	cfg := Defaults()
+	cfg.Server.AllowPrivateHTTPUpstream = true
+	cfg.Accounts = []Account{{
+		ID: "pool", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: "http://127.0.0.1:1/v1",
+		Models: []string{"m"}, Enabled: true,
+	}}
+	cfg.Routes["m"] = Route{Targets: []RouteTarget{{Account: "pool", Credential: "0123456789abcdef", Model: "m"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid CLIProxy credential pin: %v", err)
+	}
+
+	account := cfg.Accounts[0]
+	account.AdapterID = "generic-openai"
+	cfg.Accounts[0] = account
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "credential pinning") {
+		t.Fatalf("non-CLIProxy credential pin error = %v", err)
+	}
+}
+
 func TestValidateLogicalRouteAgainstRealChannelCapabilities(t *testing.T) {
 	cfg := Defaults()
 	cfg.Server.AllowPrivateHTTPUpstream = true

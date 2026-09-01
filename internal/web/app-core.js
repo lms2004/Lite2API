@@ -101,6 +101,7 @@
   function normalizeTarget(target = {}) {
     return {
       account: String(target.account || '').trim(),
+      credential: String(target.credential || '').trim(),
       model: String(target.model || '').trim(),
       reasoning_effort: String(target.reasoning_effort || '').trim().toLowerCase()
     };
@@ -288,20 +289,23 @@
       if (route.targets.length > 64) errors.push({ alias, message: '真实上游目标不能超过 64 个' });
       if (new TextEncoder().encode(route.model).length > 256) errors.push({ alias, message: '逻辑模型不能超过 256 字节' });
       if (route.model && !VALID_EFFORTS.has(route.reasoning_effort)) errors.push({ alias, message: `不支持推理强度 ${route.reasoning_effort}` });
-      const seenAccounts = new Set();
+      const seenTargets = new Set();
       route.targets.forEach((target, targetIndex) => {
         const account = accountMap.get(target.account);
         if (!target.account) {
           errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位尚未选择连接` });
           return;
         }
-        if (seenAccounts.has(target.account)) errors.push({ alias, targetIndex, message: `${target.account} 在同一路由中被重复选择` });
-        seenAccounts.add(target.account);
+        const targetIdentity = `${target.account}\u0000${target.credential}`;
+        if (seenTargets.has(targetIdentity)) errors.push({ alias, targetIndex, message: `${target.account}${target.credential ? ` 的账号 ${target.credential}` : ''} 在同一路由中被重复选择` });
+        seenTargets.add(targetIdentity);
         if (!account) {
           errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位引用了不存在的连接 ${target.account}` });
           return;
         }
         if (new TextEncoder().encode(target.account).length > 128) errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位的连接 ID 不能超过 128 字节` });
+        if (new TextEncoder().encode(target.credential).length > 128) errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位的认证账号 ID 不能超过 128 字节` });
+        if (target.credential && String(account.adapter_id || '').toLowerCase() !== 'cli-proxy-api') errors.push({ alias, targetIndex, message: `${account.name || account.id} 不支持认证账号绑定` });
         if (new TextEncoder().encode(target.model).length > 256) errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位的模型不能超过 256 字节` });
         if (!route.model && !VALID_EFFORTS.has(target.reasoning_effort)) errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位使用了不支持的推理强度 ${target.reasoning_effort}` });
         const resolution = targetResolution(account, route, target);
@@ -349,9 +353,10 @@
     }
     const payload = {
       targets: route.targets.map(target => route.model
-        ? { account: target.account, model: '' }
+        ? { account: target.account, ...(target.credential ? { credential: target.credential } : {}), model: '' }
         : {
             account: target.account,
+            ...(target.credential ? { credential: target.credential } : {}),
             model: target.model,
             ...(target.reasoning_effort ? { reasoning_effort: target.reasoning_effort } : {})
           })

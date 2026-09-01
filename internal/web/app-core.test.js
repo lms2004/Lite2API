@@ -129,6 +129,21 @@ test('route validation rejects duplicate connection targets', () => {
   assert.equal(validation.errors.some(item => item.message.includes('重复选择')), true);
 });
 
+test('CLIProxy routes preserve distinct credential pins on one connection', () => {
+  const pool = { ...connection, id: 'pool', adapter_id: 'cli-proxy-api' };
+  const route = {
+    targets: [
+      { account: 'pool', credential: '0123456789abcdef', model: 'upstream-direct' },
+      { account: 'pool', credential: 'fedcba9876543210', model: 'upstream-direct' }
+    ]
+  };
+  assert.equal(core.routeValidation({ pinned: route }, [pool]).ok, true);
+  assert.deepEqual(core.serializeRoute(route), route);
+  const duplicate = { targets: [...route.targets, { ...route.targets[0] }] };
+  assert.equal(core.routeValidation({ duplicate }, [pool]).ok, false);
+  assert.equal(core.routeValidation({ invalid: route }, [{ ...pool, adapter_id: 'generic-openai' }]).ok, false);
+});
+
 test('direct routes distinguish declared models from explicit unknown models', () => {
   const declared = core.routeValidation({ direct: { targets: [{ account: 'primary', model: 'upstream-direct' }] } }, [connection]);
   assert.equal(declared.ok, true);

@@ -14,21 +14,25 @@ RUN git init \
 COPY deploy/patches/cliproxyapi-quota-snapshot.patch /patches/cliproxyapi-quota-snapshot.patch
 COPY deploy/patches/cliproxyapi-routing-reliability.patch /patches/cliproxyapi-routing-reliability.patch
 COPY deploy/patches/cliproxyapi-auth-refresh.patch /patches/cliproxyapi-auth-refresh.patch
+COPY deploy/patches/cliproxyapi-credential-routing.patch /patches/cliproxyapi-credential-routing.patch
 RUN printf '%s  %s\n' \
       bbb9e08f18b210f9ddfbd958ee3cfb84cacc1b8d6b9c02b9c14ac8e23e490a68 /patches/cliproxyapi-quota-snapshot.patch \
       0a388faa429991cccc348bcddc31b0d350ddc21a36681da1bfbca5d052b39f37 /patches/cliproxyapi-routing-reliability.patch \
       f5e482c127994eb31c9419bbce1e82fff39bfb893ef8c38b14e875b780a330a5 /patches/cliproxyapi-auth-refresh.patch \
+      3b2dc3c8f82a28021caffc74b314e6ba375a1ca4538db408a27d39f088d2c0fe /patches/cliproxyapi-credential-routing.patch \
       | sha256sum -c - \
     && git apply --unidiff-zero --check /patches/cliproxyapi-quota-snapshot.patch \
     && git apply --unidiff-zero /patches/cliproxyapi-quota-snapshot.patch \
     && git apply --unidiff-zero --check /patches/cliproxyapi-routing-reliability.patch \
     && git apply --unidiff-zero /patches/cliproxyapi-routing-reliability.patch \
     && git apply --unidiff-zero --check /patches/cliproxyapi-auth-refresh.patch \
-    && git apply --unidiff-zero /patches/cliproxyapi-auth-refresh.patch
+    && git apply --unidiff-zero /patches/cliproxyapi-auth-refresh.patch \
+    && git apply --unidiff-zero --check /patches/cliproxyapi-credential-routing.patch \
+    && git apply --unidiff-zero /patches/cliproxyapi-credential-routing.patch
 
-ARG VERSION=v6.10.9-lite2api.6
+ARG VERSION=v6.10.9-lite2api.7
 ARG COMMIT=785b00c3127eea6aa207f1207ead8a2aa93690a3
-ARG BUILD_DATE=2026-08-24
+ARG BUILD_DATE=2026-09-01
 RUN test "$COMMIT" = "785b00c3127eea6aa207f1207ead8a2aa93690a3" \
     && GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux go build -trimpath \
       -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \

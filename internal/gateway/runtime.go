@@ -211,7 +211,13 @@ func (a *AccountRuntime) release() { a.state.capacity.active.Add(-1) }
 
 const maxWildcardBreakerBuckets = 64
 
-func breakerKey(operation, model string) string { return operation + "\x00" + model }
+func breakerKey(operation, model string, credential ...string) string {
+	scope := ""
+	if len(credential) > 0 {
+		scope = strings.TrimSpace(credential[0])
+	}
+	return operation + "\x00" + model + "\x00" + scope
+}
 
 func (a *AccountRuntime) breakerModelKey(model string) string {
 	for _, candidate := range a.Config.Models {
@@ -234,16 +240,16 @@ func (a *AccountRuntime) breakerModelKey(model string) string {
 	return fmt.Sprintf("wildcard:%02d", hash.Sum32()%maxWildcardBreakerBuckets)
 }
 
-func (a *AccountRuntime) breaker(operation, model string) *breakerRuntime {
-	value, _ := a.state.breakers.LoadOrStore(breakerKey(operation, a.breakerModelKey(model)), &breakerRuntime{})
+func (a *AccountRuntime) breaker(operation, model string, credential ...string) *breakerRuntime {
+	value, _ := a.state.breakers.LoadOrStore(breakerKey(operation, a.breakerModelKey(model), credential...), &breakerRuntime{})
 	return value.(*breakerRuntime)
 }
 
-func (a *AccountRuntime) available(now time.Time, operation, model string) bool {
+func (a *AccountRuntime) available(now time.Time, operation, model string, credential ...string) bool {
 	if !a.Config.Enabled {
 		return false
 	}
-	value, exists := a.state.breakers.Load(breakerKey(operation, a.breakerModelKey(model)))
+	value, exists := a.state.breakers.Load(breakerKey(operation, a.breakerModelKey(model), credential...))
 	return !exists || value.(*breakerRuntime).circuitUntil.Load() <= now.UnixNano()
 }
 
@@ -279,8 +285,8 @@ func (a *AccountRuntime) upstreamModel(requested, routeModel string) string {
 	return requested
 }
 
-func (a *AccountRuntime) beginAttempt(operation, model string) healthAttempt {
-	breaker := a.breaker(operation, model)
+func (a *AccountRuntime) beginAttempt(operation, model string, credential ...string) healthAttempt {
+	breaker := a.breaker(operation, model, credential...)
 	return healthAttempt{breaker: breaker, sequence: breaker.attemptSeq.Add(1)}
 }
 
@@ -410,6 +416,7 @@ func (n *schedulerNotifier) broadcast() {
 
 type Selection struct {
 	Account         *AccountRuntime
+	Credential      string
 	Model           string
 	ReasoningEffort string
 	Key             string
@@ -424,6 +431,7 @@ type routeTargetCandidate struct {
 	key             string
 	model           string
 	reasoningEffort string
+	credential      string
 }
 
 func (s *Selection) Release() {
@@ -569,7 +577,7 @@ func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
 	if !exists {
 		return false
 	}
-	availableForAnyOperation := func(account *AccountRuntime, upstreamModel string) bool {
+	availableForAnyOperation := func(account *AccountRuntime, upstreamModel, credential string) bool {
 		if account == nil || !account.Config.Enabled {
 			return false
 		}
@@ -578,7 +586,7 @@ func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
 			operations = config.DefaultOperations(account.Config.Type)
 		}
 		for _, operation := range operations {
-			if account.available(now, operation, upstreamModel) {
+			if account.available(now, operation, upstreamModel, credential) {
 				return true
 			}
 		}
@@ -591,7 +599,7 @@ func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
 				continue
 			}
 			upstreamModel, _, compatible := config.ResolveRouteTarget(account.Config, route, target)
-			if compatible && availableForAnyOperation(account, upstreamModel) {
+			if compatible && availableForAnyOperation(account, upstreamModel, target.Credential) {
 				return true
 			}
 		}
@@ -607,7 +615,7 @@ func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
 				continue
 			}
 		}
-		if availableForAnyOperation(account, account.upstreamModel(alias, route.UpstreamModel)) {
+		if availableForAnyOperation(account, account.upstreamModel(alias, route.UpstreamModel), "") {
 			return true
 		}
 	}
@@ -694,7 +702,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 			eligible = true
 			candidates = append(candidates, routeTargetCandidate{
 				index: index, account: account, key: key,
-				model: upstreamModel, reasoningEffort: reasoningEffort,
+				model: upstreamModel, reasoningEffort: reasoningEffort, credential: target.Credential,
 			})
 		}
 		counter := uint64(0)
@@ -704,7 +712,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		orderRouteTargetCandidates(candidates, route.Strategy, model, session, counter)
 		for _, candidate := range candidates {
 			account := candidate.account
-			available := account.available(now, operation, candidate.model)
+			available := account.available(now, operation, candidate.model, candidate.credential)
 			if !available || !account.tryAcquire() {
 				if available {
 					capacityBlocked = true
@@ -720,7 +728,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 			s.mu.RUnlock()
 			selected := account
 			return &Selection{
-				Account: selected, Model: candidate.model, ReasoningEffort: candidate.reasoningEffort,
+				Account: selected, Credential: candidate.credential, Model: candidate.model, ReasoningEffort: candidate.reasoningEffort,
 				Key: candidate.key, Targeted: true, release: func() {
 					selected.release()
 					s.notify.broadcast()
@@ -800,7 +808,7 @@ func (s *Scheduler) releaseAccount(account *AccountRuntime) {
 }
 
 func routeTargetKey(index int, target config.RouteTarget) string {
-	return fmt.Sprintf("target:%d:%s:%s:%s", index, target.Account, target.Model, target.ReasoningEffort)
+	return fmt.Sprintf("target:%d:%s:%s:%s:%s", index, target.Account, target.Credential, target.Model, target.ReasoningEffort)
 }
 
 // orderRouteTargetCandidates applies an optional scheduling policy to an

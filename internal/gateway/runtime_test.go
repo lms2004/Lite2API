@@ -248,6 +248,41 @@ func TestCircuitIsScopedByOperationAndUpstreamModel(t *testing.T) {
 	}
 }
 
+func TestCircuitIsScopedByExplicitCredential(t *testing.T) {
+	cfg := schedulerConfig()
+	cfg.Accounts = cfg.Accounts[:1]
+	cfg.Accounts[0].AdapterID = "cli-proxy-api"
+	cfg.Routes["pinned"] = config.Route{Targets: []config.RouteTarget{
+		{Account: "a", Credential: "credential-a", Model: "m"},
+		{Account: "a", Credential: "credential-b", Model: "m"},
+	}}
+	scheduler := NewScheduler(cfg)
+	first, err := scheduler.Select(context.Background(), "pinned", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Credential != "credential-a" {
+		t.Fatalf("first credential = %q", first.Credential)
+	}
+	first.Account.reportFailure(first.Account.beginAttempt(config.OperationOpenAIChat, first.Model, first.Credential), "quota", 1, time.Hour, true)
+	first.Release()
+
+	if first.Account.available(time.Now(), config.OperationOpenAIChat, "m", "credential-a") {
+		t.Fatal("failed credential scope remained available")
+	}
+	if !first.Account.available(time.Now(), config.OperationOpenAIChat, "m", "credential-b") {
+		t.Fatal("one credential breaker blocked another credential")
+	}
+	second, err := scheduler.Select(context.Background(), "pinned", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatalf("fallback credential was not selected: %v", err)
+	}
+	defer second.Release()
+	if second.Credential != "credential-b" {
+		t.Fatalf("fallback credential = %q, want credential-b", second.Credential)
+	}
+}
+
 func TestWildcardModelRuntimeStateHasBoundedCardinality(t *testing.T) {
 	cfg := schedulerConfig()
 	cfg.Accounts = cfg.Accounts[:1]

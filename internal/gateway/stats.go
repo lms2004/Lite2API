@@ -20,6 +20,7 @@ type RequestRecord struct {
 	Model            string  `json:"model"`
 	UpstreamModel    string  `json:"upstream_model"`
 	AccountID        string  `json:"account_id"`
+	CredentialID     string  `json:"credential_id,omitempty"`
 	Operation        string  `json:"operation,omitempty"`
 	ReasoningEffort  string  `json:"reasoning_effort,omitempty"`
 	ClientKeyID      string  `json:"client_key_id"`
@@ -368,6 +369,7 @@ func sanitizeRequestRecord(r RequestRecord) RequestRecord {
 	r.Model = truncate(r.Model, maxGatewayModelBytes)
 	r.UpstreamModel = truncate(r.UpstreamModel, maxGatewayModelBytes)
 	r.AccountID = truncate(r.AccountID, 128)
+	r.CredentialID = truncate(r.CredentialID, 128)
 	r.Operation = truncate(r.Operation, 64)
 	r.ReasoningEffort = truncate(r.ReasoningEffort, 32)
 	r.ClientKeyID = truncate(r.ClientKeyID, 128)
