@@ -699,6 +699,12 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.CredentialID = selectedCredential
 		}
 		statusRetryable, uncertainStatus := retryableStatusForOperation(operation, resp.StatusCode)
+		retrySafeCredentialFailure := selection.Credential != "" &&
+			strings.EqualFold(strings.TrimSpace(selection.Account.Config.AdapterID), "cli-proxy-api") &&
+			strings.EqualFold(strings.TrimSpace(resp.Header.Get(credentialRetrySafeHeader)), "true")
+		if retrySafeCredentialFailure && retryableStatus(resp.StatusCode) {
+			statusRetryable, uncertainStatus = true, false
+		}
 		targetedMissingRetryable := selection.Targeted && resp.StatusCode == http.StatusNotFound
 		if uncertainStatus {
 			_ = resp.Body.Close()
@@ -1434,11 +1440,12 @@ func buildUpstreamURL(base, requestPath, rawQuery string) (string, error) {
 }
 
 const (
-	credentialPinHeader      = "X-Lite2API-Auth-Index"
-	credentialSelectedHeader = "X-Lite2API-Selected-Auth-Index"
+	credentialPinHeader       = "X-Lite2API-Auth-Index"
+	credentialSelectedHeader  = "X-Lite2API-Selected-Auth-Index"
+	credentialRetrySafeHeader = "X-Lite2API-Retry-Safe"
 )
 
-var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "host": {}, strings.ToLower(credentialPinHeader): {}, strings.ToLower(credentialSelectedHeader): {}}
+var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "host": {}, strings.ToLower(credentialPinHeader): {}, strings.ToLower(credentialSelectedHeader): {}, strings.ToLower(credentialRetrySafeHeader): {}}
 
 func copyRequestHeaders(dst, src http.Header) {
 	connectionBlocked := connectionHeaderNames(src)

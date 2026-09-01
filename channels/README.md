@@ -6,7 +6,7 @@ Lite2API 核心不复制第三方项目的账号登录、Cookie 刷新或逆向�
 
 当前固定源码：
 
-- `third_party/cliproxyapi`：Gemini CLI、Claude、OpenAI/Codex、Antigravity 的 OAuth/setup-token 多账号池；固定上游为 `v6.10.9`（`785b00c3127eea6aa207f1207ead8a2aa93690a3`），仓库维护构建为 `v6.10.9-lite2api.7`，四组补丁均校验 SHA-256。
+- `third_party/cliproxyapi`：Gemini CLI、Claude、OpenAI/Codex、Antigravity 的 OAuth/setup-token 多账号池；固定上游为 `v6.10.9`（`785b00c3127eea6aa207f1207ead8a2aa93690a3`），仓库维护构建为 `v6.10.9-lite2api.8`，四组补丁均校验 SHA-256。
 - `third_party/grok2api`：Grok Build/Web/Console，多账号由它自己的管理页维护。
 - `third_party/gemini-web2api`：Gemini Web；匿名 Flash 可直接使用，Pro 需要在私有运行配置中添加 Cookie。
 - AtomCode2Api：现有独立容器，Lite2API 通过 `127.0.0.1:45678/v1` 接入。
@@ -24,7 +24,7 @@ docker compose -f docker-compose.yml -f compose.channels.yml --profile grok up -
 docker compose -f docker-compose.yml -f compose.channels.yml --profile oauth up -d --build
 ```
 
-Gemini profile 需要上面的固定子模块；Grok 使用 Compose 中固定的镜像 digest；OAuth 镜像会在构建阶段拉取并核验 CLIProxyAPI 固定提交，再按固定顺序应用三组维护补丁，因此不会使用现场 dirty 子模块。端口只发布到宿主回环：Grok `45680`、Gemini `45681`、CLIProxyAPI `45682`。每个渠道使用独立 bridge 网络以保留上游访问但隔离横向流量，并以非 root UID、只读根文件系统、空 capabilities 和资源上限运行。
+Gemini profile 需要上面的固定子模块；Grok 使用 Compose 中固定的镜像 digest；OAuth 镜像会在构建阶段拉取并核验 CLIProxyAPI 固定提交，再按固定顺序应用四组维护补丁，因此不会使用现场 dirty 子模块。端口只发布到宿主回环：Grok `45680`、Gemini `45681`、CLIProxyAPI `45682`。每个渠道使用独立 bridge 网络以保留上游访问但隔离横向流量，并以非 root UID、只读根文件系统、空 capabilities 和资源上限运行。
 
 `bootstrap-channels.sh` 会在锁内原子补齐 `.env` 的渠道密钥并生成 `0600` 私有配置；已存在配置作为迁移源，所以 Gemini Cookie 和其他手工字段不会因重跑被清空，脚本只同步托管密钥、容器监听地址与 CLIProxyAPI 路由策略。占位符、长度错误的托管密钥以及 runtime 符号链接会被拒绝。root 执行时使用 UID/GID `10001:10001` 并修正 owner；普通 Docker 用户执行时记录当前 UID/GID，Compose 使用同一身份，因此 `0600` 配置可读。若 `.env` 已显式配置另一 UID/GID，脚本会拒绝用不匹配的非 root 用户继续。Compose 运行密钥、OAuth 文件和 Cookie 放在 `channels/runtime/`，该目录和 `.env` 均不会进入 Docker build context 或 Git。
 
@@ -82,7 +82,7 @@ CLIProxyAPI 生产版本必须显式修改子模块 revision 和 Compose 的 `VE
 
 仓库模板使用 `max-retry-credentials: 0`，让一次请求遍历所有当前可选凭据，并使用 `request-retry: 0` 在一轮失败后立即交给 Lite 外层目标链。选号策略通过回环管理 API 写回配置：Compose 只把单个 `config.yaml` 以可写 bind mount 暴露给非 root 容器；systemd 只放行 `/etc/cliproxyapi/config.yaml` 且保持 `root:cliproxyapi 0660`。安装器和渠道 bootstrap 重建配置时会保留现有 `round-robin` / `fill-first`，其余安全模板值仍由仓库收敛。
 
-Claude 额度使用真实请求响应中的统一限额字段生成内存快照，支持 5 小时、7 天、Sonnet 周和 Opus 周窗口。Codex 使用 ChatGPT 官方 usage 接口读取主/次窗口，Gemini CLI 与 Antigravity 使用 Code Assist 官方 `retrieveUserQuota` 读取模型桶；它们仅在账号页可见时按需触发，每个凭据 10 分钟内最多一次并异步完成。反重力还展示可用 AI Credits，所有渠道发生 429 时都会保留模型冷却和重置时间。快照只包含脱敏后的窗口、百分比/余额、模型、重置和观测时间，服务重启后自然清空；没有可靠字段时保持 unknown，不用本地请求数推算官方余额。路由目标可选填公开的 `auth_index`，将请求固定到一个认证账号；CLIProxyAPI 会返回实际命中的公开索引，Lite2API 只记录脱敏索引并按“连接、认证账号、操作、模型”隔离熔断。空索引继续使用自动账号池。systemd 安装器会对固定上游提交依次幂等应用 `deploy/patches/cliproxyapi-quota-snapshot.patch`、`deploy/patches/cliproxyapi-routing-reliability.patch`、`deploy/patches/cliproxyapi-auth-refresh.patch` 与 `deploy/patches/cliproxyapi-credential-routing.patch`，不自动跟随第三方分支。
+Claude 额度使用真实请求响应中的统一限额字段生成内存快照，支持 5 小时、7 天、Sonnet 周和 Opus 周窗口。Codex 使用 ChatGPT 官方 usage 接口读取主/次窗口，Gemini CLI 与 Antigravity 使用 Code Assist 官方 `retrieveUserQuota` 读取模型桶；它们仅在账号页可见时按需触发，每个凭据 10 分钟内最多一次并异步完成。反重力还展示可用 AI Credits，所有渠道发生 429 时都会保留模型冷却和重置时间。快照只包含脱敏后的窗口、百分比/余额、模型、重置和观测时间，服务重启后自然清空；没有可靠字段时保持 unknown，不用本地请求数推算官方余额。路由目标可选填公开的 `auth_index`，将请求固定到一个认证账号；CLIProxyAPI 会返回实际命中的公开索引，Lite2API 只记录脱敏索引并按“连接、认证账号、操作、模型”隔离熔断。空索引继续使用自动账号池。只有 CLIProxyAPI 明确证明请求尚未提交时，受信的内部标记才允许 5xx 跨账号重放；普通供应商 5xx 仍按结果不确定处理。Antigravity 的明确 `MODEL_CAPACITY_EXHAUSTED` 拒绝会归一为 429。systemd 安装器会对固定上游提交依次幂等应用 `deploy/patches/cliproxyapi-quota-snapshot.patch`、`deploy/patches/cliproxyapi-routing-reliability.patch`、`deploy/patches/cliproxyapi-auth-refresh.patch` 与 `deploy/patches/cliproxyapi-credential-routing.patch`，不自动跟随第三方分支。
 
 ## 浏览器 Cookie / SSO 接入
 

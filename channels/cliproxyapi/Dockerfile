@@ -19,7 +19,7 @@ RUN printf '%s  %s\n' \
       bbb9e08f18b210f9ddfbd958ee3cfb84cacc1b8d6b9c02b9c14ac8e23e490a68 /patches/cliproxyapi-quota-snapshot.patch \
       0a388faa429991cccc348bcddc31b0d350ddc21a36681da1bfbca5d052b39f37 /patches/cliproxyapi-routing-reliability.patch \
       f5e482c127994eb31c9419bbce1e82fff39bfb893ef8c38b14e875b780a330a5 /patches/cliproxyapi-auth-refresh.patch \
-      3b2dc3c8f82a28021caffc74b314e6ba375a1ca4538db408a27d39f088d2c0fe /patches/cliproxyapi-credential-routing.patch \
+      d0e4923a56dabd12f7cbae421ca9c624bbd4e372fc22b47d95e7644c140bc131 /patches/cliproxyapi-credential-routing.patch \
       | sha256sum -c - \
     && git apply --unidiff-zero --check /patches/cliproxyapi-quota-snapshot.patch \
     && git apply --unidiff-zero /patches/cliproxyapi-quota-snapshot.patch \
@@ -30,7 +30,7 @@ RUN printf '%s  %s\n' \
     && git apply --unidiff-zero --check /patches/cliproxyapi-credential-routing.patch \
     && git apply --unidiff-zero /patches/cliproxyapi-credential-routing.patch
 
-ARG VERSION=v6.10.9-lite2api.7
+ARG VERSION=v6.10.9-lite2api.8
 ARG COMMIT=785b00c3127eea6aa207f1207ead8a2aa93690a3
 ARG BUILD_DATE=2026-09-01
 RUN test "$COMMIT" = "785b00c3127eea6aa207f1207ead8a2aa93690a3" \

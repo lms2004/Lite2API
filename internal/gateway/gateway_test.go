@@ -1329,6 +1329,48 @@ func TestCredentialPinIsTrustedAndSelectedCredentialIsRecorded(t *testing.T) {
 	}
 }
 
+func TestCredentialRetrySafeHeaderAllowsTrustedFailover(t *testing.T) {
+	const credential = "0123456789abcdef"
+	var fallbackCalls atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(credentialRetrySafeHeader); got != "" {
+			t.Errorf("client retry-safe header reached upstream: %q", got)
+		}
+		w.Header().Set(credentialRetrySafeHeader, "true")
+		http.Error(w, "credential was rejected before provider submission", http.StatusServiceUnavailable)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+	}))
+	defer second.Close()
+
+	g := newTestGateway(t, []config.Account{
+		{ID: "pool", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+		{ID: "fallback", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true},
+	}, map[string]config.Route{
+		"alias": {Targets: []config.RouteTarget{
+			{Account: "pool", Credential: credential, Model: "m"},
+			{Account: "fallback", Model: "m"},
+		}},
+	})
+	request := gatewayRequest(`{"model":"alias","messages":[{"role":"user","content":"ping"}]}`)
+	request.Header.Set(credentialRetrySafeHeader, "true")
+	recorder := httptest.NewRecorder()
+	g.ServeGateway(recorder, request)
+	if recorder.Code != http.StatusOK || fallbackCalls.Load() != 1 {
+		t.Fatalf("status=%d fallback_calls=%d body=%s", recorder.Code, fallbackCalls.Load(), recorder.Body.String())
+	}
+	if recorder.Header().Get(credentialRetrySafeHeader) != "" {
+		t.Fatal("internal retry-safe header leaked downstream")
+	}
+	if g.Stats().Failovers != 1 {
+		t.Fatalf("failovers=%d, want 1", g.Stats().Failovers)
+	}
+}
+
 func TestReloadReusesUnchangedRequestLogWriter(t *testing.T) {
 	g := newTestGateway(t, nil, nil)
 	before := g.requestLog.Load()
