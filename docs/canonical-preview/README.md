@@ -15,8 +15,8 @@ Lite2API now ships one embedded admin application. Its complete source is:
 
 There are no numbered UI generations, runtime patch layers, inline click
 handlers, or global render-function overrides. `embed_test.go`,
-`app-core.test.js`, `app-runtime.test.js`, and the main CI workflow enforce that
-boundary. Modules are embedded in dependency order by Go, retaining one
+`app-core.test.js`, and `app-runtime.test.js` enforce that boundary. Modules are
+embedded in dependency order by Go, retaining one
 document, one CSP-pinned script and no frontend runtime or build dependencies.
 
 ## Refresh and rendering ownership
@@ -102,14 +102,12 @@ document, one CSP-pinned script and no frontend runtime or build dependencies.
 
 ## Acceptance
 
-`.github/workflows/admin-canonical-product-qa.yml` starts deterministic local
-upstreams and a credential-pool fixture, builds a real Lite2API binary, seeds
-real traffic, and drives one sequential Playwright browser through usage,
+The files in `.github/qa/` provide a local acceptance harness. They start
+deterministic upstreams and a credential-pool fixture, build a real Lite2API
+binary, seed real traffic, and drive one sequential Playwright browser through usage,
 quality testing, direct channel chat, common-account actions, every uncommon onboarding
 branch, automatic connection test/save, immediate route activation, route
-validation/save, import dry-run, and mobile layouts. Screenshots and
-diagnostics remain ephemeral on the isolated runner; the workflow reports
-pass/fail without uploading management evidence.
+validation/save, import dry-run, and mobile layouts.
 
 `interaction_checks.js` additionally exercises delayed range responses,
 in-progress account edits, menu dismissal and focus return, dialog motion and

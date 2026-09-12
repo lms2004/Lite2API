@@ -2,7 +2,7 @@
 
 The admin console is a dependency-free, server-embedded application. See
 `canonical-preview/README.md` for its source boundary, product invariants, and
-acceptance workflow.
+local acceptance harness.
 
 When changing the UI:
 
