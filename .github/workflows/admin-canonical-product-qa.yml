@@ -5,13 +5,19 @@ on:
     branches: [main, "feat/**"]
     paths:
       - "internal/web/**"
+      - "internal/config/**"
       - "internal/gateway/**"
+      - "cmd/lite2api/**"
+      - "go.mod"
       - ".github/qa/**"
       - ".github/workflows/admin-canonical-product-qa.yml"
   pull_request:
     paths:
       - "internal/web/**"
+      - "internal/config/**"
       - "internal/gateway/**"
+      - "cmd/lite2api/**"
+      - "go.mod"
       - ".github/qa/**"
       - ".github/workflows/admin-canonical-product-qa.yml"
   workflow_dispatch:
@@ -30,23 +36,21 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout without persisted credentials
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.26.5
           cache: false
 
-      - name: Test, build, and validate configuration
+      - name: Build and validate the acceptance server
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence
-          go test ./... 2>&1 | tee evidence/go-test.log
-          node --test internal/web/app-core.test.js internal/web/app-runtime.test.js 2>&1 | tee evidence/app-core-test.log
           go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
           cp .github/qa/canonical-preview-config.json "$RUNNER_TEMP/lite2api-canonical-preview.json"
           "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-canonical-preview.json" -check-config | tee evidence/config-check.txt
@@ -136,3 +140,28 @@ jobs:
             node .github/qa/canonical_capture.js 2>&1 | tee evidence/playwright.log
           file evidence/*.png | tee evidence/screenshots.txt
           sha256sum evidence/*.png | tee evidence/SHA256SUMS.txt
+
+      - name: Report failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          for log in evidence/playwright.log evidence/lite2api.log evidence/fixtures.log; do
+            if [ -s "$log" ]; then
+              printf '::group::%s\n' "$log"
+              tail -n 200 "$log"
+              printf '::endgroup::\n'
+            fi
+          done
+
+      - name: Stop acceptance services
+        if: always()
+        shell: bash
+        run: |
+          for pid_file in evidence/lite2api.pid evidence/fixtures.pid; do
+            if [ -s "$pid_file" ]; then
+              pid="$(cat "$pid_file")"
+              if [[ "$pid" =~ ^[0-9]+$ ]]; then
+                kill "$pid" 2>/dev/null || true
+              fi
+            fi
+          done

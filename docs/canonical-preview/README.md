@@ -15,8 +15,8 @@ Lite2API now ships one embedded admin application. Its complete source is:
 
 There are no numbered UI generations, runtime patch layers, inline click
 handlers, or global render-function overrides. `embed_test.go`,
-`app-core.test.js`, `app-runtime.test.js`, and the UI quality workflow enforce
-that boundary. Modules are embedded in dependency order by Go, retaining one
+`app-core.test.js`, `app-runtime.test.js`, and the main CI workflow enforce that
+boundary. Modules are embedded in dependency order by Go, retaining one
 document, one CSP-pinned script and no frontend runtime or build dependencies.
 
 ## Refresh and rendering ownership

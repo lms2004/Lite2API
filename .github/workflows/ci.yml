@@ -20,12 +20,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout without persisted credentials
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.26.5
           # This stdlib-only module intentionally has no go.sum.
@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           for javascript in internal/web/*.js; do node --check "$javascript"; done
-          node --test internal/web/app-core.test.js
+          node --test internal/web/app-core.test.js internal/web/app-runtime.test.js
           node --check deploy/migrate-sub2api-auths.mjs
           node --test deploy/migrate-sub2api-auths.test.mjs
           bash deploy/bootstrap.test.sh
@@ -118,13 +118,13 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout fixed submodule revision
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           submodules: false
 
       - name: Set up Go 1.26
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.26.5
           cache: false
@@ -152,7 +152,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout without persisted credentials
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           submodules: false
