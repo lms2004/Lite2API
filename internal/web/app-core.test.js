@@ -41,6 +41,9 @@ test('Claude Code temporary config embeds the selected key and pins every model 
   assert.match(config, /export ANTHROPIC_DEFAULT_SONNET_MODEL='Shadow'/);
   assert.match(config, /export ANTHROPIC_DEFAULT_HAIKU_MODEL='Shadow'/);
   assert.match(config, /export CLAUDE_CODE_SUBAGENT_MODEL='Shadow'/);
+  assert.match(config, /unset ANTHROPIC_API_KEY ANTHROPIC_API_HOST CLAUDE_CODE_API_BASE_URL/);
+  assert.match(config, /unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_ANTHROPIC_AWS/);
+  assert.match(config, /claude --model "\$ANTHROPIC_MODEL"/);
   assert.doesNotMatch(config, /read -r -s|GATEWAY_MODEL_DISCOVERY|ANTHROPIC_CUSTOM_MODEL_OPTION/);
   assert.match(config, /\$ANTHROPIC_BASE_URL\/v1\/models\?limit=1000/);
   assert.match(config, /if curl -fsS/);
