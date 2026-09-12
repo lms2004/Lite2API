@@ -62,10 +62,10 @@ jobs:
           test ! -e internal/web/index.html
           test -z "$(find internal/web -maxdepth 1 -name 'native-*' -print -quit)"
           grep -Fq 'data-ui="canonical-usage-console"' internal/web/app.html
-          grep -Fq 'function testManualAccount(' internal/web/app.js
-          grep -Fq 'function validateAndRenderRoutes(' internal/web/app.js
-          grep -Fq 'function discardRouteChanges(' internal/web/app.js
-          grep -Fq 'function showOnboardingResult(' internal/web/app.js
+          grep -Fq 'function testManualAccount(' internal/web/app-onboarding.js
+          grep -Fq 'function validateAndRenderRoutes(' internal/web/app-routes.js
+          grep -Fq 'function discardRouteChanges(' internal/web/app-routes.js
+          grep -Fq 'function showOnboardingResult(' internal/web/app-onboarding.js
           if grep -Eq 'onclick[[:space:]]*=' internal/web/app.html; then
             echo 'Inline click handlers are forbidden' >&2
             exit 1
@@ -77,6 +77,5 @@ jobs:
 
       - name: Check JavaScript domain contracts
         run: |
-          node --check internal/web/app-core.js
-          node --check internal/web/app.js
-          node --test internal/web/app-core.test.js
+          for file in internal/web/app*.js; do node --check "$file"; done
+          node --test internal/web/app-core.test.js internal/web/app-runtime.test.js

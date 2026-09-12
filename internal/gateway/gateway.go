@@ -1132,6 +1132,8 @@ func operationForGatewayPath(path string) (string, bool) {
 		return config.OperationOpenAIResponses, true
 	case "/v1/messages":
 		return config.OperationAnthropic, true
+	case "/v1/messages/count_tokens":
+		return config.OperationAnthropic, true
 	case "/v1/embeddings":
 		return config.OperationEmbeddings, true
 	case "/v1/images/generations":

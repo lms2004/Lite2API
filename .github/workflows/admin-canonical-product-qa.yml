@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           go test ./... 2>&1 | tee evidence/go-test.log
-          node --test internal/web/app-core.test.js 2>&1 | tee evidence/app-core-test.log
+          node --test internal/web/app-core.test.js internal/web/app-runtime.test.js 2>&1 | tee evidence/app-core-test.log
           go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "$RUNNER_TEMP/lite2api" ./cmd/lite2api
           cp .github/qa/canonical-preview-config.json "$RUNNER_TEMP/lite2api-canonical-preview.json"
           "$RUNNER_TEMP/lite2api" -config "$RUNNER_TEMP/lite2api-canonical-preview.json" -check-config | tee evidence/config-check.txt

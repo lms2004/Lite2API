@@ -20,6 +20,12 @@ var appCoreJS []byte
 //go:embed app.js
 var appJS []byte
 
+// Feature modules have explicit dependencies and are assembled once at startup.
+// No runtime loader, additional network requests, or JavaScript build toolchain.
+//
+//go:embed app-runtime.js app-metrics.js app-ui.js app-shared.js app-usage.js app-chat.js app-accounts.js app-onboarding.js app-routes.js app-clients.js
+var appModules embed.FS
+
 //go:embed assets/model-icons/*.svg assets/model-icons/*.png
 var modelIconFS embed.FS
 
@@ -46,7 +52,20 @@ var officialIconAssets = []officialIconAsset{
 }
 
 var canonicalCSS = injectOfficialIcons(appCSS)
-var canonicalScript = bytes.Join([][]byte{bytes.TrimSpace(appCoreJS), bytes.TrimSpace(appJS)}, []byte("\n"))
+var canonicalScript = assembleScript()
+
+func assembleScript() []byte {
+	parts := [][]byte{bytes.TrimSpace(appCoreJS)}
+	for _, name := range []string{"runtime", "metrics", "ui", "shared", "usage", "chat", "accounts", "onboarding", "routes", "clients"} {
+		data, err := appModules.ReadFile("app-" + name + ".js")
+		if err != nil {
+			panic("read admin module " + name + ": " + err.Error())
+		}
+		parts = append(parts, bytes.TrimSpace(data))
+	}
+	parts = append(parts, bytes.TrimSpace(appJS))
+	return bytes.Join(parts, []byte("\n"))
+}
 
 // IndexHTML is the complete canonical Lite2API management application. The
 // server still ships a self-contained document, but every runtime surface now
@@ -57,7 +76,18 @@ var IndexHTMLGzip = gzipBytes(IndexHTML)
 // ScriptCSPSource pins the exact embedded controller. Dynamic HTML can never
 // opt itself into script execution because the server no longer needs
 // script-src 'unsafe-inline'.
-var ScriptCSPSource = cspHash(canonicalScript)
+var ScriptCSPSource = cspHash(scriptContent(IndexHTML))
+
+// CSP hashes cover the exact bytes inside the element, including template
+// indentation. Hashing only the source breaks when the HTML is formatted.
+func scriptContent(page []byte) []byte {
+	start := bytes.Index(page, []byte("<script>"))
+	end := bytes.Index(page, []byte("</script>"))
+	if start < 0 || end < start {
+		panic("canonical admin document must contain a script element")
+	}
+	return page[start+len("<script>") : end]
+}
 
 func injectOfficialIcons(css []byte) []byte {
 	result := append([]byte(nil), css...)
@@ -89,7 +119,7 @@ func buildApp(html, css, script []byte) []byte {
 }
 
 func cspHash(script []byte) string {
-	digest := sha256.Sum256(bytes.TrimSpace(script))
+	digest := sha256.Sum256(script)
 	return "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
 }
 

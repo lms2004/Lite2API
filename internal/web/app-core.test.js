@@ -21,6 +21,64 @@ test('connection test fingerprint changes with secrets and advertised models', (
   assert.equal(core.accountFingerprint(base).includes('password'), false);
 });
 
+test('gateway base derives the public prefix from the admin mount', () => {
+  assert.equal(core.gatewayBaseFromPath('https://gateway.test', '/lite-admin/'), 'https://gateway.test/lite');
+  assert.equal(core.gatewayAPIBaseFromPath('https://gateway.test', '/lite-admin/'), 'https://gateway.test/lite/v1');
+  assert.equal(core.gatewayBaseFromPath('https://gateway.test', '/admin/'), 'https://gateway.test');
+  assert.equal(core.gatewayBaseFromPath('https://gateway.test/', '/admin'), 'https://gateway.test');
+});
+
+test('Claude Code temporary config embeds the selected key and pins every model entry point', () => {
+  const config = core.claudeCodeShellConfig({
+    baseUrl: 'https://gateway.test/lite',
+    model: 'Shadow',
+    apiKey: "lite'key",
+  });
+  assert.match(config, /export ANTHROPIC_BASE_URL='https:\/\/gateway\.test\/lite'/);
+  assert.match(config, /export ANTHROPIC_AUTH_TOKEN='lite'\\''key'/);
+  assert.match(config, /export ANTHROPIC_MODEL='Shadow'/);
+  assert.match(config, /export ANTHROPIC_DEFAULT_OPUS_MODEL='Shadow'/);
+  assert.match(config, /export ANTHROPIC_DEFAULT_SONNET_MODEL='Shadow'/);
+  assert.match(config, /export ANTHROPIC_DEFAULT_HAIKU_MODEL='Shadow'/);
+  assert.match(config, /export CLAUDE_CODE_SUBAGENT_MODEL='Shadow'/);
+  assert.doesNotMatch(config, /read -r -s|GATEWAY_MODEL_DISCOVERY|ANTHROPIC_CUSTOM_MODEL_OPTION/);
+  assert.match(config, /\$ANTHROPIC_BASE_URL\/v1\/models\?limit=1000/);
+  assert.match(config, /if curl -fsS/);
+  assert.match(config, /^\(\n/);
+  assert.match(config, /\n\)$/);
+  assert.equal(config.includes('<YOUR_API_KEY>'), false);
+  assert.equal(core.shellQuote("a'b"), "'a'\\''b'");
+  assert.match(core.claudeCodeShellConfig({ baseUrl: 'https://gateway.test', model: 'Shadow' }), /<YOUR_API_KEY>/);
+});
+
+test('Claude Code alternate config modes keep validation and credential boundaries explicit', () => {
+  const powershell = core.claudeCodePowerShellConfig({
+    baseUrl: 'https://gateway.test/lite',
+    model: 'Shadow',
+  });
+  assert.match(powershell, /Read-Host -Prompt 'Lite2API API Key' -AsSecureString/);
+  assert.match(powershell, /Invoke-RestMethod -Method Get/);
+  assert.match(powershell, /v1\/models\?limit=1000/);
+  assert.match(powershell, /Remove-Item Env:ANTHROPIC_AUTH_TOKEN/);
+  assert.match(powershell, /\$headers = \$null/);
+  assert.match(powershell, /ANTHROPIC_CUSTOM_MODEL_OPTION/);
+  assert.doesNotMatch(powershell, /<YOUR_API_KEY>/);
+  assert.equal(core.powerShellQuote("a'b"), "'a''b'");
+
+  const persistent = core.claudeCodePersistentShellConfig({
+    baseUrl: 'https://gateway.test/lite',
+    model: 'Shadow',
+  });
+  assert.match(persistent, /settings\.json/);
+  assert.match(persistent, /apiKeyHelper/);
+  assert.match(persistent, /python3/);
+  assert.match(persistent, /os\.replace/);
+  assert.match(persistent, /0o600/);
+  assert.match(persistent, /v1\/models\?limit=1000/);
+  assert.doesNotMatch(persistent, /export ANTHROPIC_AUTH_TOKEN=/);
+  assert.doesNotMatch(persistent, /<YOUR_API_KEY>/);
+});
+
 test('connection save only requires a fresh test when an enabled connection is new or materially changed', () => {
   const input = { currentFingerprint: 'current', originalFingerprint: 'original', testedFingerprint: '' };
   assert.equal(core.connectionTestRequired({ ...input, editing: false, enabled: true }), true);

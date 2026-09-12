@@ -13,6 +13,232 @@
     return [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
   }
 
+  // The admin UI and the public gateway may share a reverse-proxy prefix
+  // (for example /lite-admin/ and /lite/v1). Keep this derivation pure so the
+  // client generator and its tests cannot accidentally reintroduce /v1 at the
+  // wrong layer.
+  function gatewayBaseFromPath(origin, pathname) {
+    const normalizedOrigin = String(origin || '').replace(/\/+$/, '');
+    const path = String(pathname || '').replace(/\/+$/, '');
+    let prefix = '';
+    if (path.endsWith('-admin')) prefix = path.slice(0, -'-admin'.length);
+    else if (path.endsWith('/admin')) prefix = path.slice(0, -'/admin'.length);
+    return normalizedOrigin + (prefix === '/' ? '' : prefix);
+  }
+
+  function gatewayAPIBaseFromPath(origin, pathname) {
+    return gatewayBaseFromPath(origin, pathname) + '/v1';
+  }
+
+  function shellQuote(value) {
+    return "'" + String(value ?? '').replace(/'/g, "'\\''") + "'";
+  }
+
+  function powerShellQuote(value) {
+    return "'" + String(value ?? '').replace(/'/g, "''") + "'";
+  }
+
+  function claudeCodeShellConfig({ baseUrl = '', model = '', apiKey = '' } = {}) {
+    const safeBaseURL = shellQuote(String(baseUrl || '').replace(/\/+$/, ''));
+    const safeModel = shellQuote(model);
+    const safeAPIKey = shellQuote(apiKey || '<YOUR_API_KEY>');
+    const lines = [
+      '(',
+      '# Claude Code → Lite2API（Bash / Zsh）',
+      '# Base URL 故意不包含 /v1；Claude Code 会自动请求 /v1/messages。',
+      '# Key 已由 Lite2API 自动填入；命令只在当前子 Shell 内生效。',
+      `export ANTHROPIC_BASE_URL=${safeBaseURL}`,
+      `export ANTHROPIC_AUTH_TOKEN=${safeAPIKey}`,
+      `export ANTHROPIC_MODEL=${safeModel}`,
+      `export ANTHROPIC_DEFAULT_OPUS_MODEL=${safeModel}`,
+      `export ANTHROPIC_DEFAULT_SONNET_MODEL=${safeModel}`,
+      `export ANTHROPIC_DEFAULT_HAIKU_MODEL=${safeModel}`,
+      `export CLAUDE_CODE_SUBAGENT_MODEL=${safeModel}`,
+      '',
+      '# 只验证 URL、Bearer Key 与模型目录，不产生模型调用。',
+      'if curl -fsS --connect-timeout 5 --max-time 15 \\',
+      '  --config <(printf \'header = "Authorization: Bearer %s"\\n\' "$ANTHROPIC_AUTH_TOKEN") \\',
+      '  "$ANTHROPIC_BASE_URL/v1/models?limit=1000" >/dev/null; then',
+      '  claude',
+      'else',
+      "  printf '%s\\n' '网关验证失败，未启动 Claude Code。' >&2",
+      'fi',
+      ')',
+    ];
+    return lines.join('\n');
+  }
+
+  function claudeCodePowerShellConfig({ baseUrl = '', model = '' } = {}) {
+    const safeBaseURL = powerShellQuote(String(baseUrl || '').replace(/\/+$/, ''));
+    const safeModel = powerShellQuote(model);
+    const lines = [
+      '# Claude Code → Lite2API（PowerShell）',
+      '# Base URL 故意不包含 /v1；Claude Code 会自动请求 /v1/messages。',
+      '# 输入裸 API Key，不要手动添加 Bearer 前缀。',
+      `$env:ANTHROPIC_BASE_URL = ${safeBaseURL}`,
+      '$secureToken = Read-Host -Prompt \'Lite2API API Key\' -AsSecureString',
+      '$tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)',
+      'try {',
+      '  $env:ANTHROPIC_AUTH_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)',
+      '} finally {',
+      '  if ($tokenPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr) }',
+      '  $secureToken = $null',
+      '}',
+      `$env:ANTHROPIC_MODEL = ${safeModel}`,
+      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = \'1\'',
+    ];
+
+    if (!/(claude|anthropic)/i.test(String(model || ''))) {
+      lines.push(
+        `$env:ANTHROPIC_CUSTOM_MODEL_OPTION = ${safeModel}`,
+        `$env:ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = ${powerShellQuote(`${model || 'Lite2API'} (Lite2API)`)}`,
+        `$env:ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = 'Lite2API model route'`,
+      );
+    }
+
+    lines.push(
+      '',
+      '# 只验证 URL、Bearer Key 与模型目录，不产生模型调用。',
+      '# 验证失败时不会启动 Claude Code；关闭 Claude Code 后会清理当前进程的 Key 环境变量。',
+      '$headers = @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" }',
+      'try {',
+      '  Invoke-RestMethod -Method Get -Uri "$env:ANTHROPIC_BASE_URL/v1/models?limit=1000" -Headers $headers -TimeoutSec 15 -ErrorAction Stop | Out-Null',
+      '  claude',
+      '} catch {',
+      '  Write-Error "Lite2API/Claude Code 启动失败：$($_.Exception.Message)"',
+      '  throw',
+      '} finally {',
+      '  $headers = $null',
+      '  Remove-Item Env:ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue',
+      '}',
+    );
+    return lines.join('\n');
+  }
+
+  function claudeCodePersistentShellConfig({ baseUrl = '', model = '' } = {}) {
+    const safeBaseURL = shellQuote(String(baseUrl || '').replace(/\/+$/, ''));
+    const safeModel = shellQuote(model);
+    const lines = [
+      '# Claude Code → Lite2API（用户级持久化，Bash / Zsh）',
+      '# 需要已安装的 claude、curl、Python 3；输入裸 API Key，不要手动添加 Bearer 前缀。',
+      '# Key 只在提示符中输入，不写进 settings.json。',
+      `export ANTHROPIC_BASE_URL=${safeBaseURL}`,
+      'config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/lite2api"',
+      'settings_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"',
+      'key_file="$config_dir/api-key"',
+      'helper_file="$config_dir/api-key-helper"',
+      'settings_file="$settings_dir/settings.json"',
+      'if ! command -v claude >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then',
+      "  printf '%s\\n' '需要已安装的 claude、curl 与 Python 3，未写入配置，也未启动 Claude Code。' >&2",
+      'else',
+      "printf 'Lite2API API Key（不会显示输入内容）: '",
+      'IFS= read -r -s gateway_key',
+      "printf '\\n'",
+      'if [ -z "$gateway_key" ]; then',
+      "  printf '%s\\n' 'Key 不能为空，未写入配置，也未启动 Claude Code。' >&2",
+      'else',
+      '  if ! curl -fsS --connect-timeout 5 --max-time 15 \\',
+      '    --config <(printf \'header = "Authorization: Bearer %s"\\n\' "$gateway_key") \\',
+      '    "$ANTHROPIC_BASE_URL/v1/models?limit=1000" >/dev/null; then',
+      "    printf '%s\\n' '网关验证失败，未写入配置，也未启动 Claude Code。' >&2",
+      '  else',
+      '    if ! mkdir -p "$config_dir" "$settings_dir" || ! chmod 700 "$config_dir"; then',
+      "      printf '%s\\n' '无法创建安全配置目录，未写入配置，也未启动 Claude Code。' >&2",
+      '    else',
+      `      if LITE2API_BOOTSTRAP_KEY="$gateway_key" python3 - "$key_file" "$helper_file" "$settings_file" "$ANTHROPIC_BASE_URL" ${safeModel} <<'PY'`,
+      'import json',
+      'import os',
+      'import re',
+      'import shlex',
+      'import shutil',
+      'import sys',
+      'import tempfile',
+      'import time',
+      'from pathlib import Path',
+      '',
+      'key_path = Path(sys.argv[1]).expanduser().resolve()',
+      'helper_path = Path(sys.argv[2]).expanduser().resolve()',
+      'settings_path = Path(sys.argv[3]).expanduser().resolve()',
+      'base_url = sys.argv[4].rstrip("/")',
+      'model = sys.argv[5]',
+      'api_key = os.environ.get("LITE2API_BOOTSTRAP_KEY", "")',
+      '',
+      'if not api_key:',
+      '    raise SystemExit("Key 不能为空")',
+      'if not base_url:',
+      '    raise SystemExit("Base URL 不能为空")',
+      '',
+      'settings = {}',
+      'if settings_path.exists():',
+      '    try:',
+      '        with settings_path.open(encoding="utf-8") as stream:',
+      '            settings = json.load(stream)',
+      '    except json.JSONDecodeError as exc:',
+      '        raise SystemExit(f"现有 settings.json 不是有效 JSON：{exc}")',
+      '    if not isinstance(settings, dict):',
+      '        raise SystemExit("现有 settings.json 顶层必须是对象")',
+      '',
+      'env = settings.setdefault("env", {})',
+      'if not isinstance(env, dict):',
+      '    raise SystemExit("现有 settings.json 的 env 必须是对象")',
+      'for variable in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"):',
+      '    if env.get(variable):',
+      '        raise SystemExit(f"现有 settings.json 已设置 {variable}；为避免覆盖，请先清理后重试")',
+      '',
+      'helper_command = shlex.quote(str(helper_path))',
+      'existing_helper = settings.get("apiKeyHelper")',
+      'if existing_helper and str(existing_helper) != helper_command:',
+      '    raise SystemExit("现有 apiKeyHelper 指向其他程序；为避免覆盖，请先人工合并")',
+      '',
+      'env.update({',
+      '    "ANTHROPIC_BASE_URL": base_url,',
+      '    "ANTHROPIC_MODEL": model,',
+      '    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",',
+      '})',
+      'if model and not re.search(r"(claude|anthropic)", model, re.IGNORECASE):',
+      '    env.update({',
+      '        "ANTHROPIC_CUSTOM_MODEL_OPTION": model,',
+      '        "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"{model} (Lite2API)",',
+      '        "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Lite2API model route",',
+      '    })',
+      'settings["apiKeyHelper"] = helper_command',
+      '',
+      'def atomic_write(path, content, mode):',
+      '    path.parent.mkdir(parents=True, exist_ok=True)',
+      '    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)',
+      '    try:',
+      '        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:',
+      '            stream.write(content)',
+      '            stream.flush()',
+      '            os.fsync(stream.fileno())',
+      '        os.chmod(temporary, mode)',
+      '        os.replace(temporary, path)',
+      '    finally:',
+      '        if os.path.exists(temporary):',
+      '            os.unlink(temporary)',
+      '',
+      'if settings_path.exists():',
+      '    backup = settings_path.with_name(settings_path.name + f".lite2api.bak.{time.time_ns()}")',
+      '    shutil.copy2(settings_path, backup)',
+      '    os.chmod(backup, 0o600)',
+      'atomic_write(key_path, api_key + "\\n", 0o600)',
+      'atomic_write(helper_path, "#!/bin/sh\\nexec cat " + shlex.quote(str(key_path)) + "\\n", 0o700)',
+      'atomic_write(settings_path, json.dumps(settings, ensure_ascii=False, indent=2, sort_keys=True) + "\\n", 0o600)',
+      'print(f"已写入 {settings_path}；Key helper 位于 {helper_path}。")',
+      'PY',
+      '      then',
+      '        unset gateway_key LITE2API_BOOTSTRAP_KEY',
+      '        claude',
+      '      fi',
+      '    fi',
+      '  fi',
+      'fi',
+      'fi',
+      'unset gateway_key LITE2API_BOOTSTRAP_KEY',
+    ];
+    return lines.join('\n');
+  }
+
   // Return only keys backed by checked-in, vendor-provided artwork. Model
   // aliases deliberately resolve to the icon for their effective upstream
   // model so the UI never invents a look for a model family.
@@ -399,11 +625,16 @@
     channelChatModels,
     channelChatResponse,
     channelChatSupported,
+    claudeCodePersistentShellConfig,
+    claudeCodePowerShellConfig,
+    claudeCodeShellConfig,
     connectionTestRequired,
     defaultRouteForAccount,
     directModels,
     directResolution,
     finiteNumber,
+    gatewayAPIBaseFromPath,
+    gatewayBaseFromPath,
     hashText,
     logicalModels,
     meteredTokenTotal,
@@ -414,6 +645,8 @@
     routeImpact,
     routeValidation,
     serializeRoute,
+    powerShellQuote,
+    shellQuote,
     stableStringify,
     targetResolution,
     uniqueStrings

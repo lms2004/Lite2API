@@ -18,7 +18,7 @@ func TestCanonicalAdminDocument(t *testing.T) {
 		`id="manualAccountDialog"`, `id="connectionTestSteps"`, `id="importDialog"`,
 		`id="channelChatDialog"`, `id="channelChatMessages"`, `id="channelChatForm"`,
 		`id="onboardingResultDialog"`, `id="routeCreateDialog"`, `id="discardRoutesButton"`,
-		`id="routeEditor"`, `id="clientConfig"`, `globalThis.Lite2APIAppCore`,
+		`id="routeEditor"`, `id="clientConfig"`, `id="clientConfigMode"`, `globalThis.Lite2APIAppCore`,
 		`function runQuality(`, `function testManualAccount(`, `function runImport(`,
 		`function startOAuth(`, `function saveRoutes(`, `function createKey(`,
 		`function finishCredentialOnboarding(`, `function validateAndRenderRoutes(`,
@@ -62,7 +62,7 @@ func TestCanonicalUITrustAndAccessibility(t *testing.T) {
 		`id="oauthServiceState"`, `id="retryOAuthAccounts"`, `function oauthErrorPresentation(`,
 		`id="chartA11ySummary"`, `id="chartDataRows"`, `function chartKeyboard(`,
 		`class="clean-table responsive-table"`, `aria-label="搜索最近请求"`,
-		`function usageEvidence(`, "request(`/trends?range=${APP.range}`",
+		`function usageEvidence(`, `function loadSnapshot(`, `/trends?range=`,
 	}
 	for _, value := range required {
 		if !strings.Contains(page, value) {
@@ -126,6 +126,17 @@ func TestCanonicalScriptCSPHashMatchesDocument(t *testing.T) {
 	script := IndexHTML[start+len(startMarker) : end]
 	if got := cspHash(script); got != ScriptCSPSource {
 		t.Fatalf("script CSP source does not match embedded document: got %s want %s", got, ScriptCSPSource)
+	}
+}
+
+func TestScriptCSPHashIncludesTemplateWhitespace(t *testing.T) {
+	page := buildApp([]byte("<style>/*__APP_CSS__*/</style><script>\n  /*__APP_JS__*/\n</script>"), nil, []byte("boot();"))
+	script := scriptContent(page)
+	if !bytes.Equal(script, []byte("\n  boot();\n")) {
+		t.Fatalf("template whitespace was lost: %q", script)
+	}
+	if cspHash(script) == cspHash(bytes.TrimSpace(script)) {
+		t.Fatal("browser CSP hashes must distinguish template whitespace")
 	}
 }
 

@@ -45,6 +45,16 @@ async function waitForToast(page, text) {
 }
 
 let browser;
+const browserDeadline = setTimeout(async () => {
+  console.error('Browser acceptance exceeded its four-minute deadline');
+  await browser?.close();
+  process.exit(1);
+}, 240000);
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(signal, async () => {
+  clearTimeout(browserDeadline);
+  await browser?.close();
+  process.exit(1);
+});
 (async () => {
   browser = await chromium.launch({
     headless: true,
@@ -74,6 +84,12 @@ let browser;
     contentType: 'application/json',
     body: JSON.stringify(trendFixture())
   }));
+  // The adapter catalog contains conventional localhost deployment ports. Keep
+  // visual acceptance fully inside its fixtures even when run on an ops host.
+  await page.route('**/admin/api/adapters', route => route.fulfill({json:{data:[{
+    id:'fixture-adapter', name:'测试适配器', status:'ready',
+    description:'隔离验收环境的兼容模型服务', account_ids:['fast-lane']
+  }]}}));
 
   const login = await context.request.post(`${adminURL}/api/login`, { data: { token: 'preview-admin-token' } });
   if (!login.ok()) throw new Error(`login failed ${login.status()} ${await login.text()}`);
@@ -184,8 +200,8 @@ let browser;
   await page.waitForFunction(() => document.querySelector('#routeStatus')?.textContent.includes('未保存'));
   await page.locator('#routeEditor [data-route-action="duplicate"]').click();
   await page.waitForFunction(() => document.querySelector('#routeAliasInput')?.value.includes('-copy'));
-  page.once('dialog', dialog => dialog.accept());
   await page.locator('#routeEditor [data-route-action="delete"]').click();
+  await page.locator('#confirmAccept').click();
   await page.waitForFunction(() => ![...document.querySelectorAll('#routeList [data-route-alias]')].some(button => button.dataset.routeAlias.includes('-copy')));
   await screenshot(page, 'route-draft');
   await page.locator('#saveRoutesButton').click();
@@ -223,6 +239,7 @@ let browser;
   await screenshot(page, 'import-dry-run');
   await page.locator('#importDialog .close-button').click();
 
+  await require('./interaction_checks.js')(page, log);
   log('[stage] mobile layout and structural checks');
   const duplicateIDs = await page.evaluate(() => {
     const counts = new Map();
@@ -244,5 +261,6 @@ let browser;
   console.error(error);
   process.exitCode = 1;
 }).finally(async () => {
+  clearTimeout(browserDeadline);
   await browser?.close();
 });
