@@ -18,7 +18,8 @@ func TestCanonicalAdminDocument(t *testing.T) {
 		`id="manualAccountDialog"`, `id="connectionTestSteps"`, `id="importDialog"`,
 		`id="channelChatDialog"`, `id="channelChatMessages"`, `id="channelChatForm"`,
 		`id="onboardingResultDialog"`, `id="routeCreateDialog"`, `id="discardRoutesButton"`,
-		`id="routeEditor"`, `id="clientConfig"`, `id="clientConfigMode"`, `globalThis.Lite2APIAppCore`,
+		`id="routeEditor"`, `id="routeCreateModelSelect"`, `id="routeCreateCustomModelField"`,
+		`id="clientConfig"`, `id="clientConfigMode"`, `globalThis.Lite2APIAppCore`,
 		`function runQuality(`, `function testManualAccount(`, `function runImport(`,
 		`function startOAuth(`, `function saveRoutes(`, `function createKey(`,
 		`function finishCredentialOnboarding(`, `function validateAndRenderRoutes(`,
@@ -37,7 +38,7 @@ func TestCanonicalAdminDocument(t *testing.T) {
 		"native-v5", "native-v6", "native-v7", "native-v8", "native-v9", "native-v10", "native-v12",
 		"class=\"app-shell native-shell\"", "/*__APP_CSS__*/", "/*__APP_JS__*/", "onclick=\"",
 		"MutationObserver", "window.selectAccountTemplate", "window.renderRoutes",
-		"class=\"segmented account-tabs\"", "创建路由草稿",
+		"class=\"segmented account-tabs\"", "创建路由草稿", `id="routeCreateModels"`, `targetModels${index}`,
 	}
 	for _, value := range forbidden {
 		if strings.Contains(page, value) {

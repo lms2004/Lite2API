@@ -28,7 +28,7 @@ test('gateway base derives the public prefix from the admin mount', () => {
   assert.equal(core.gatewayBaseFromPath('https://gateway.test/', '/admin'), 'https://gateway.test');
 });
 
-test('Claude Code temporary config embeds the selected key and pins every model entry point', () => {
+test('Claude Code temporary config embeds the selected key and maps its capabilities for one session', () => {
   const config = core.claudeCodeShellConfig({
     baseUrl: 'https://gateway.test/lite',
     model: 'Shadow',
@@ -36,14 +36,29 @@ test('Claude Code temporary config embeds the selected key and pins every model 
   });
   assert.match(config, /export ANTHROPIC_BASE_URL='https:\/\/gateway\.test\/lite'/);
   assert.match(config, /export ANTHROPIC_AUTH_TOKEN='lite'\\''key'/);
-  assert.match(config, /export ANTHROPIC_MODEL='Shadow'/);
+  assert.doesNotMatch(config, /export ANTHROPIC_MODEL=/);
   assert.match(config, /export ANTHROPIC_DEFAULT_OPUS_MODEL='Shadow'/);
   assert.match(config, /export ANTHROPIC_DEFAULT_SONNET_MODEL='Shadow'/);
   assert.match(config, /export ANTHROPIC_DEFAULT_HAIKU_MODEL='Shadow'/);
   assert.match(config, /export CLAUDE_CODE_SUBAGENT_MODEL='Shadow'/);
+  assert.match(config, /lite2api_claude_settings='\{"modelPicker":/);
+  const settingsLiteral = config.match(/^lite2api_claude_settings='(.+)'$/m)?.[1];
+  assert.ok(settingsLiteral, 'the launcher includes an inline Claude Code settings object');
+  assert.deepEqual(JSON.parse(settingsLiteral), {
+    modelPicker: {
+      options: [{
+        model: 'Shadow',
+        label: 'Shadow (Lite2API)',
+        description: 'Lite2API model route',
+        behavesAs: 'claude-opus-4-6',
+      }],
+      replaceBuiltInOptions: true,
+    },
+  });
   assert.match(config, /unset ANTHROPIC_API_KEY ANTHROPIC_API_HOST CLAUDE_CODE_API_BASE_URL/);
   assert.match(config, /unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_ANTHROPIC_AWS/);
-  assert.match(config, /claude --model "\$ANTHROPIC_MODEL"/);
+  assert.match(config, /claude --settings "\$lite2api_claude_settings" --model 'Shadow'/);
+  assert.match(config, /command -v claude/);
   assert.doesNotMatch(config, /read -r -s|GATEWAY_MODEL_DISCOVERY|ANTHROPIC_CUSTOM_MODEL_OPTION/);
   assert.match(config, /\$ANTHROPIC_BASE_URL\/v1\/models\?limit=1000/);
   assert.match(config, /if curl -fsS/);

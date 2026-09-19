@@ -219,6 +219,53 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 	}
 }
 
+func TestEnsureOAuthCredentialPrefixesIsolatesOverlappingProviders(t *testing.T) {
+	const managementKey = "management-test-secret"
+	patched := make([]map[string]any, 0, 2)
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+managementKey {
+			t.Errorf("missing management authorization")
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/management/auth-files":
+			writeJSON(w, http.StatusOK, map[string]any{"files": []map[string]any{
+				{"id": "claude-a.json", "name": "claude-a.json", "provider": "claude"},
+				{"id": "antigravity-a.json", "name": "antigravity-a.json", "provider": "antigravity"},
+				{"id": "codex-a.json", "name": "codex-a.json", "provider": "codex"},
+				{"id": "runtime-claude", "provider": "claude", "runtime_only": true},
+			}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/v0/management/auth-files/fields":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			patched = append(patched, payload)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer adapter.Close()
+
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", adapter.URL)
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_KEY", managementKey)
+	if err := ensureOAuthCredentialPrefixes(context.Background(), "anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureOAuthCredentialPrefixes(context.Background(), "antigravity"); err != nil {
+		t.Fatal(err)
+	}
+	if len(patched) != 2 {
+		t.Fatalf("patched=%+v", patched)
+	}
+	if patched[0]["name"] != "claude-a.json" || patched[0]["prefix"] != "claude-code" {
+		t.Fatalf("Claude patch=%+v", patched[0])
+	}
+	if patched[1]["name"] != "antigravity-a.json" || patched[1]["prefix"] != "antigravity" {
+		t.Fatalf("Antigravity patch=%+v", patched[1])
+	}
+}
+
 func TestAdminOAuthAccountDeleteRemovesAuthFile(t *testing.T) {
 	const managementKey = "management-delete-secret"
 	var deleted atomic.Bool

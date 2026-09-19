@@ -2,7 +2,7 @@
 
 更新时间：2026-09-12
 
-本文针对 Lite2API 当前的客户端配置生成器，以及 `https://sub2api.foresights.top` 的现有反向代理拓扑。目标不是堆砌环境变量，而是让“复制配置 → 安全输入 Key → 无模型调用验证 → 启动 Claude Code”成为一条可诊断、可升级的路径。
+本文针对 Lite2API 当前的客户端配置生成器，以及 `https://sub2api.foresights.top` 的现有反向代理拓扑。目标不是堆砌环境变量，而是让“创建 Key → 明文自动填入临时命令 → 无模型调用预检 → 启动 Claude Code”成为一条可诊断、可升级的路径。
 
 ## 结论先行
 
@@ -14,51 +14,44 @@ https://sub2api.foresights.top/lite
 
 这里故意不带 `/v1`。Claude Code 通过 `ANTHROPIC_BASE_URL` 使用 Anthropic Messages 协议，并自行请求 `/v1/messages`；因此写成域名根会命中不存在的 `/v1/messages`，写成 `/lite/v1` 又会重复成 `/lite/v1/v1/messages`。
 
-验证边界：本次工作环境无法解析公网域名，因此没有把 live 请求结果当作已验证事实；上述 `/lite` 判断来自工作区保存的 Nginx staging 配置，发布前仍需按文末清单执行真实公网验收。
+已使用 Claude Code `2.1.269` 对公网网关执行真实验收：`GET /lite/v1/models` 返回 200，使用默认工具集的 `POST /lite/v1/messages` 首次请求返回 200，模型路由仍为 `Shadow`。
 
 `ANTHROPIC_AUTH_TOKEN` 的值应是裸 Key，不要手动加 `Bearer `。Claude Code 会把它作为 `Authorization: Bearer <value>` 发送。`ANTHROPIC_API_KEY` 是另一条 `X-Api-Key` 认证路径，不应与本网关的 Bearer 配置同时生成。
 
-`Shadow` 不是标准 Claude 名称。Claude Code 的网关模型发现会读取 `/v1/models`，但只保留 ID 中包含 `claude` 或 `anthropic` 的条目，所以仅设置 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 不能保证 `Shadow` 出现在 `/model` 列表。应同时设置 `ANTHROPIC_CUSTOM_MODEL_OPTION=Shadow`，并保留网关发现开关以发现其他标准 Claude 路由。
+`Shadow` 不是 Claude Code 内置模型 ID。仅设置 `ANTHROPIC_MODEL=Shadow` 会触发 `unrecognized_model`，且在 Claude Code `2.1.269` 上可以构造出被上游拒绝的请求，错误为 `role 'system' is not supported on this model`。临时命令应通过 `--settings` 添加仅本会话生效的 `modelPicker` 行，以 `behavesAs: claude-opus-4-6` 声明 Shadow 的实际能力族。这会保留 `Shadow` 路由名，同时让 Claude Code 按已知 Opus 4.6 模型生成请求。
 
 ## 推荐的一次性安全启动命令
 
-这是当前生成器应输出的 Bash/Zsh 版本。外层子 Shell 让一次性启动结束后不污染调用终端；它不把明文 Key 拼进命令文本，避免复制到终端历史；Key 在提示符中静默输入。
+这是当前生成器输出的 Bash/Zsh 结构。管理端创建 Key 后会把 `<AUTO_FILLED_KEY>` 直接替换为本次仅显示一次的明文，无需再次复制 Key。外层子 Shell 保证关闭 Claude Code 后环境变量自动清理。
 
 ```bash
 (
 # Claude Code → Lite2API（Bash / Zsh）
 # Base URL 故意不包含 /v1；Claude Code 会自动请求 /v1/messages。
-# 输入裸 API Key，不要手动添加 Bearer 前缀。
+# 下面是文档示意；管理端生成的实际命令会自动填入 Key。
+unset ANTHROPIC_API_KEY ANTHROPIC_API_HOST CLAUDE_CODE_API_BASE_URL
+unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_ANTHROPIC_AWS
 export ANTHROPIC_BASE_URL='https://sub2api.foresights.top/lite'
-if ! command -v claude >/dev/null 2>&1; then
-  printf '%s\n' '找不到 claude 命令，请先安装 Claude Code。' >&2
-else
-  printf 'Lite2API API Key: '
-  IFS= read -r -s ANTHROPIC_AUTH_TOKEN
-  printf '\n'
-  export ANTHROPIC_AUTH_TOKEN
-  export ANTHROPIC_MODEL='Shadow'
-  export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-  export ANTHROPIC_CUSTOM_MODEL_OPTION='Shadow'
-  export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME='Shadow (Lite2API)'
-  export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION='Lite2API model route'
+export ANTHROPIC_AUTH_TOKEN='<AUTO_FILLED_KEY>'
+export ANTHROPIC_DEFAULT_OPUS_MODEL='Shadow'
+export ANTHROPIC_DEFAULT_SONNET_MODEL='Shadow'
+export ANTHROPIC_DEFAULT_HAIKU_MODEL='Shadow'
+export CLAUDE_CODE_SUBAGENT_MODEL='Shadow'
+lite2api_claude_settings='{"modelPicker":{"options":[{"model":"Shadow","label":"Shadow (Lite2API)","description":"Lite2API model route","behavesAs":"claude-opus-4-6"}],"replaceBuiltInOptions":true}}'
 
-  # 只验证 URL、Bearer Key 与模型目录，不产生模型调用。
-  # 验证失败时不会启动 Claude Code；子 Shell 结束后自动清理 Key。
-  # ANTHROPIC_MODEL 也可被 claude --model <MODEL> 临时覆盖。
-  if curl -fsS --connect-timeout 5 --max-time 15 \
-    --config <(printf 'header = "Authorization: Bearer %s"\n' "$ANTHROPIC_AUTH_TOKEN") \
-    "$ANTHROPIC_BASE_URL/v1/models?limit=1000" >/dev/null; then
-    claude
-  else
-    printf '%s\n' '网关验证失败，未启动 Claude Code。' >&2
-  fi
-  unset ANTHROPIC_AUTH_TOKEN
+if ! command -v claude >/dev/null 2>&1; then
+  printf '%s\n' '找不到 claude 命令，请先安装或更新 Claude Code。' >&2
+elif curl -fsS --connect-timeout 5 --max-time 15 \
+  --config <(printf 'header = "Authorization: Bearer %s"\n' "$ANTHROPIC_AUTH_TOKEN") \
+  "$ANTHROPIC_BASE_URL/v1/models?limit=1000" >/dev/null; then
+  claude --settings "$lite2api_claude_settings" --model 'Shadow'
+else
+  printf '%s\n' '网关验证失败，未启动 Claude Code。' >&2
 fi
 )
 ```
 
-这里选择 `ANTHROPIC_MODEL` 而不是把 `--model Shadow` 作为唯一配置：前者在本次启动中提供默认路由，后者仍然可以作为单次会话覆盖；一次性模式退出后不保留该子 Shell 环境，若需要跨会话免重复输入应选择持久化模式。当前本机 Claude Code 版本是 `2.1.234`，因此没有依赖文档中要求 `2.1.236+` 的 `ANTHROPIC_DEFAULT_MODEL`。
+`--model Shadow` 是主会话的唯一选择源，因此不再重复导出 `ANTHROPIC_MODEL`。三个 `ANTHROPIC_DEFAULT_*_MODEL` 分别覆盖 Claude Code 可能使用的 Opus/Sonnet/Haiku 内部入口，`CLAUDE_CODE_SUBAGENT_MODEL` 覆盖子代理，它们不是主模型的重复设置。
 
 ## 官方协议约束与配置决策
 
@@ -66,10 +59,10 @@ fi
 | --- | --- | --- |
 | 基地址 | `ANTHROPIC_BASE_URL` 指向网关基地址；Messages 请求落在 `/v1/messages` | 生成器从 `/lite-admin/` 推导 `/lite`，再由 Claude Code 拼 `/v1` |
 | 认证 | `ANTHROPIC_AUTH_TOKEN` 生成 Bearer；`ANTHROPIC_API_KEY` 生成 `X-Api-Key` | 只生成 Bearer 变量，不混用两套凭据 |
-| 模型发现 | `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 后请求 `GET /v1/models?limit=1000`；失败会使用缓存/内置列表 | 保留发现开关，并在启动前用同一路径做只读检查 |
-| 非标准模型 | 发现列表过滤掉不含 `claude`/`anthropic` 的 ID | 对 `Shadow` 自动追加 `ANTHROPIC_CUSTOM_MODEL_OPTION*` |
-| 模型默认值 | `ANTHROPIC_MODEL` 可作为启动默认；`--model` 是会话级覆盖 | 生成 `ANTHROPIC_MODEL`，避免只生成一次性 flag |
-| Key 安全 | `settings.json` 的 `env` 可跨会话生效；`apiKeyHelper` 可从脚本取凭据 | 一次性命令静默读 Key；持久化模式应优先使用 `apiKeyHelper` |
+| 模型发现 | 网关发现只把特定 ID 加入 picker，且发现不等于能力识别 | 预检仍请求 `/v1/models`，模型能力由临时 `modelPicker.behavesAs` 明确声明 |
+| 非标准模型 | `modelPicker` 可添加自定义 ID，`behavesAs` 使其继承已知模型的能力与请求行为 | 将 `Shadow` 声明为 `claude-opus-4-6`，同时用 `replaceBuiltInOptions` 避免切换到网关未开放的模型 |
+| 模型默认值 | `--model` 的优先级高于 `ANTHROPIC_MODEL` 和 settings 中的 `model` | 只使用 `--model Shadow` 选择主会话，不再同时生成 `ANTHROPIC_MODEL` |
+| Key 安全 | `ANTHROPIC_AUTH_TOKEN` 作为 Bearer token | 新 Key 仅显示一次并自动填入子 Shell；服务端仅保留摘要 |
 | 自定义网关能力 | 需要转发 `anthropic-version`、`anthropic-beta`、工具/缓存/思考相关字段 | 默认命令不打开实验开关，把协议兼容放在网关测试与版本矩阵中 |
 
 依据： [环境变量参考](https://code.claude.com/docs/en/env-vars)、[模型配置](https://code.claude.com/docs/en/model-config)、[网关兼容性协议](https://code.claude.com/docs/en/llm-gateway-protocol)、[网关认证](https://code.claude.com/docs/en/team)。
@@ -77,12 +70,12 @@ fi
 ## 已落实到当前代码
 
 1. `gatewayBaseFromPath()` 处理 `/lite-admin/ → /lite`、`/admin/ → /` 两种挂载方式，避免把管理路径误当成公网 API 路径。
-2. Claude Code 生成器使用安全 Shell 引用、静默读取 Key、`/v1/models` 只读验证和非标准模型自定义选项。
+2. Claude Code 生成器使用安全 Shell 引用、自动填入新 Key、`/v1/models` 只读预检，并通过临时 `modelPicker.behavesAs` 映射 Shadow 的 Opus 4.6 能力。
 3. Codex/OpenAI/cURL 配置改用独立的 `/v1` API 基地址，避免 Claude Code 基地址修正后影响其他客户端。
 4. Key 验证按钮也改用正确的公网 `/v1/models` 地址，并明确提示不会产生模型调用。
 5. 配置面提供 Bash/Zsh 一次性启动、PowerShell 安全启动、用户级持久化三种模式；持久化模式使用 `apiKeyHelper`，合并并备份用户 settings，Key/helper/settings 权限分别收紧到 `0600`/`0700`/`0600`。
 6. Key 验证会请求 `GET /v1/models?limit=1000`，同时检查当前选中的模型是否真的在该 Key 的可访问目录中。
-7. 增加了路径、模型别名、Shell 转义、PowerShell/持久化生成器和“命令文本不含 Key”的 Node 测试；生成文本通过 `bash -n` 检查，`internal/web` Go 测试通过。
+7. 增加了路径、模型能力映射、Shell 转义、PowerShell/持久化生成器和 Key 边界的 Node 测试；生成文本通过 `bash -n` 检查，`internal/web` Go 测试通过。
 
 相关实现：
 
@@ -125,7 +118,7 @@ fi
 
 - 已增加 `POST /v1/messages/count_tokens` 的 Anthropic Messages 转发。官方说明没有该端点时 Claude Code 仍能工作，但 `/context` 只能显示基于字符的近似值；当前实现仍依赖上游 Anthropic-compatible 服务实际支持该端点。
 - 建议 `/v1/models` 增加可选的 `display_name`、`description`，让 Claude Code 的 `/model` 列表不只显示裸别名；不能改变 `id`，因为 `id` 是实际路由键。
-- 建议为路由暴露模型能力元数据（thinking、effort、工具、上下文窗口），再按能力生成 `ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES`；未确认能力时宁可不声明，避免客户端发送上游不接受的字段。
+- 建议为路由暴露模型能力元数据（thinking、effort、工具、上下文窗口），未来可按路由动态生成 `behavesAs` 或精确 capability；当前 Shadow 的生产目标已确认为 Opus 4.6。
 - 建立 Claude Code 版本矩阵，至少覆盖标准 Claude ID、`Shadow`、流式工具调用、adaptive thinking、上下文计数和 401/403/429/5xx 错误转发。
 
 ### P2：后续产品增强
@@ -140,9 +133,9 @@ fi
 
 - [ ] 管理端页面为 `/lite-admin/` 时，生成 `ANTHROPIC_BASE_URL=https://sub2api.foresights.top/lite`。
 - [ ] `/v1/models` 无 Key 为 401，正确 Key 为 200；验证按钮不调用 `/messages`。
-- [ ] `Shadow` 可通过 `ANTHROPIC_CUSTOM_MODEL_OPTION` 启动，并且 client-key 的模型白名单允许 `Shadow`。
+- [ ] `Shadow` 通过临时 `modelPicker.behavesAs=claude-opus-4-6` 启动，并且 client-key 的模型白名单允许 `Shadow`。
 - [ ] 启动后 `/status` 显示自定义 base URL 和网关认证，而不是复用本地登录状态。
-- [ ] `/model` 能看到标准发现项与 Shadow 自定义项；若设置 managed `availableModels`，其中包含 `Shadow`。
+- [ ] `/model` 只显示本次命令配置的 Shadow 行，且不再输出 `unrecognized_model`。
 - [ ] 用 `claude --debug` 检查发现请求是否为 `GET /v1/models?limit=1000`，且没有重定向。
 - [ ] 持久化模式写入后执行 `claude doctor`，确认 `apiKeyHelper`、用户 settings 和更高优先级配置没有冲突。
 - [ ] 发送一次真实请求验证 `/v1/messages`、流式 ping、模型重写、工具调用和错误体转发。

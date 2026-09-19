@@ -166,6 +166,55 @@ type oauthAuthFilesResponse struct {
 	} `json:"files"`
 }
 
+func oauthCredentialPrefix(provider string) string {
+	switch normalizeOAuthProvider(provider) {
+	case "anthropic":
+		return "claude-code"
+	case "antigravity":
+		return "antigravity"
+	default:
+		return ""
+	}
+}
+
+// ensureOAuthCredentialPrefixes keeps provider families with overlapping model
+// IDs in separate CLIProxy namespaces. Without these prefixes, a Claude model
+// can either be absent from the scoped Lite2API catalog or share a scheduler
+// pool with an Antigravity credential advertising the same unqualified ID.
+func ensureOAuthCredentialPrefixes(ctx context.Context, provider string) error {
+	normalizedProvider := normalizeOAuthProvider(provider)
+	desiredPrefix := oauthCredentialPrefix(normalizedProvider)
+	if desiredPrefix == "" {
+		return nil
+	}
+	var payload oauthAuthFilesResponse
+	if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &payload); err != nil {
+		return err
+	}
+	matched := 0
+	for _, item := range payload.Files {
+		if normalizeOAuthProvider(item.Provider) != normalizedProvider {
+			continue
+		}
+		name := firstNonEmpty(strings.TrimSpace(item.Name), strings.TrimSpace(item.ID))
+		if name == "" || item.RuntimeOnly {
+			continue
+		}
+		var result struct {
+			Status string `json:"status"`
+		}
+		fields := map[string]any{"name": name, "prefix": desiredPrefix}
+		if err := callOAuthAdapter(ctx, http.MethodPatch, "auth-files/fields", nil, fields, &result); err != nil {
+			return fmt.Errorf("set %s prefix on OAuth credential: %w", normalizedProvider, err)
+		}
+		matched++
+	}
+	if matched == 0 {
+		return fmt.Errorf("no %s credential was visible after authentication", normalizedProvider)
+	}
+	return nil
+}
+
 func (g *Gateway) serveOAuthStart(w http.ResponseWriter, r *http.Request) {
 	var input oauthStartRequest
 	if decodeAdminJSON(w, r, &input) != nil {
@@ -243,10 +292,17 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		response["error"] = result.Error
 	}
 	if result.Status == "ok" {
+		if err := ensureOAuthCredentialPrefixes(r.Context(), input.Provider); err != nil {
+			response["warning"] = "OAuth credential was saved, but provider isolation failed: " + err.Error()
+		}
 		ready, err := g.ensureOAuthPoolAccount(r.Context(), input.Provider)
 		response["pool_ready"] = ready
 		if err != nil {
-			response["warning"] = err.Error()
+			if warning, ok := response["warning"].(string); ok && warning != "" {
+				response["warning"] = warning + "; " + err.Error()
+			} else {
+				response["warning"] = err.Error()
+			}
 		}
 		if credentials, listErr := listOAuthCredentials(r.Context()); listErr == nil {
 			count := 0

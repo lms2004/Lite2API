@@ -76,6 +76,13 @@ func TestBuildOAuthAuthFilePlatforms(t *testing.T) {
 		if provider != tc.provider || name != tc.wantName || bundle["type"] != tc.wantType {
 			t.Fatalf("%s: provider=%q name=%q type=%v", tc.platform, provider, name, bundle["type"])
 		}
+		wantPrefix := "claude-code"
+		if tc.platform == "antigravity" {
+			wantPrefix = "antigravity"
+		}
+		if bundle["prefix"] != wantPrefix {
+			t.Fatalf("%s: prefix=%v, want %q", tc.platform, bundle["prefix"], wantPrefix)
+		}
 	}
 }
 

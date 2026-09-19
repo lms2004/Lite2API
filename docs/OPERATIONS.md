@@ -127,6 +127,7 @@ sudo ./deploy/server-ops/backup-configs.sh /mnt/offsite/lite2api-systemd-$(date 
 - 调整 OAuth 优先级后仍命中旧账号：刷新账号列表确认持久化值；Gemini 虚拟项目账号会把优先级写回父凭据并同步到项目条目。若目标账号处于冷却或不支持请求模型，调度器会跳过它，即使它的数值最高。
 - 外层路由没有按连接优先级选号：显式 `targets[]` 默认为严格手动顺序。到“模型路由”把“账号策略”改为“账号优先级”后，才会按 Lite 连接 priority **小值优先**；同值继续使用拖动顺序。也可选最少负载、轮询或会话粘滞。明确拒绝的 401/402/403/429、显式目标 404 和可证明尚未写入上游的连接错误可以排除当前目标后继续；任意上游 POST 的 408/409/425/5xx 或写入后传输错误都可能已经产生结果或计费（包括 Embeddings、Rerank），会返回 `uncertain_submission` 而不自动重放。
 - “同级选号”保存失败：CLIProxyAPI 必须能写自己的单个配置文件。Compose 应把 `/CLIProxyAPI/config.yaml` 以 `rw` 挂载；systemd 配置应为 `root:cliproxyapi 0660`，并在沙箱中仅放行 `/etc/cliproxyapi/config.yaml`。仓库安装器会设置这两个边界，并在升级时保留已选的 `round-robin` / `fill-first`。不要扩大为整个 `/etc` 可写。
+- `unknown provider for model claude-code/...`：先检查 Claude auth 文件是否包含 `"prefix":"claude-code"`，Antigravity auth 文件是否包含 `"prefix":"antigravity"`，再确认 CLIProxyAPI 的 `/v1/models` 已发布对应前缀。Lite2API 经由 OAuth 或导入创建的凭据会自动收敛该字段；只有绕过管理面手工放置的文件需要人工补齐。
 - Claude 额度显示“等待观测”：先确认已有真实 Claude 请求成功；Claude 快照等待真实响应。Codex、Gemini CLI 或 Antigravity 显示“正在按需同步”时，保持账号页打开一个刷新周期；官方查询异步执行，并按凭据缓存 10 分钟。不要把未知当作 0%，也不要开启 `passthrough-headers`。
 - 额度显示“数据已过期”：账号可能长时间没有流量；这是观测新鲜度提示，不会单独触发停用。真正的 429/冷却仍由适配器健康状态处理。
 - 官方额度查询失败不会阻断推理或把账号停用；失败凭据最早 1 分钟后重试，成功凭据 10 分钟后才允许再次查询。先检查 OAuth Token、项目 ID、账号代理和提供方状态，不要通过缩短页面刷新间隔放大故障。

@@ -80,6 +80,8 @@ CLIProxyAPI 生产版本必须显式修改子模块 revision 和 Compose 的 `VE
 
 认证池和路由池是两个层次：一个 `cliproxy-oauth` 路由连接可复用多个 OAuth 凭据。成功登录后应在“渠道账号”看到新的脱敏凭据和统计，路由连接数量不增加是正常且节省资源的行为。认证账号优先级使用高值优先，先选最高的可用优先级层；同级可轮询或固定首选，禁用、鉴权失败、额度/模型冷却和上游错误会自动换号。Lite 外层显式路由默认严格按 `targets[]` 顺序，也可在“账号策略”中改为外层 priority 小值优先、最少负载、轮询或会话粘滞；两层不要用相反的 priority 方向互相推断。
 
+Claude 官方与 Antigravity 会发布部分同名 Claude 模型。Lite2API 因此在 OAuth 完成及账号导入时分别把凭据收敛到 `claude-code/` 和 `antigravity/` 模型命名空间；这不是展示别名，而是 CLIProxyAPI 的凭据级隔离边界。若手工放置 auth 文件，也必须写入对应的 `prefix`，否则 `claude-code/...` 模型不会注册，或未限定前缀的同名模型会混入另一 provider 的账号池。可通过 `GET /v1/models` 验证带前缀模型已出现，再进行会消耗额度的生成测试。
+
 仓库模板使用 `max-retry-credentials: 0`，让一次请求遍历所有当前可选凭据，并使用 `request-retry: 0` 在一轮失败后立即交给 Lite 外层目标链。选号策略通过回环管理 API 写回配置：Compose 只把单个 `config.yaml` 以可写 bind mount 暴露给非 root 容器；systemd 只放行 `/etc/cliproxyapi/config.yaml` 且保持 `root:cliproxyapi 0660`。安装器和渠道 bootstrap 重建配置时会保留现有 `round-robin` / `fill-first`，其余安全模板值仍由仓库收敛。
 
 Claude 额度使用真实请求响应中的统一限额字段生成内存快照，支持 5 小时、7 天、Sonnet 周和 Opus 周窗口。Codex 使用 ChatGPT 官方 usage 接口读取主/次窗口，Gemini CLI 与 Antigravity 使用 Code Assist 官方 `retrieveUserQuota` 读取模型桶；它们仅在账号页可见时按需触发，每个凭据 10 分钟内最多一次并异步完成。反重力还展示可用 AI Credits，所有渠道发生 429 时都会保留模型冷却和重置时间。快照只包含脱敏后的窗口、百分比/余额、模型、重置和观测时间，服务重启后自然清空；没有可靠字段时保持 unknown，不用本地请求数推算官方余额。路由目标可选填公开的 `auth_index`，将请求固定到一个认证账号；CLIProxyAPI 会返回实际命中的公开索引，Lite2API 只记录脱敏索引并按“连接、认证账号、操作、模型”隔离熔断。空索引继续使用自动账号池。只有 CLIProxyAPI 明确证明请求尚未提交时，受信的内部标记才允许 5xx 跨账号重放；普通供应商 5xx 仍按结果不确定处理。Antigravity 的明确 `MODEL_CAPACITY_EXHAUSTED` 拒绝会归一为 429。systemd 安装器会对固定上游提交依次幂等应用 `deploy/patches/cliproxyapi-quota-snapshot.patch`、`deploy/patches/cliproxyapi-routing-reliability.patch`、`deploy/patches/cliproxyapi-auth-refresh.patch` 与 `deploy/patches/cliproxyapi-credential-routing.patch`，不自动跟随第三方分支。

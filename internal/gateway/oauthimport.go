@@ -81,6 +81,7 @@ func (item AccountImportItem) buildOAuthAuthFile(index int) (provider, fileName 
 	case "anthropic", "claude":
 		bundle = map[string]any{
 			"type": "claude", "access_token": accessToken, "refresh_token": refreshToken, "email": email,
+			"prefix":            "claude-code",
 			"account_uuid":      credString(credentials, "account_uuid"),
 			"organization_uuid": credString(credentials, "org_uuid", "organization_uuid"),
 			"last_refresh":      now, "expired": expired,
@@ -89,6 +90,7 @@ func (item AccountImportItem) buildOAuthAuthFile(index int) (provider, fileName 
 	case "antigravity":
 		bundle = map[string]any{
 			"type": "antigravity", "access_token": accessToken, "refresh_token": refreshToken, "email": email,
+			"prefix":     "antigravity",
 			"project_id": credString(credentials, "project_id"),
 			"token_type": firstNonEmpty(credString(credentials, "token_type"), "Bearer"),
 			"expired":    expired,

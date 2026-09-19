@@ -2117,6 +2117,13 @@ dialog::backdrop {
   min-width: 0;
   font-size: 0.875rem;
 }
+.target-model-picker {
+  display: grid;
+  gap: 6px;
+}
+.target-model-picker [hidden] {
+  display: none;
+}
 .route-preview {
   display: grid;
   grid-template-columns: minmax(190px, 0.8fr) minmax(260px, 1.2fr);

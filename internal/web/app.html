@@ -504,7 +504,7 @@
               <div class="section-head">
                 <div>
                   <h2>接入配置</h2>
-                  <p>选择客户端与默认模型，生成可直接复制的配置；新建 Key 会自动填入 Claude Code 临时命令。</p>
+                  <p>选择客户端与默认模型，生成可直接复制的配置；新建 Key 会自动填入 Claude Code 临时命令，退出后自动清理。</p>
                 </div>
               </div>
               <div class="client-chooser" id="clientChooser" role="group" aria-label="客户端类型">
@@ -889,12 +889,14 @@
         <div class="route-create-body">
           <label>连接<select id="routeCreateConnection" name="connection" required></select></label
           ><label
-            >模型<input
+            >模型<select id="routeCreateModelSelect" name="model_choice" required></select></label
+          ><label id="routeCreateCustomModelField" hidden
+            >自定义模型<input
               id="routeCreateModel"
               name="model"
-              list="routeCreateModels"
-              placeholder="选择或填写真实模型"
-              required /><datalist id="routeCreateModels"></datalist></label
+              placeholder="填写真实上游模型 ID"
+              autocomplete="off"
+              required /></label
           ><label
             >对外模型名<input id="routeCreateAlias" name="alias" placeholder="默认与模型相同" required
           /></label>

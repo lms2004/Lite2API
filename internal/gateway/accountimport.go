@@ -153,6 +153,9 @@ func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportReque
 		}
 		sort.Strings(providers)
 		for _, provider := range providers {
+			if err := ensureOAuthCredentialPrefixes(ctx, provider); err != nil {
+				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: err.Error()})
+			}
 			if _, err := g.ensureOAuthPoolAccount(ctx, provider); err != nil {
 				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: err.Error()})
 				continue

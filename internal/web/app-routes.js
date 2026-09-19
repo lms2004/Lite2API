@@ -32,8 +32,10 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     routeConflict: false,
     routesDirty: false,
     routeCreateAliasTouched: false,
+    routeCreateManualModel: false,
     routePickerAliases: new Set(),
   };
+  const customRouteModelValue = '__lite2api_custom_model__';
   let saving = false;
 
   function receiveSnapshot(serverRoutes = {}) {
@@ -422,10 +424,11 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
             )}</select><span class="target-resolution ${target.credential ? '' : 'warn'}">${target.credential ? '只使用该账号；失败后进入下一目标' : '由认证池自动选号并在池内重试'}</span></label>`
         : '';
     const directModels = Core.directModels(account),
-      listID = `targetModels${index}`;
+      selectedFromCatalog = directModels.includes(target.model),
+      manualModel = !target.model || !selectedFromCatalog;
     const modelField = route.model
       ? `<label data-ui-key="model">解析后的上游模型<div class="resolved-field ${invalid ? 'bad' : ''}">${resolution.upstream_model ? modelLabelHTML(resolution.upstream_model, 'resolved-model-label') : '无法解析'}</div></label>`
-      : `<label data-ui-key="model">实际上游模型<input data-target-field="model" list="${listID}" value="${escapeHTML(target.model || '')}" placeholder="必填；可选择或手动填写"><datalist id="${listID}">${directModels.map((model) => `<option value="${escapeHTML(model)}"></option>`).join('')}</datalist></label>`;
+      : `<label data-ui-key="model">实际上游模型<div class="target-model-picker"><select data-target-model-choice aria-label="选择实际上游模型">${directModels.length ? `<option value="" disabled ${!target.model ? 'selected' : ''}>选择已发现模型</option>${directModels.map((model) => `<option value="${escapeHTML(model)}" ${model === target.model ? 'selected' : ''}>${escapeHTML(model)}</option>`).join('')}` : ''}<option value="${customRouteModelValue}" ${manualModel ? 'selected' : ''}>手动填写模型…</option></select><input data-target-field="model" value="${escapeHTML(target.model || '')}" placeholder="填写真实上游模型 ID" autocomplete="off" ${manualModel ? '' : 'hidden'}></div></label>`;
     const effortField = route.model
       ? '<label data-ui-key="effort">推理强度<div class="resolved-field">继承路由设置</div></label>'
       : `<label data-ui-key="effort">目标推理强度<select data-target-field="reasoning_effort">${['', 'auto', 'none', 'minimal', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'].map((value) => `<option value="${value}" ${value === target.reasoning_effort ? 'selected' : ''}>${value || '不指定'}</option>`).join('')}</select></label>`;
@@ -666,6 +669,14 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     validateAndRenderRoutes();
   }
 
+  function selectTargetModel(index, value) {
+    updateTarget(index, 'model', value === customRouteModelValue ? '' : value);
+    const row = one(`[data-target-index="${index}"]`, $('routeEditor'));
+    if (value === customRouteModelValue)
+      requestAnimationFrame(() => row?.querySelector('[data-target-field="model"]')?.focus());
+    else row?.querySelector('[data-target-model-choice]')?.focus({ preventScroll: true });
+  }
+
   function targetAction(index, action) {
     const route = normalizedRoute(routesState.selectedRoute);
     if (action === 'delete') route.targets.splice(index, 1);
@@ -699,27 +710,56 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
   function syncRouteCreateModels(resetModel = false) {
     const account = configuredAccount($('routeCreateConnection').value),
       input = $('routeCreateModel'),
+      select = $('routeCreateModelSelect'),
       logical = Core.logicalModels(account ? [account] : []),
       direct = Core.directModels(account),
       models = Core.uniqueStrings([...logical, ...direct]);
+    if (resetModel) {
+      routesState.routeCreateManualModel = false;
+      input.value = logical[0] || direct[0] || '';
+    } else if (!routesState.routeCreateManualModel && !input.value.trim())
+      input.value = logical[0] || direct[0] || '';
+    const selectedModel = input.value.trim(),
+      selectedFromCatalog = models.includes(selectedModel);
+    if ((!selectedFromCatalog && selectedModel) || !models.length)
+      routesState.routeCreateManualModel = true;
+    const manual = routesState.routeCreateManualModel;
     setHTML(
-      $('routeCreateModels'),
-      models.map((model) => `<option value="${escapeHTML(model)}"></option>`).join(''),
+      select,
+      `${logical.length ? `<optgroup label="能力映射">${logical.map((model) => `<option value="${escapeHTML(model)}">${escapeHTML(model)}</option>`).join('')}</optgroup>` : ''}${direct.length ? `<optgroup label="实际模型">${direct.map((model) => `<option value="${escapeHTML(model)}">${escapeHTML(model)}</option>`).join('')}</optgroup>` : ''}<option value="${customRouteModelValue}">手动填写模型…</option>`,
     );
-    if (resetModel || !input.value) input.value = logical[0] || direct[0] || '';
-    const capability = (account?.capabilities || []).find((item) => item.model === input.value),
-      knownDirect = direct.includes(input.value) || (account?.models || []).includes('*');
+    select.value = manual ? customRouteModelValue : selectedModel;
+    $('routeCreateCustomModelField').hidden = !manual;
+    const capability = (account?.capabilities || []).find((item) => item.model === selectedModel),
+      knownDirect = direct.includes(selectedModel) || (account?.models || []).includes('*');
     setHTML(
       $('routeCreateModeHint'),
       capability
-        ? `<strong>能力映射模式</strong><br>${escapeHTML(input.value)} 会按每条连接的能力表解析实际模型。`
+        ? `<strong>能力映射模式</strong><br>${escapeHTML(selectedModel)} 会按每条连接的能力表解析实际模型。`
         : knownDirect
-          ? `<strong>实际模型直连</strong><br>${escapeHTML(input.value)} 已由此连接声明。`
+          ? `<strong>实际模型直连</strong><br>${escapeHTML(selectedModel)} 已由此连接声明。`
           : `<strong>手动实际模型</strong><br>${account ? '此连接未声明该模型，保存前会要求你确认。' : '请先选择连接。'}`,
     );
     if (!routesState.routeCreateAliasTouched || !$('routeCreateAlias').value)
-      $('routeCreateAlias').value = uniqueRouteAlias(input.value || 'new-model');
-    one('button[type="submit"]', $('routeCreateForm')).disabled = !account || !input.value.trim();
+      $('routeCreateAlias').value = uniqueRouteAlias(selectedModel || 'new-model');
+    one('button[type="submit"]', $('routeCreateForm')).disabled = !account || !selectedModel;
+  }
+
+  function selectRouteCreateModel() {
+    const select = $('routeCreateModelSelect'),
+      input = $('routeCreateModel');
+    if (select.value === customRouteModelValue) {
+      routesState.routeCreateManualModel = true;
+      input.value = '';
+      $('routeCreateCustomModelField').hidden = false;
+      syncRouteCreateModels(false);
+      requestAnimationFrame(() => input.focus());
+      return;
+    }
+    routesState.routeCreateManualModel = false;
+    input.value = select.value;
+    $('routeCreateCustomModelField').hidden = true;
+    syncRouteCreateModels(false);
   }
 
   function openRouteCreate(connectionID = '', preferredModel = '') {
@@ -736,6 +776,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     );
     if (connectionID && accounts.some((account) => account.id === connectionID)) select.value = connectionID;
     routesState.routeCreateAliasTouched = false;
+    routesState.routeCreateManualModel = false;
     $('routeCreateModel').value = preferredModel;
     $('routeCreateAlias').value = '';
     syncRouteCreateModels(!preferredModel);
@@ -918,6 +959,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     $('discardRoutesButton').addEventListener('click', () => discardRouteChanges(true));
     $('reloadRoutesButton').addEventListener('click', () => discardRouteChanges(routesState.routesDirty));
     $('routeCreateConnection').addEventListener('change', () => syncRouteCreateModels(true));
+    $('routeCreateModelSelect').addEventListener('change', selectRouteCreateModel);
     $('routeCreateModel').addEventListener('input', () => syncRouteCreateModels(false));
     $('routeCreateAlias').addEventListener('input', () => {
       routesState.routeCreateAliasTouched = true;
@@ -937,6 +979,10 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
         return;
       }
       const row = event.target.closest('[data-target-index]');
+      if (row && event.target.dataset.targetModelChoice !== undefined) {
+        selectTargetModel(Number(row.dataset.targetIndex), event.target.value);
+        return;
+      }
       if (row && event.target.dataset.targetField)
         updateTarget(Number(row.dataset.targetIndex), event.target.dataset.targetField, event.target.value);
     });

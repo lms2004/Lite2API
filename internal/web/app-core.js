@@ -42,6 +42,20 @@
     const safeBaseURL = shellQuote(String(baseUrl || '').replace(/\/+$/, ''));
     const safeModel = shellQuote(model);
     const safeAPIKey = shellQuote(apiKey || '<YOUR_API_KEY>');
+    const safeSessionSettings = shellQuote(JSON.stringify({
+      modelPicker: {
+        options: [{
+          model: String(model),
+          label: `${model || 'Lite2API'} (Lite2API)`,
+          description: 'Lite2API model route',
+          // Shadow currently routes to Claude Opus 4.6. Declaring the model
+          // family prevents Claude Code from constructing its unknown-model
+          // fallback request, which some upstreams reject with HTTP 400.
+          behavesAs: 'claude-opus-4-6',
+        }],
+        replaceBuiltInOptions: true,
+      },
+    }));
     const lines = [
       '(',
       '# Claude Code → Lite2API（Bash / Zsh）',
@@ -52,17 +66,19 @@
       'unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_ANTHROPIC_AWS',
       `export ANTHROPIC_BASE_URL=${safeBaseURL}`,
       `export ANTHROPIC_AUTH_TOKEN=${safeAPIKey}`,
-      `export ANTHROPIC_MODEL=${safeModel}`,
       `export ANTHROPIC_DEFAULT_OPUS_MODEL=${safeModel}`,
       `export ANTHROPIC_DEFAULT_SONNET_MODEL=${safeModel}`,
       `export ANTHROPIC_DEFAULT_HAIKU_MODEL=${safeModel}`,
       `export CLAUDE_CODE_SUBAGENT_MODEL=${safeModel}`,
+      `lite2api_claude_settings=${safeSessionSettings}`,
       '',
-      '# 只验证 URL、Bearer Key 与模型目录，不产生模型调用。',
-      'if curl -fsS --connect-timeout 5 --max-time 15 \\',
+      '# 只验证 URL 与 Bearer Key，不产生模型调用。',
+      'if ! command -v claude >/dev/null 2>&1; then',
+      "  printf '%s\\n' '找不到 claude 命令，请先安装或更新 Claude Code。' >&2",
+      'elif curl -fsS --connect-timeout 5 --max-time 15 \\',
       '  --config <(printf \'header = "Authorization: Bearer %s"\\n\' "$ANTHROPIC_AUTH_TOKEN") \\',
       '  "$ANTHROPIC_BASE_URL/v1/models?limit=1000" >/dev/null; then',
-      '  claude --model "$ANTHROPIC_MODEL"',
+      `  claude --settings "$lite2api_claude_settings" --model ${safeModel}`,
       'else',
       "  printf '%s\\n' '网关验证失败，未启动 Claude Code。' >&2",
       'fi',
