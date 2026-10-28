@@ -88,6 +88,8 @@ curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$LITE2API_ADMIN_
 
 Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、Gemini CLI 与 Antigravity 在账号页可见时异步读取各自官方额度接口，每个凭据 10 分钟内最多一次，也可从账号页显式刷新。反重力的 Credits、模型桶、最近约 200 分钟的逐账号成功/失败计数，以及所有渠道的 429 冷却/重置时间采用同一展示协议。CLIProxyAPI 只把脱敏的百分比、余额、模型、重置和观测时间保存在内存；没有可信数据时页面显示“等待观测”，不会伪装成 0%，也不打开全局响应头透传。
 
+授权失效会在账号页显示“需重新授权”并提供登录入口。受信的本机适配器返回 401 时，网关合并并发刷新并最多重试一次；刷新成功会清除旧的授权冷却，永久失效的刷新令牌需要重新登录。客户端 Key 无效返回 401，上游授权失败返回 502 `upstream_auth_failed`。
+
 凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理平台白名单内的 OAuth 操作、脱敏账号列表、账号状态/删除/刷新/优先级以及认证池选号策略，所有写操作都要求管理会话与 CSRF。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
 
 Gemini Web 与 Grok Web/Console 属于 Cookie/SSO 型接入。管理页只在本地浏览器整理扩展导出的 Cookie-Editor JSON、Netscape Cookie、单行 Cookie 或 SSO 文本，然后提示写入对应隔离适配器；Lite2API 核心不会接收或保存这些内容。为节省资源，未配置凭据的 Web 适配器保持停止，配置完成后才按需启动。

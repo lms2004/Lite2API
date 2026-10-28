@@ -1,0 +1,287 @@
+diff --git a/sdk/cliproxy/auth/conductor.go b/sdk/cliproxy/auth/conductor.go
+--- a/sdk/cliproxy/auth/conductor.go
++++ b/sdk/cliproxy/auth/conductor.go
+@@ -289,7 +289,13 @@
+ 		return nil, errors.New("provider executor is not registered")
+ 	}
+ 
+-	updated, err := exec.Refresh(ctx, cloned)
++	var updated *Auth
++	var err error
++	if unrefreshableOAuth(cloned, time.Now()) {
++		err = errors.New("reauth_required: expired or rejected OAuth token has no refresh token")
++	} else {
++		updated, err = exec.Refresh(ctx, cloned)
++	}
+ 	now := time.Now()
+ 	if err != nil {
+ 		// A caller cancellation is not a credential failure. Penalizing the auth
+@@ -302,6 +308,13 @@
+ 		if current := m.auths[authID]; current != nil {
+ 			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
+ 			current.LastError = &Error{Message: err.Error()}
++			if terminalOAuthRefreshError(err) {
++				current.LastError.Code = "reauth_required"
++				current.Status = StatusError
++				current.StatusMessage = "reauth_required"
++				current.Unavailable = true
++				current.NextRetryAfter = time.Time{}
++			}
+ 			m.auths[authID] = current
+ 			if m.scheduler != nil {
+ 				m.scheduler.upsertAuth(current.Clone())
+@@ -319,12 +332,48 @@
+ 	}
+ 	updated.LastRefreshedAt = now
+ 	updated.NextRefreshAfter = time.Time{}
++	clearRefreshedAuthorizationFailures(updated, now)
+ 	updated.LastError = nil
+ 	updated.UpdatedAt = now
+ 	if m.shouldRefresh(updated, now) {
+ 		updated.NextRefreshAfter = now.Add(refreshIneffectiveBackoff)
+ 	}
+ 	return m.Update(ctx, updated)
++}
++
++func terminalOAuthRefreshError(err error) bool {
++	if err == nil {
++		return false
++	}
++	text := strings.ToLower(err.Error())
++	return strings.Contains(text, "reauth_required") || strings.Contains(text, "invalid_grant") || strings.Contains(text, "refresh_token_reused") ||
++		strings.Contains(text, "refresh token expired") || strings.Contains(text, "refresh token has expired") ||
++		strings.Contains(text, "refresh token revoked")
++}
++
++// A new token clears authorization failures only. Quota, payment, model
++// support and provider availability failures remain in effect after refresh.
++func clearRefreshedAuthorizationFailures(auth *Auth, now time.Time) {
++	if auth == nil {
++		return
++	}
++	for model, state := range auth.ModelStates {
++		if state != nil && statusCodeFromResult(state.LastError) == http.StatusUnauthorized {
++			resetModelState(state, now)
++			registry.GetGlobalRegistry().ResumeClientModel(auth.ID, model)
++		}
++	}
++	if len(auth.ModelStates) > 0 {
++		updateAggregatedAvailability(auth, now)
++	} else if statusCodeFromResult(auth.LastError) == http.StatusUnauthorized ||
++		(auth.LastError != nil && auth.LastError.Code == "reauth_required") {
++		auth.Unavailable = false
++		auth.NextRetryAfter = time.Time{}
++	}
++	if !hasModelError(auth, now) && !auth.Unavailable && !auth.Disabled {
++		auth.Status = StatusActive
++		auth.StatusMessage = ""
++	}
+ }
+ 
+ // ReconcileRegistryModelStates aligns per-model runtime state with the current
+@@ -1179,6 +1228,7 @@
+ 	if auth.ID == "" {
+ 		auth.ID = uuid.NewString()
+ 	}
++	markUnrefreshableOAuth(auth, time.Now())
+ 	auth.EnsureIndex()
+ 	authClone := auth.Clone()
+ 	m.mu.Lock()
+@@ -1199,6 +1249,7 @@
+ 	if auth == nil || auth.ID == "" {
+ 		return nil, nil
+ 	}
++	markUnrefreshableOAuth(auth, time.Now())
+ 	m.mu.Lock()
+ 	if existing, ok := m.auths[auth.ID]; ok && existing != nil {
+ 		if !auth.indexAssigned && auth.Index == "" {
+@@ -1251,6 +1302,7 @@
+ 		if auth == nil || auth.ID == "" {
+ 			continue
+ 		}
++		markUnrefreshableOAuth(auth, time.Now())
+ 		auth.EnsureIndex()
+ 		m.auths[auth.ID] = auth.Clone()
+ 	}
+@@ -3387,6 +3439,9 @@
+ 	if a == nil || a.Disabled {
+ 		return false
+ 	}
++	if a.LastError != nil && a.LastError.Code == "reauth_required" {
++		return false
++	}
+ 	if !a.NextRefreshAfter.IsZero() && now.Before(a.NextRefreshAfter) {
+ 		return false
+ 	}
+diff --git a/sdk/cliproxy/auth/selector.go b/sdk/cliproxy/auth/selector.go
+--- a/sdk/cliproxy/auth/selector.go
++++ b/sdk/cliproxy/auth/selector.go
+@@ -369,6 +369,9 @@
+ }
+ 
+ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, blockReason, time.Time) {
++	if auth != nil && auth.LastError != nil && auth.LastError.Code == "reauth_required" {
++		return true, blockReasonOther, time.Time{}
++	}
+ 	if auth == nil {
+ 		return true, blockReasonOther, time.Time{}
+ 	}
+diff --git a/sdk/cliproxy/auth/oauth_recovery.go b/sdk/cliproxy/auth/oauth_recovery.go
+new file mode 100644
+--- /dev/null
++++ b/sdk/cliproxy/auth/oauth_recovery.go
+@@ -0,0 +1,58 @@
++package auth
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"strings"
++	"time"
++)
++
++func unrefreshableOAuth(auth *Auth, now time.Time) bool {
++	if auth == nil || auth.Disabled || auth.Metadata == nil || isAPIKeyAuth(auth) {
++		return false
++	}
++	switch strings.ToLower(auth.Provider) {
++	case "codex", "claude", "gemini", "antigravity", "kimi":
++	default:
++		return false
++	}
++	refresh, _ := auth.Metadata["refresh_token"].(string)
++	access, _ := auth.Metadata["access_token"].(string)
++	if strings.TrimSpace(refresh) != "" || access == "" {
++		return false
++	}
++	if statusCodeFromResult(auth.LastError) == 401 || (auth.LastError != nil && auth.LastError.Code == "reauth_required") {
++		return true
++	}
++	if expiration, ok := auth.ExpirationTime(); ok && !expiration.After(now) {
++		return true
++	}
++	// JWT expiry is a rejection hint only, never proof of authentication. Some
++	// imported credentials omit expiration metadata but retain the signed exp.
++	if len(access) > 32<<10 {
++		return false
++	}
++	parts := strings.Split(access, ".")
++	if len(parts) != 3 {
++		return false
++	}
++	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
++	if err != nil {
++		return false
++	}
++	var claims struct {
++		Exp int64 `json:"exp"`
++	}
++	return json.Unmarshal(payload, &claims) == nil && claims.Exp > 0 && claims.Exp <= now.Unix()
++}
++
++func markUnrefreshableOAuth(auth *Auth, now time.Time) {
++	if !unrefreshableOAuth(auth, now) {
++		return
++	}
++	auth.Status = StatusError
++	auth.StatusMessage = "reauth_required"
++	auth.Unavailable = true
++	auth.NextRetryAfter = time.Time{}
++	auth.LastError = &Error{Code: "reauth_required", Message: "expired or rejected OAuth token has no refresh token"}
++}
+diff --git a/sdk/cliproxy/auth/oauth_recovery_test.go b/sdk/cliproxy/auth/oauth_recovery_test.go
+new file mode 100644
+--- /dev/null
++++ b/sdk/cliproxy/auth/oauth_recovery_test.go
+@@ -0,0 +1,91 @@
++package auth
++
++import (
++	"context"
++	"encoding/base64"
++	"errors"
++	"fmt"
++	"testing"
++	"time"
++)
++
++func TestForceRefreshRestoresAuthorizationWithoutClearingQuota(t *testing.T) {
++	manager := NewManager(nil, &RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(schedulerProviderTestExecutor{provider: "claude"})
++	now := time.Now()
++	auth := &Auth{ID: "recovery", Provider: "claude", Status: StatusError, Unavailable: true,
++		LastError: &Error{HTTPStatus: 401}, NextRetryAfter: now.Add(30 * time.Minute),
++		ModelStates: map[string]*ModelState{
++			"expired": {Status: StatusError, Unavailable: true, LastError: &Error{HTTPStatus: 401}, NextRetryAfter: now.Add(30 * time.Minute)},
++			"limited": {Status: StatusError, Unavailable: true, LastError: &Error{HTTPStatus: 429}, NextRetryAfter: now.Add(time.Hour), Quota: QuotaState{Exceeded: true, NextRecoverAt: now.Add(time.Hour)}},
++		}}
++	if _, err := manager.Register(context.Background(), auth); err != nil {
++		t.Fatal(err)
++	}
++	updated, err := manager.ForceRefreshAuth(context.Background(), auth.ID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if blocked, _, _ := isAuthBlockedForModel(updated, "expired", now); blocked {
++		t.Fatal("refreshed authorization is still blocked")
++	}
++	if !updated.ModelStates["limited"].Quota.Exceeded {
++		t.Fatal("token refresh cleared a genuine quota limit")
++	}
++	if blocked, _, _ := isAuthBlockedForModel(updated, "limited", now); !blocked {
++		t.Fatal("quota-limited model became selectable")
++	}
++}
++
++func TestExpiredAccessOnlyCredentialCannotReportSuccessfulRefresh(t *testing.T) {
++	manager := NewManager(nil, &RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(schedulerProviderTestExecutor{provider: "codex"})
++	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":1}`))
++	auth := &Auth{ID: "expired-access-only", Provider: "codex", Status: StatusActive,
++		Metadata: map[string]any{"access_token": "header." + payload + ".signature", "refresh_token": ""}}
++	registered, err := manager.Register(context.Background(), auth)
++	if err != nil || registered.LastError == nil || registered.LastError.Code != "reauth_required" {
++		t.Fatalf("expired imported credential was advertised as usable: %+v %v", registered, err)
++	}
++	if _, err := manager.ForceRefreshAuth(context.Background(), auth.ID); err == nil {
++		t.Fatal("no-op refresh was reported as success")
++	}
++	future := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
++	fresh := &Auth{Provider: "codex", Metadata: map[string]any{"access_token": "header." + future + ".signature"}}
++	if unrefreshableOAuth(fresh, time.Now()) {
++		t.Fatal("valid temporary access-only token was prematurely rejected")
++	}
++}
++
++type terminalRefreshExecutor struct{ schedulerProviderTestExecutor }
++
++func (e terminalRefreshExecutor) Refresh(context.Context, *Auth) (*Auth, error) {
++	return nil, errors.New(`{"error":"invalid_grant","error_description":"Refresh token expired"}`)
++}
++
++func TestTerminalRefreshRequiresReauthorizationAndCanRecover(t *testing.T) {
++	manager := NewManager(nil, &RoundRobinSelector{}, nil)
++	manager.RegisterExecutor(terminalRefreshExecutor{schedulerProviderTestExecutor{provider: "claude"}})
++	auth := &Auth{ID: "terminal-refresh", Provider: "claude", Status: StatusActive}
++	if _, err := manager.Register(context.Background(), auth); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := manager.ForceRefreshAuth(context.Background(), auth.ID); err == nil {
++		t.Fatal("expected failed refresh")
++	}
++	failed, _ := manager.GetByID(auth.ID)
++	if failed.LastError.Code != "reauth_required" || failed.StatusMessage != "reauth_required" {
++		t.Fatalf("missing actionable failure status: %+v", failed)
++	}
++	if manager.shouldRefresh(failed, time.Now().Add(24*time.Hour)) {
++		t.Fatal("terminal refresh would be retried automatically")
++	}
++	if blocked, _, _ := isAuthBlockedForModel(failed, "another-model", time.Now()); !blocked {
++		t.Fatal("terminal credential was selectable for an unobserved model")
++	}
++	manager.RegisterExecutor(schedulerProviderTestExecutor{provider: "claude"})
++	updated, err := manager.ForceRefreshAuth(context.Background(), auth.ID)
++	if err != nil || updated.Status != StatusActive || updated.LastError != nil || updated.Unavailable {
++		t.Fatalf("manual reauthorization did not recover: updated=%+v err=%v", updated, err)
++	}
++}

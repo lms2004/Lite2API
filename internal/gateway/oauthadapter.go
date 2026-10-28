@@ -93,6 +93,8 @@ type oauthCredential struct {
 	Status         string             `json:"status"`
 	Disabled       bool               `json:"disabled"`
 	Ready          bool               `json:"ready"`
+	HealthCode     string             `json:"health_code,omitempty"`
+	HealthMessage  string             `json:"health_message,omitempty"`
 	Success        int64              `json:"success"`
 	Failed         int64              `json:"failed"`
 	RecentSuccess  int64              `json:"recent_success"`
@@ -144,6 +146,7 @@ type oauthAuthFilesResponse struct {
 		AccountType    string `json:"account_type"`
 		Priority       int    `json:"priority"`
 		Status         string `json:"status"`
+		StatusMessage  string `json:"status_message"`
 		Disabled       bool   `json:"disabled"`
 		Unavailable    bool   `json:"unavailable"`
 		RuntimeOnly    bool   `json:"runtime_only"`
@@ -423,19 +426,17 @@ func (g *Gateway) serveOAuthAccountRefresh(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	input.ID = strings.TrimSpace(input.ID)
+	if (input.ID == "" && !input.All) || (input.ID != "" && input.All) {
+		writeAPIErrorCode(w, http.StatusBadRequest, "specify one account id or all=true", "invalid_request_error", "invalid_oauth_refresh_target")
+		return
+	}
 
 	payload := map[string]any{"all": true}
 	if input.ID != "" {
 		payload = map[string]any{"name": resolveOAuthAccountName(r.Context(), input.ID)}
 	}
 
-	var result struct {
-		Status    string           `json:"status"`
-		Refreshed int              `json:"refreshed"`
-		Skipped   int              `json:"skipped"`
-		Files     []map[string]any `json:"files"`
-		Failed    []map[string]any `json:"failed"`
-	}
+	var result oauthRefreshResult
 	if err := callOAuthAdapter(r.Context(), http.MethodPost, "auth-files/refresh", nil, payload, &result); err != nil {
 		writeOAuthAdapterError(w, err)
 		return
@@ -445,8 +446,8 @@ func (g *Gateway) serveOAuthAccountRefresh(w http.ResponseWriter, r *http.Reques
 		"status":    result.Status,
 		"refreshed": result.Refreshed,
 		"skipped":   result.Skipped,
-		"files":     result.Files,
-		"failed":    result.Failed,
+		"files":     sanitizedOAuthRefreshEntries(result.Files, false),
+		"failed":    sanitizedOAuthRefreshEntries(result.Failed, true),
 	})
 }
 
@@ -545,6 +546,10 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 		} else if status == "" {
 			status = "active"
 		}
+		healthCode, healthMessage := oauthHealthReason(status, item.StatusMessage, item.NextRetryAfter, item.Quota.Exceeded)
+		if healthCode == "reauth_required" && !item.Disabled {
+			status = "reauth_required"
+		}
 		identity := firstNonEmpty(item.Label, item.Email, item.Account, item.ID)
 		quotaWindows := make([]oauthQuotaWindow, len(item.QuotaWindows))
 		var promptUsage *oauthPromptUsage
@@ -561,7 +566,8 @@ func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
 		credentials = append(credentials, oauthCredential{
 			ID: id, Provider: provider, Identity: maskCredentialIdentity(identity),
 			Plan: strings.TrimSpace(item.AccountType), Priority: item.Priority, Status: status, Disabled: item.Disabled,
-			Ready:   status == "active" && !item.Disabled && !item.Unavailable,
+			Ready:      status == "active" && !item.Disabled && !item.Unavailable,
+			HealthCode: healthCode, HealthMessage: healthMessage,
 			Success: item.Success, Failed: item.Failed, UpdatedAt: item.UpdatedAt, LastRefresh: item.LastRefresh,
 			RecentSuccess: recentSuccess, RecentFailed: recentFailed,
 			NextRetryAfter: item.NextRetryAfter, QuotaExceeded: item.Quota.Exceeded,
@@ -750,11 +756,18 @@ func validCallbackURL(raw string) bool {
 func writeOAuthAdapterError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	code := "oauth_adapter_error"
+	message := "OAuth adapter request failed; check the local adapter and its credentials"
 	if errors.Is(err, errOAuthAdapterUnavailable) {
 		status = http.StatusServiceUnavailable
 		code = "oauth_adapter_unavailable"
+		message = "OAuth adapter is not configured"
 	}
-	writeAPIErrorCode(w, status, err.Error(), "upstream_error", code)
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		status, code = http.StatusGatewayTimeout, "oauth_adapter_timeout"
+		message = "OAuth adapter request timed out"
+	}
+	writeAPIErrorCode(w, status, message, "upstream_error", code)
 }
 
 func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context, provider string) (bool, error) {

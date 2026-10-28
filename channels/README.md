@@ -6,7 +6,7 @@ Lite2API 核心不复制第三方项目的账号登录、Cookie 刷新或逆向�
 
 当前固定源码：
 
-- `third_party/cliproxyapi`：Gemini CLI、Claude、OpenAI/Codex、Antigravity 的 OAuth/setup-token 多账号池；固定上游为 `v6.10.9`（`785b00c3127eea6aa207f1207ead8a2aa93690a3`），仓库维护构建为 `v6.10.9-lite2api.8`，四组补丁均校验 SHA-256。
+- `third_party/cliproxyapi`：Gemini CLI、Claude、OpenAI/Codex、Antigravity 的 OAuth/setup-token 多账号池；固定上游为 `v6.10.9`（`785b00c3127eea6aa207f1207ead8a2aa93690a3`），仓库维护构建为 `v6.10.9-lite2api.9`，五组补丁均校验 SHA-256。
 - `third_party/grok2api`：Grok Build/Web/Console，多账号由它自己的管理页维护。
 - `third_party/gemini-web2api`：Gemini Web；匿名 Flash 可直接使用，Pro 需要在私有运行配置中添加 Cookie。
 - AtomCode2Api：现有独立容器，Lite2API 通过 `127.0.0.1:45678/v1` 接入。
@@ -84,10 +84,18 @@ Claude 官方与 Antigravity 会发布部分同名 Claude 模型。Lite2API 因�
 
 仓库模板使用 `max-retry-credentials: 0`，让一次请求遍历所有当前可选凭据，并使用 `request-retry: 0` 在一轮失败后立即交给 Lite 外层目标链。选号策略通过回环管理 API 写回配置：Compose 只把单个 `config.yaml` 以可写 bind mount 暴露给非 root 容器；systemd 只放行 `/etc/cliproxyapi/config.yaml` 且保持 `root:cliproxyapi 0660`。安装器和渠道 bootstrap 重建配置时会保留现有 `round-robin` / `fill-first`，其余安全模板值仍由仓库收敛。
 
-Claude 额度使用真实请求响应中的统一限额字段生成内存快照，支持 5 小时、7 天、Sonnet 周和 Opus 周窗口。Codex 使用 ChatGPT 官方 usage 接口读取主/次窗口，Gemini CLI 与 Antigravity 使用 Code Assist 官方 `retrieveUserQuota` 读取模型桶；它们仅在账号页可见时按需触发，每个凭据 10 分钟内最多一次并异步完成。反重力还展示可用 AI Credits，所有渠道发生 429 时都会保留模型冷却和重置时间。快照只包含脱敏后的窗口、百分比/余额、模型、重置和观测时间，服务重启后自然清空；没有可靠字段时保持 unknown，不用本地请求数推算官方余额。路由目标可选填公开的 `auth_index`，将请求固定到一个认证账号；CLIProxyAPI 会返回实际命中的公开索引，Lite2API 只记录脱敏索引并按“连接、认证账号、操作、模型”隔离熔断。空索引继续使用自动账号池。只有 CLIProxyAPI 明确证明请求尚未提交时，受信的内部标记才允许 5xx 跨账号重放；普通供应商 5xx 仍按结果不确定处理。Antigravity 的明确 `MODEL_CAPACITY_EXHAUSTED` 拒绝会归一为 429。systemd 安装器会对固定上游提交依次幂等应用 `deploy/patches/cliproxyapi-quota-snapshot.patch`、`deploy/patches/cliproxyapi-routing-reliability.patch`、`deploy/patches/cliproxyapi-auth-refresh.patch` 与 `deploy/patches/cliproxyapi-credential-routing.patch`，不自动跟随第三方分支。
+Claude 额度使用真实请求响应中的统一限额字段生成内存快照，支持 5 小时、7 天、Sonnet 周和 Opus 周窗口。Codex 使用 ChatGPT 官方 usage 接口读取主/次窗口，Gemini CLI 与 Antigravity 使用 Code Assist 官方 `retrieveUserQuota` 读取模型桶；它们仅在账号页可见时按需触发，每个凭据 10 分钟内最多一次并异步完成。反重力还展示可用 AI Credits，所有渠道发生 429 时都会保留模型冷却和重置时间。快照只包含脱敏后的窗口、百分比/余额、模型、重置和观测时间，服务重启后自然清空；没有可靠字段时保持 unknown，不用本地请求数推算官方余额。路由目标可选填公开的 `auth_index`，将请求固定到一个认证账号；CLIProxyAPI 会返回实际命中的公开索引，Lite2API 只记录脱敏索引并按“连接、认证账号、操作、模型”隔离熔断。空索引继续使用自动账号池。只有 CLIProxyAPI 明确证明请求尚未提交时，受信的内部标记才允许 5xx 跨账号重放；普通供应商 5xx 仍按结果不确定处理。Antigravity 的明确 `MODEL_CAPACITY_EXHAUSTED` 拒绝会归一为 429。systemd 安装器会对固定上游提交依次幂等应用 `deploy/patches/cliproxyapi-quota-snapshot.patch`、`deploy/patches/cliproxyapi-routing-reliability.patch`、`deploy/patches/cliproxyapi-auth-refresh.patch`、`deploy/patches/cliproxyapi-credential-routing.patch` 与 `deploy/patches/cliproxyapi-oauth-recovery.patch`，不自动跟随第三方分支。
 
 ## 浏览器 Cookie / SSO 接入
 
 - Gemini Web：在已登录 `gemini.google.com` 的浏览器中，用 Cookie-Editor 一类扩展导出 JSON、Netscape Cookie 或单行 Cookie；管理页只在浏览器本地归一化成 `name=value; ...`，然后手工写入 `channels/runtime/gemini-web2api/` 的私有配置。
 - Grok Web/Console：优先使用 Grok2API 的 Build 设备 OAuth；已有 Web/Console 会话时，按 Grok2API 当前支持格式导出 SSO 文本、JSON 或 JSONL，再导入它自己的凭据存储。
 - 两类敏感内容都不得提交 Lite2API API、配置文件或 Git。只有凭据已配置且需要承载流量时才启动对应 Compose profile；否则保持 `stopped`，避免常驻内存和探针开销。
+
+## OAuth 授权故障恢复
+
+Lite2API 仅在本机受信 CLIProxyAPI 明确返回 401，且返回了实际选号索引或路由固定索引时，尝试刷新该凭据并重试一次。刷新使用已有的回环管理接口，每个账号同时只执行一次刷新，成功或失败后均缓存 1 分钟，单次等待上限 12 秒；正常请求路径没有管理网络请求。超时、连接中断、普通 5xx 和已开始的流不会触发此重试。适配器明确声明尚未提交的选号失败，即使使用自动账号池，也可以安全切换后备目标。
+
+成功刷新会清除旧 401 的模型冷却与注册表挂起状态，保留 402/403、429、模型缺失和上游故障的限制。永久失效的刷新令牌，以及已经过期且没有刷新令牌的导入账号，标记为 `reauth_required`，停止自动刷新和选号，直到手动刷新成功或重新登录；账号页显示重新授权入口。客户端 Key 错误仍返回 401，上游 401/403 在后备目标也失败后返回 502 `upstream_auth_failed`，不透传原始令牌错误或认证挑战。管理刷新结果仅返回公开索引和固定诊断文本，不返回原始文件名与错误正文。
+
+管理刷新必须指定 `{"id":"公开索引"}` 或 `{"all":true}`；空请求和同时指定两种目标会被拒绝，避免误刷新全部账号。导入的 Access Token 仍在有效期内时可以临时使用；过期后没有 Refresh Token 的账号不会被伪装成刷新成功。

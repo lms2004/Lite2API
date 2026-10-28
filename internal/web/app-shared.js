@@ -156,6 +156,8 @@ globalThis.Lite2APIShared = function createShared(context) {
   }
 
   function accountStatus(account) {
+    if (!account.disabled && (account.health_code === 'reauth_required' || account.status === 'reauth_required'))
+      return { label: '需重新授权', tone: 'bad' };
     const windows = quotaWindows(account),
       warning =
         account.quota_exceeded ||
@@ -171,7 +173,7 @@ globalThis.Lite2APIShared = function createShared(context) {
     if (!account.ready)
       return {
         label:
-          account.status === 'disabled' ? '已停用' : account.status === 'unavailable' ? '冷却中' : '需检查',
+          account.status === 'disabled' ? '已停用' : account.health_code === 'cooldown' ? '冷却中' : '需检查',
         tone: 'bad',
       };
     if (recentFailed > 0 && recentSuccess === 0) return { label: '最近调用失败', tone: 'bad' };

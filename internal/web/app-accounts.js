@@ -145,7 +145,7 @@ globalThis.Lite2APIAccounts = function createAccounts(context) {
             status = accountStatus(account),
             windows = quotaWindows(account),
             priority = Number.isFinite(Number(account.priority)) ? Number(account.priority) : 0;
-          return `<article class="auth-account" data-oauth-id="${escapeHTML(account.id)}" data-ui-key="account-${escapeHTML(account.id)}"><div class="quota-identity">${providerIconHTML(key)}<div><strong>${escapeHTML(account.identity || '已保存凭据')}</strong><span>${escapeHTML(PROVIDER_LABEL[key] || account.provider)} · ${escapeHTML(account.plan || '套餐未知')}</span></div></div><div class="quota-windows">${windows.length ? windows.slice(0, 4).map(quotaWindowHTML).join('') : '<div class="quota-unknown">暂无真实额度观测</div>'}</div><div class="numeric">${number(account.success || 0)}<br><small>${number(account.failed || 0)} 失败</small></div><div><span class="status-pill ${status.tone}">${status.label}</span><small>${account.updated_at ? relativeTime(account.updated_at) : '未更新'}</small></div><details class="compact-row-actions"><summary>管理</summary><div class="oauth-controls"><label>账号池选择值 <span>大值优先</span><input data-oauth-priority type="number" min="0" max="1000" value="${priority}"></label><button data-oauth-action="priority" type="button">保存</button><div class="oauth-actions"><button data-oauth-action="refresh" type="button">刷新</button><button data-oauth-action="toggle" type="button">${account.disabled ? '启用' : '停用'}</button><button data-oauth-action="delete" class="danger" type="button">移除</button></div></div></details></article>`;
+          return `<article class="auth-account" data-oauth-id="${escapeHTML(account.id)}" data-ui-key="account-${escapeHTML(account.id)}"><div class="quota-identity">${providerIconHTML(key)}<div><strong>${escapeHTML(account.identity || '已保存凭据')}</strong><span>${escapeHTML(PROVIDER_LABEL[key] || account.provider)} · ${escapeHTML(account.plan || '套餐未知')}</span></div></div><div class="quota-windows">${windows.length ? windows.slice(0, 4).map(quotaWindowHTML).join('') : '<div class="quota-unknown">暂无真实额度观测</div>'}</div><div class="numeric">${number(account.success || 0)}<br><small>${number(account.failed || 0)} 失败</small></div><div><span class="status-pill ${status.tone}">${status.label}</span>${account.health_message ? `<small>${escapeHTML(account.health_message)}</small>` : ''}${account.health_code === 'reauth_required' && !account.disabled ? '<button data-oauth-action="reauth" type="button">重新授权</button>' : ''}<small>${account.updated_at ? relativeTime(account.updated_at) : '未更新'}</small></div><details class="compact-row-actions"><summary>管理</summary><div class="oauth-controls"><label>账号池选择值 <span>大值优先</span><input data-oauth-priority type="number" min="0" max="1000" value="${priority}"></label><button data-oauth-action="priority" type="button">保存</button><div class="oauth-actions"><button data-oauth-action="refresh" type="button">刷新</button><button data-oauth-action="toggle" type="button">${account.disabled ? '启用' : '停用'}</button><button data-oauth-action="delete" class="danger" type="button">移除</button></div></div></details></article>`;
         })
         .join(''),
     );
@@ -238,10 +238,10 @@ globalThis.Lite2APIAccounts = function createAccounts(context) {
     try {
       const result = await request('/oauth/accounts/refresh', {
         method: 'POST',
-        body: JSON.stringify({ id }),
+        body: JSON.stringify(id ? { id } : { all: true }),
       });
       toast(
-        result.ok === false ? '部分认证账号刷新失败' : `已刷新 ${result.refreshed || 0} 个认证账号`,
+        result.ok === false ? result.failed?.[0]?.error || '部分认证账号刷新失败' : `已刷新 ${result.refreshed || 0} 个认证账号`,
         result.ok === false,
       );
       const menu = button?.closest('details');
@@ -275,7 +275,10 @@ globalThis.Lite2APIAccounts = function createAccounts(context) {
     if (!account) return;
     button.disabled = true;
     try {
-      if (button.dataset.oauthAction === 'priority') {
+      if (button.dataset.oauthAction === 'reauth') {
+        await startOAuth(account.provider);
+        return;
+      } else if (button.dataset.oauthAction === 'priority') {
         const value = Number(one('[data-oauth-priority]', card)?.value);
         if (!Number.isInteger(value) || value < 0 || value > 1000)
           throw new Error('账号池选择值必须是 0–1000 的整数');

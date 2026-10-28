@@ -1,0 +1,3 @@
+# Unified patch context preserves source indentation after a context marker.
+# Validate whitespace in the applied source rather than rewriting patch data.
+deploy/patches/*.patch -whitespace

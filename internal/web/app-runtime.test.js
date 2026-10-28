@@ -4,6 +4,16 @@ const assert = require('node:assert/strict');
 const { createRequestClient, createRefreshLoop } = require('./app-runtime.js');
 const { createIndex, createRouteUsageIndex } = require('./app-metrics.js');
 const Core = require('./app-core.js');
+require('./app-shared.js');
+
+test('expired authorization has a distinct account state and never looks like cooldown', () => {
+  const shared = globalThis.Lite2APIShared({ Core, now: Date.now, indexData: () => ({}), resourcesState: {} });
+  assert.equal(shared.accountStatus({ ready: false, status: 'reauth_required', health_code: 'reauth_required' }).label, '需重新授权');
+  assert.equal(shared.accountStatus({ ready: false, status: 'unavailable', health_code: 'cooldown' }).label, '冷却中');
+  assert.equal(shared.accountStatus({ ready: false, status: 'unavailable', health_code: 'upstream_error' }).label, '需检查');
+  assert.equal(shared.accountStatus({ ready: false, disabled: true, status: 'disabled', health_code: 'reauth_required' }).label, '已停用');
+  assert.equal(shared.accountStatus({ ready: true, status: 'active', success: 0 }).label, '待实测');
+});
 
 function deferred() {
   let resolve, reject;

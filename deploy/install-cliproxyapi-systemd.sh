@@ -3,9 +3,9 @@ set -euo pipefail
 
 umask 077
 
-version=v6.10.9-lite2api.8
+version=v6.10.9-lite2api.9
 commit=785b00c3127eea6aa207f1207ead8a2aa93690a3
-build_date=2026-09-01
+build_date=2026-10-28
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir="$project_dir/third_party/cliproxyapi"
 lite_env=/etc/lite2api/lite2api.env
@@ -19,12 +19,14 @@ maintained_patch_paths=(
     deploy/patches/cliproxyapi-routing-reliability.patch
     deploy/patches/cliproxyapi-auth-refresh.patch
     deploy/patches/cliproxyapi-credential-routing.patch
+    deploy/patches/cliproxyapi-oauth-recovery.patch
 )
 maintained_patch_sha256=(
     bbb9e08f18b210f9ddfbd958ee3cfb84cacc1b8d6b9c02b9c14ac8e23e490a68
     0a388faa429991cccc348bcddc31b0d350ddc21a36681da1bfbca5d052b39f37
     f5e482c127994eb31c9419bbce1e82fff39bfb893ef8c38b14e875b780a330a5
     d0e4923a56dabd12f7cbae421ca9c624bbd4e372fc22b47d95e7644c140bc131
+    068bdfeb0ffd5393fc7f6ea7d98e767bcf8a6060f2b41137ec394a8d4fdb027e
 )
 
 if [[ $(id -u) -ne 0 ]]; then
@@ -239,6 +241,7 @@ maintained_patches=(
     "$main_tree/deploy/patches/cliproxyapi-routing-reliability.patch"
     "$main_tree/deploy/patches/cliproxyapi-auth-refresh.patch"
     "$main_tree/deploy/patches/cliproxyapi-credential-routing.patch"
+    "$main_tree/deploy/patches/cliproxyapi-oauth-recovery.patch"
 )
 config_template="$main_tree/channels/cliproxyapi/config.template.yaml"
 service_file="$main_tree/deploy/cliproxyapi.service"

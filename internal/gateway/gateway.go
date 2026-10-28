@@ -40,19 +40,20 @@ type runtimeState struct {
 }
 
 type Gateway struct {
-	configPath   string
-	store        *config.Store
-	state        atomic.Pointer[runtimeState]
-	requestLog   atomic.Pointer[requestLogWriter]
-	reloadMu     sync.Mutex
-	stats        *Stats
-	globalActive atomic.Int64
-	bodyBytes    atomic.Int64
-	clientKeys   *ClientKeyStore
-	adminAuth    *AdminAuthenticator
-	adapterProbe *adapterProbeCache
-	closeOnce    sync.Once
-	closed       atomic.Bool
+	configPath    string
+	store         *config.Store
+	state         atomic.Pointer[runtimeState]
+	requestLog    atomic.Pointer[requestLogWriter]
+	reloadMu      sync.Mutex
+	stats         *Stats
+	globalActive  atomic.Int64
+	bodyBytes     atomic.Int64
+	clientKeys    *ClientKeyStore
+	adminAuth     *AdminAuthenticator
+	adapterProbe  *adapterProbeCache
+	oauthRecovery oauthRecoveryCoordinator
+	closeOnce     sync.Once
+	closed        atomic.Bool
 }
 
 const (
@@ -646,7 +647,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		}
 		attemptStart := time.Now()
 		attemptHealth := selection.Account.beginAttempt(operation, selection.Model, selection.Credential)
-		resp, err := g.doUpstream(r.Context(), state, selection.Account, r, attemptBody, requestID, selection.Credential)
+		resp, err := g.doUpstreamWithOAuthRecovery(r.Context(), state, selection, r, attemptBody, requestID)
 		bodyLease.ShrinkTo(baseBodyReservation)
 		if err != nil {
 			selection.Release()
@@ -699,8 +700,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.CredentialID = selectedCredential
 		}
 		statusRetryable, uncertainStatus := retryableStatusForOperation(operation, resp.StatusCode)
-		retrySafeCredentialFailure := selection.Credential != "" &&
-			strings.EqualFold(strings.TrimSpace(selection.Account.Config.AdapterID), "cli-proxy-api") &&
+		retrySafeCredentialFailure := trustedOAuthAccount(selection.Account.Config) &&
 			strings.EqualFold(strings.TrimSpace(resp.Header.Get(credentialRetrySafeHeader)), "true")
 		if retrySafeCredentialFailure && retryableStatus(resp.StatusCode) {
 			statusRetryable, uncertainStatus = true, false
@@ -725,6 +725,10 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 				buffered.readError = truncate(bufferErr.Error(), 1024)
 			}
 			selection.Release()
+			normalizeUpstreamAuthError(buffered, operation)
+			if retrySafeCredentialFailure && buffered.status == http.StatusServiceUnavailable {
+				normalizeOAuthUnavailableError(buffered, operation)
+			}
 			last = buffered
 			lastAccountID = selection.Account.Config.ID
 			lastCredentialID = record.CredentialID
