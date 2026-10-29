@@ -1,0 +1,48 @@
+{
+  "observed_at": "2026-10-29T09:03:31.911680+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "client": "Claude Code",
+      "operation": "messages",
+      "tool_roundtrip": true,
+      "transport_exit": 1,
+      "complete": false,
+      "latency_ms": 2744
+    }
+  ],
+  "binary_sha256": "800ceea4924ae40754883e34203b529dc6cea0588b7ab9fcc3e081984788e6c9",
+  "source_evidence": [],
+  "logical_calls": [
+    {
+      "request_id": "47100aa20439509f5d9fa0bc",
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 429,
+      "outcome": "upstream_status",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    },
+    {
+      "request_id": "3de8de9d0e79922f560ec944",
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 429,
+      "outcome": "upstream_status",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    }
+  ],
+  "ok": false,
+  "client_acceptance_settings": {
+    "CLAUDE_CODE_MAX_RETRIES": "0",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "1024",
+    "MAX_THINKING_TOKENS": "0",
+    "single_existing_route_target": true
+  }
+}

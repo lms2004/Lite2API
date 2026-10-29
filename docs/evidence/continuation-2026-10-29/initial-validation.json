@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-10-29T06:39:52Z",
+  "candidate_version": "continuation-20261029-8fd66ab140a9",
+  "scope": "source regression before final compensation and health follow-ups",
+  "go_test_pass_events": 547,
+  "go_test_fail_events": 0,
+  "go_race_pass_events": 547,
+  "go_race_fail_events": 0,
+  "go_vet_exit": 0,
+  "make_test_deploy_exit": 0,
+  "make_test_web_exit": 0,
+  "acceptance_tool_tests": 9,
+  "real_upstream_calls": 0,
+  "production_mutations": false,
+  "retained_failure_notes": [
+    "business-tool initial build failed during concurrent source edits; test log originally replaced before evidence policy was tightened, tool transcript retained",
+    "business-tool-tests.log: fixture lacked required version/upstream API key; fixture corrected",
+    "business-tool-tests-final.log and business-tool-integration-debug.log: fixture startup failed due missing upstream API key; corrected",
+    "business-tool-reviewed-tests.log: build overlapped OAuth intermediate edit; final make test-deploy passed including 9 acceptance-tool tests"
+  ]
+}

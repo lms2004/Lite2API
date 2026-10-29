@@ -17,6 +17,10 @@
       ? sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1))]
       : null;
   }
+  function requestSucceeded(record) {
+    if (record.outcome) return record.outcome === 'success';
+    return !record.error && Number(record.status) >= 200 && Number(record.status) < 300;
+  }
   function createIndex() {
     let previous;
     let result;
@@ -34,7 +38,7 @@
         const live = runtime.get(config.id) || {};
         const rows = requests.get(config.id) || [];
         const latencies = rows.map((row) => finite(row.latency_ms)).filter((value) => value !== null);
-        const failures = rows.reduce((count, row) => count + !(row.status >= 200 && row.status < 400), 0);
+        const failures = rows.reduce((count, row) => count + !requestSucceeded(row), 0);
         return {
           id: config.id,
           name: config.name || config.id,
@@ -77,5 +81,5 @@
       return lookup;
     };
   }
-  return { createIndex, createRouteUsageIndex, percentile };
+  return { createIndex, createRouteUsageIndex, percentile, requestSucceeded };
 });

@@ -82,6 +82,22 @@ func TestValidateOrderedRouteTargets(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDuplicateRouteTargets(t *testing.T) {
+	cfg := Defaults()
+	cfg.Server.AllowPrivateHTTPUpstream = true
+	cfg.Accounts = []Account{{
+		ID: "channel-a", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", Enabled: true,
+		Models: []string{"gpt"},
+	}}
+	cfg.Routes["gpt"] = Route{Targets: []RouteTarget{
+		{Account: "channel-a", Model: "gpt", ReasoningEffort: "auto"},
+		{Account: "channel-a", Model: "gpt", ReasoningEffort: "auto"},
+	}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("duplicate route target must be rejected, got %v", err)
+	}
+}
+
 func TestValidateCredentialPinRequiresCLIProxyAccount(t *testing.T) {
 	cfg := Defaults()
 	cfg.Server.AllowPrivateHTTPUpstream = true

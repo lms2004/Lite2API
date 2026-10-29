@@ -1,0 +1,13 @@
+{
+  "from_version": "continuation-20261029-d2c5dd763eef",
+  "to_version": "continuation-20261029-2ee1d3934d3a",
+  "runtime_source_files": 126,
+  "runtime_source_differences": [],
+  "affected_acceptance_tool_files": [
+    "Makefile",
+    "deploy/verify_service.py",
+    "deploy/verify_service_null_test.py",
+    "tools/verify-business-runtime.py"
+  ],
+  "purpose": "Reuse runtime full/race and restoration evidence only for identical runtime source; acceptance checker regressions rerun separately."
+}

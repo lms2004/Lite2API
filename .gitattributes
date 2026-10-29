@@ -1,3 +1,8 @@
 # Unified patch context preserves source indentation after a context marker.
 # Validate whitespace in the applied source rather than rewriting patch data.
 deploy/patches/*.patch -whitespace
+
+# Preserve raw diagnostic and patch evidence byte for byte, including context
+# indentation and historical trailing spaces covered by the archive hashes.
+docs/evidence/**/*.log -whitespace
+docs/evidence/**/*.patch -whitespace

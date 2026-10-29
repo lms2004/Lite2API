@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lms2004/lite2api/internal/config"
@@ -28,6 +29,38 @@ func TestParseModelIDs(t *testing.T) {
 	want := []string{"model-a", "model-b", "model-c", "model-z"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseModelIDs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestProbeAccountModelsDoesNotFollowRedirects(t *testing.T) {
+	var redirected atomic.Int64
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+	}))
+	defer destination.Close()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL+"/models", http.StatusFound)
+	}))
+	defer upstream.Close()
+	result, err := probeAccountModels(context.Background(), config.Account{
+		BaseURL: upstream.URL + "/v1?key=query-canary", APIKey: "secret", AuthHeader: "Authorization", AuthScheme: "Bearer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || result.Status != http.StatusFound || redirected.Load() != 0 {
+		t.Fatalf("redirect result=%+v destination_calls=%d", result, redirected.Load())
+	}
+	if strings.Contains(result.Endpoint, "query-canary") {
+		t.Fatal("connection result exposed query credential")
+	}
+}
+
+func TestProbeAccountModelsRedactsNetworkErrorURL(t *testing.T) {
+	_, err := probeAccountModels(context.Background(), config.Account{BaseURL: "http://127.0.0.1:0/v1?key=query-canary"})
+	if err == nil || strings.Contains(err.Error(), "query-canary") {
+		t.Fatalf("network error should retain failure without the query credential: %v", err)
 	}
 }
 

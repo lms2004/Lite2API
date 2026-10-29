@@ -1,0 +1,14 @@
+test_cli_writes_report_and_returns_failure_for_incomplete_provider (__main__.ExitStatusIntegration.test_cli_writes_report_and_returns_failure_for_incomplete_provider) ... FAIL
+
+======================================================================
+FAIL: test_cli_writes_report_and_returns_failure_for_incomplete_provider (__main__.ExitStatusIntegration.test_cli_writes_report_and_returns_failure_for_incomplete_provider)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 131, in test_cli_writes_report_and_returns_failure_for_incomplete_provider
+    self.assertEqual(result.returncode, 0 if complete else 1, result.stderr + json.dumps(report))
+AssertionError: 1 != 0 : {"observed_at": "2026-10-29T06:31:42.929705+00:00", "route": "alias", "isolation": "temporary_config_keys_logs_and_port", "cases": [], "runtime_error": "RuntimeError", "source_evidence": [], "logical_calls": [], "ok": false}
+
+----------------------------------------------------------------------
+Ran 1 test in 2.385s
+
+FAILED (failures=1)

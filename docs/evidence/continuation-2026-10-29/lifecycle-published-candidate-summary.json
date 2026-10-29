@@ -1,0 +1,24 @@
+{
+  "observed_at": "2026-10-29T08:59:40.398198+00:00",
+  "version": "continuation-20261029-2ee1d3934d3a",
+  "binary_sha256": "800ceea4924ae40754883e34203b529dc6cea0588b7ab9fcc3e081984788e6c9",
+  "systemd": {
+    "exit_code": 0,
+    "passed_cases": 5,
+    "private_unit_removed": true,
+    "evidence": "lifecycle-systemd-published-candidate.json"
+  },
+  "restore_evidence_reuse": {
+    "reference": "lifecycle-final-release-summary.json",
+    "execution_log": "lifecycle-restore-release.log",
+    "executed_binary_version": "continuation-20261029-d2c5dd763eef",
+    "executed_binary_sha256": "d5a190351744c61836d0e7c5bcb1fb36e19a0235aa8c10a928714932bd8ea2b7",
+    "cmd_internal_files_compared": 125,
+    "cmd_internal_identical": true,
+    "runtime_source_manifest_sha256": "32dde4676be81e5ac5a1f1d471b0a4a973c7ca7fa76a4378c6b882bccf8db33a",
+    "scope": "Restore runtime behavior may reuse the prior successful chroot/Docker managed-key and revoked-grant checks because all 125 cmd/internal files are byte-identical. This does not claim restore was re-executed on the new binary, nor validation of changed external acceptance-script logic.",
+    "new_restore_execution": false
+  },
+  "production_service_changed": false,
+  "external_provider_calls": 0
+}

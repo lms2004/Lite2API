@@ -1,0 +1,31 @@
+node --test internal/web/*.test.js deploy/migrate-sub2api-auths.test.mjs
+TAP version 13
+# Subtest: /root/Lite2API/deploy/migrate-sub2api-auths.test.mjs
+ok 1 - /root/Lite2API/deploy/migrate-sub2api-auths.test.mjs
+  ---
+  duration_ms: 6498.89043
+  ...
+# Subtest: /root/Lite2API/internal/web/app-controls.test.js
+ok 2 - /root/Lite2API/internal/web/app-controls.test.js
+  ---
+  duration_ms: 3213.997405
+  ...
+# Subtest: /root/Lite2API/internal/web/app-core.test.js
+ok 3 - /root/Lite2API/internal/web/app-core.test.js
+  ---
+  duration_ms: 931.934604
+  ...
+# Subtest: /root/Lite2API/internal/web/app-runtime.test.js
+ok 4 - /root/Lite2API/internal/web/app-runtime.test.js
+  ---
+  duration_ms: 1592.464826
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12397.646422

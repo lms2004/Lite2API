@@ -154,7 +154,7 @@ func TestRequestLogRecoveryKeepsBoundedNewestSetAndPerRouteLatest(t *testing.T) 
 	if len(records) != 10 || records[0].RequestID != "request-090" || records[9].RequestID != "request-099" {
 		t.Fatalf("bounded recovery returned wrong newest set: len=%d first=%+v last=%+v", len(records), records[0], records[len(records)-1])
 	}
-	if cold := routeLatest[routeObservationKey("cold", "")]; cold.RequestID != "request-003" {
+	if cold := routeLatest[routeObservationKey(RequestRecord{Model: "cold", AccountID: "upstream"})]; cold.RequestID != "request-003" {
 		t.Fatalf("low-volume route latest observation was lost: %+v", cold)
 	}
 }

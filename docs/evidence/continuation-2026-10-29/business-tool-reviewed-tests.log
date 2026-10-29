@@ -1,0 +1,32 @@
+test_client_timeout_kills_tool_process_group (__main__.CompletionChecks.test_client_timeout_kills_tool_process_group) ... ok
+test_incomplete_json_and_stream_are_not_success (__main__.CompletionChecks.test_incomplete_json_and_stream_are_not_success) ... ok
+test_unknown_only_is_rejected_before_startup (__main__.CompletionChecks.test_unknown_only_is_rejected_before_startup) ... ok
+setUpClass (__main__.ExitStatusIntegration) ... ERROR
+test_empty_membership_does_not_implicitly_expand (__main__.SourceSelection.test_empty_membership_does_not_implicitly_expand) ... ok
+test_explicit_membership_and_credential_are_preserved (__main__.SourceSelection.test_explicit_membership_and_credential_are_preserved) ... ok
+test_logical_capability_and_negative_evidence (__main__.SourceSelection.test_logical_capability_and_negative_evidence) ... ok
+test_wildcard_respects_enabled_operation_and_requested_model (__main__.SourceSelection.test_wildcard_respects_enabled_operation_and_requested_model) ... ok
+
+======================================================================
+ERROR: setUpClass (__main__.ExitStatusIntegration)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 101, in setUpClass
+    subprocess.run(["go", "build", "-o", str(cls.binary), "./cmd/lite2api"], cwd=ROOT, env={**os.environ, "GOTOOLCHAIN": "local"}, check=True, capture_output=True, timeout=90)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['go', 'build', '-o', '/tmp/lite2api-business-tool-test-3l9wuqka/lite2api', './cmd/lite2api']' returned non-zero exit status 1.
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.422s
+
+FAILED (errors=1)
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/weakref.py", line 666, in _exitfunc
+    f()
+  File "/usr/lib/python3.12/weakref.py", line 590, in __call__
+    return info.func(*info.args, **(info.kwargs or {}))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/tempfile.py", line 1075, in _cleanup
+    _warnings.warn(warn_message, ResourceWarning)
+ResourceWarning: Implicitly cleaning up <TemporaryDirectory '/tmp/lite2api-business-tool-test-3l9wuqka'>

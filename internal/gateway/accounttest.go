@@ -45,17 +45,13 @@ func (g *Gateway) serveAccountTest(w http.ResponseWriter, r *http.Request, state
 	if account.ID == "" {
 		account.ID = "connection-test"
 	}
-	if account.APIKey == "********" {
-		account.APIKey = ""
+	if err := restoreAccountDisplaySecrets(&account, configuredAccountByID(state.cfg.Accounts, account.ID)); err != nil {
+		writeAPIErrorCode(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_account_test_config")
+		return
 	}
 	if existing := configuredAccountByID(state.cfg.Accounts, account.ID); existing != nil {
 		if account.APIKey == "" && account.APIKeyEnv == "" {
 			account.APIKey, account.APIKeyEnv = existing.APIKey, existing.APIKeyEnv
-		}
-		for name, value := range account.Headers {
-			if value == "********" {
-				account.Headers[name] = existing.Headers[name]
-			}
 		}
 	}
 
@@ -95,25 +91,29 @@ func configuredAccountByID(accounts []config.Account, id string) *config.Account
 func probeAccountModels(parent context.Context, account config.Account) (accountTestResult, error) {
 	base, err := url.Parse(strings.TrimRight(account.BaseURL, "/"))
 	if err != nil {
-		return accountTestResult{}, fmt.Errorf("parse account base URL: %w", err)
+		return accountTestResult{}, errors.New("invalid account base URL")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/models"
 	base.Fragment = ""
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
 	if strings.TrimSpace(account.ProxyURL) != "" {
 		proxy, err := url.Parse(account.ProxyURL)
 		if err != nil {
-			return accountTestResult{}, fmt.Errorf("parse proxy URL: %w", err)
+			return accountTestResult{}, errors.New("invalid proxy URL")
 		}
 		transport.Proxy = http.ProxyURL(proxy)
 	}
-	client := &http.Client{Transport: transport, Timeout: accountTestTimeout}
+	client := &http.Client{
+		Transport: transport, Timeout: accountTestTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	ctx, cancel := context.WithTimeout(parent, accountTestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
 	if err != nil {
-		return accountTestResult{}, fmt.Errorf("create account test request: %w", err)
+		return accountTestResult{}, errors.New("could not create account test request")
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Lite2API-Account-Test/1.0")
@@ -148,7 +148,7 @@ func probeAccountModels(parent context.Context, account config.Account) (account
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return accountTestResult{}, errors.New("upstream connection test timed out after 12 seconds")
 		}
-		return accountTestResult{}, fmt.Errorf("upstream connection test failed: %w", err)
+		return accountTestResult{}, fmt.Errorf("upstream connection test failed: %s", upstreamErrorMessage(err))
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, accountTestResponseSize+1))
@@ -163,9 +163,9 @@ func probeAccountModels(parent context.Context, account config.Account) (account
 		OK:          resp.StatusCode >= 200 && resp.StatusCode < 300,
 		Status:      resp.StatusCode,
 		LatencyMS:   latency,
-		Endpoint:    base.String(),
+		Endpoint:    redactedAccountURL(base.String()),
 		ContentType: resp.Header.Get("Content-Type"),
-		Message:     resp.Status,
+		Message:     fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode)),
 	}
 	if result.OK {
 		result.Models = parseModelIDs(body)

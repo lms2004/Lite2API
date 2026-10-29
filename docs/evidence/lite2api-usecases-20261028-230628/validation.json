@@ -1,0 +1,214 @@
+{
+  "title": "Lite2API 业务用例依据与验证边界",
+  "recorded_at": "2026-10-28T23:09:51.492742+08:00",
+  "host": "ser451803379164",
+  "repository": "/root/Lite2API",
+  "base_commit": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "source_state": "Uncommitted working tree; verification applies to the captured snapshot, not all later edits.",
+  "final_snapshot_captured_at": "2026-10-28T23:06:28.804179+08:00",
+  "changed_during_snapshot_copy": [],
+  "changed_after_snapshot": [
+    "internal/gateway/gateway.go",
+    "internal/gateway/gateway_test.go",
+    "internal/gateway/response_completion.go",
+    "internal/gateway/response_completion_test.go"
+  ],
+  "go_race": {
+    "command": "GOTOOLCHAIN=local go test -race ./... -count=1 -json",
+    "exit_code": 1,
+    "passed_test_events_including_subtests": 340,
+    "failed_tests": [
+      "TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel"
+    ],
+    "failure_output": [
+      "=== RUN   TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel\n",
+      "    gateway_test.go:1517: status=502 body={\"error\":{\"code\":\"invalid_upstream_response\",\"message\":\"upstream returned an invalid or incomplete response\",\"param\":null,\"type\":\"upstream_error\"}}\n",
+      "--- FAIL: TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel (0.02s)\n"
+    ],
+    "package_results": [
+      {
+        "Time": "2026-10-28T15:07:36.333108954Z",
+        "Action": "skip",
+        "Package": "github.com/lms2004/lite2api/cmd/lite2api",
+        "Elapsed": 0.006
+      },
+      {
+        "Time": "2026-10-28T15:07:37.830932687Z",
+        "Action": "pass",
+        "Package": "github.com/lms2004/lite2api/internal/config",
+        "Elapsed": 1.4969999999999999
+      },
+      {
+        "Time": "2026-10-28T15:08:33.815706054Z",
+        "Action": "pass",
+        "Package": "github.com/lms2004/lite2api/internal/web",
+        "Elapsed": 8.307
+      },
+      {
+        "Time": "2026-10-28T15:08:55.65089614Z",
+        "Action": "fail",
+        "Package": "github.com/lms2004/lite2api/internal/gateway",
+        "Elapsed": 30.144
+      }
+    ]
+  },
+  "node": {
+    "command": "node --test internal/web/app-core.test.js internal/web/app-runtime.test.js",
+    "exit_code": 0,
+    "passed_test_files": 2
+  },
+  "backup_verifier": {
+    "command": "bash deploy/backup-verifiers.test.sh",
+    "exit_code": 0,
+    "scope": "Synthetic archives and a fake age executable. This does not verify real encryption, production backup completeness or full disaster recovery."
+  },
+  "earlier_checks": {
+    "initial_full": {
+      "passed_test_events_including_subtests": 157,
+      "failed_tests": [
+        "TestDownstreamWriteFailureDoesNotTripUpstreamBreaker"
+      ],
+      "failure_output": [
+        "=== RUN   TestDownstreamWriteFailureDoesNotTripUpstreamBreaker\n",
+        "--- FAIL: TestDownstreamWriteFailureDoesNotTripUpstreamBreaker (0.06s)\n",
+        "panic: net/http: abort Handler [recovered, repanicked]\n",
+        "\n",
+        "goroutine 591 [running]:\n",
+        "testing.tRunner.func1.2({0xb55080, 0x10d0850})\n",
+        "\t/usr/local/go/src/testing/testing.go:1974 +0x419\n",
+        "testing.tRunner.func1()\n",
+        "\t/usr/local/go/src/testing/testing.go:1977 +0x67f\n",
+        "panic({0xb55080?, 0x10d0850?})\n",
+        "\t/usr/local/go/src/runtime/panic.go:860 +0x13a\n",
+        "github.com/lms2004/lite2api/internal/gateway.(*Gateway).ServeGateway(0xc0001fe280, {0xc98238, 0xc00003a350}, 0xc0001ac780)\n",
+        "\t/tmp/lite2api-usecases-khs23w5q/internal/gateway/gateway.go:837 +0x66dd\n",
+        "github.com/lms2004/lite2api/internal/gateway.TestDownstreamWriteFailureDoesNotTripUpstreamBreaker(0xc0000c0908)\n",
+        "\t/tmp/lite2api-usecases-khs23w5q/internal/gateway/gateway_test.go:1056 +0x91a\n",
+        "testing.tRunner(0xc0000c0908, 0xc8d0a0)\n",
+        "\t/usr/local/go/src/testing/testing.go:2036 +0x21d\n",
+        "created by testing.(*T).Run in goroutine 1\n",
+        "\t/usr/local/go/src/testing/testing.go:2101 +0xb13\n"
+      ],
+      "package_results": [
+        {
+          "Time": "2026-10-28T15:03:49.90275732Z",
+          "Action": "skip",
+          "Package": "github.com/lms2004/lite2api/cmd/lite2api",
+          "Elapsed": 0
+        },
+        {
+          "Time": "2026-10-28T15:03:52.655825644Z",
+          "Action": "pass",
+          "Package": "github.com/lms2004/lite2api/internal/config",
+          "Elapsed": 1.079
+        },
+        {
+          "Time": "2026-10-28T15:03:57.625410099Z",
+          "Action": "pass",
+          "Package": "github.com/lms2004/lite2api/internal/web",
+          "Elapsed": 4.049
+        },
+        {
+          "Time": "2026-10-28T15:04:05.01806308Z",
+          "Action": "fail",
+          "Package": "github.com/lms2004/lite2api/internal/gateway",
+          "Elapsed": 12.928
+        }
+      ]
+    },
+    "initial_targeted": {
+      "passed_test_events_including_subtests": 155,
+      "failed_tests": [
+        "TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes",
+        "TestOAuth401RefreshesSelectedCredentialAndRetriesOnce"
+      ],
+      "failure_output": [
+        "=== RUN   TestOAuth401RefreshesSelectedCredentialAndRetriesOnce\n",
+        "    oauthrecovery_test.go:54: status=502 calls=2 refreshes=1 body={\"error\":{\"code\":\"invalid_upstream_response\",\"message\":\"upstream returned an invalid or incomplete response\",\"param\":null,\"type\":\"upstream_error\"}}\n",
+        "--- FAIL: TestOAuth401RefreshesSelectedCredentialAndRetriesOnce (0.12s)\n",
+        "=== RUN   TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes\n",
+        "    runtime_test.go:56: explicit all_accounts route failed: no enabled account supports the requested model and operation\n",
+        "--- FAIL: TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes (0.00s)\n"
+      ],
+      "package_results": [
+        {
+          "Time": "2026-10-28T15:05:08.011866154Z",
+          "Action": "pass",
+          "Package": "github.com/lms2004/lite2api/internal/config",
+          "Elapsed": 1.221
+        },
+        {
+          "Time": "2026-10-28T15:05:21.930392883Z",
+          "Action": "fail",
+          "Package": "github.com/lms2004/lite2api/internal/gateway",
+          "Elapsed": 13.405
+        }
+      ]
+    },
+    "restricted_attempt": "Temporary IPv6 loopback socket was blocked; subsequently rerun with permission. Earlier failures belong to the earlier snapshot and are not all asserted against the final snapshot."
+  },
+  "use_case_numbers": {
+    "1": "接好来源",
+    "2": "接好工具",
+    "3": "完成调用",
+    "4": "控制使用",
+    "5": "更换渠道",
+    "6": "恢复调用",
+    "7": "升级服务",
+    "8": "恢复服务"
+  },
+  "boundaries": [
+    "No product source edits.",
+    "No production configuration reads or writes.",
+    "No live model calls, browser runs, deployments or service restarts.",
+    "No external adapter rebuild or full restore drill.",
+    "Earlier 257-pass evidence from HEAD does not validate the later dirty tree."
+  ],
+  "artifacts": [
+    {
+      "path": "source-manifest.json",
+      "bytes": 17340,
+      "sha256": "a952e4ff2561b090b4246c11219f0912f83c9a1c736d1f7d32690b5901451e20"
+    },
+    {
+      "path": "go-race-final.jsonl",
+      "bytes": 298288,
+      "sha256": "69c2acf98ba3ce513d094a1a951aa4602c6f0843b88144d56b9068dad69d4059"
+    },
+    {
+      "path": "node-final.tap",
+      "bytes": 506,
+      "sha256": "abffb4b657f3b8b86fe2d6236bf1e83447bf9c89b49e99fe2e89af66e1fa2550"
+    },
+    {
+      "path": "backup-verifier.log",
+      "bytes": 33,
+      "sha256": "8f2b084eab9f9929ad3fbc2db333b72e7a0f6d71821993a857208bf6f43aa70b"
+    },
+    {
+      "path": "source-manifest-initial.json",
+      "bytes": 17169,
+      "sha256": "278303ffa7fe47a022cbfa160f7eb778e05a1d1e1f58358fd3bb1b5976573397"
+    },
+    {
+      "path": "go-race-initial-restricted.jsonl",
+      "bytes": 57682,
+      "sha256": "88f1537effc1e496a94fd350725ce40c997671c8abdfa0cef443633f8bf645be"
+    },
+    {
+      "path": "go-race-initial-approved.jsonl",
+      "bytes": 143329,
+      "sha256": "c3b933e6800ea140385ba56a06fd7514adf4fcf4a71dc172cd6387bbd18bf0b4"
+    },
+    {
+      "path": "go-targeted-initial.jsonl",
+      "bytes": 137699,
+      "sha256": "4017adb3e4728e6936f97b8602edb2626880f8cdd6c1ff6fd030f90edf58cebc"
+    },
+    {
+      "path": "targeted-test-command-initial.json",
+      "bytes": 5167,
+      "sha256": "315c3363c47654ed51f855f2a0cadfa030f6be0146a0e3c21e6b1c31396486a3"
+    }
+  ]
+}

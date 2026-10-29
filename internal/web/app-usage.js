@@ -299,13 +299,13 @@ globalThis.Lite2APIUsage = function createUsage(context) {
     if (!result) return { label: '未测试', tone: 'neutral' };
     if (result.running) return { label: '测试中', tone: 'neutral' };
     const successes = result.rounds.filter((round) => round.ok).length;
-    if (!successes) return { label: '不可用', tone: 'bad' };
+    if (!successes) return { label: '本轮未完成', tone: 'bad' };
     const values = result.rounds.filter((round) => round.ok).map((round) => round.latency_ms),
       avg = values.reduce((a, b) => a + b, 0) / values.length,
       spread = values.length > 1 ? (Math.max(...values) - Math.min(...values)) / Math.max(1, avg) : 0;
     if (successes < result.rounds.length) return { label: '有失败', tone: 'warn' };
     if (spread > 0.45) return { label: '波动较大', tone: 'warn' };
-    return { label: '稳定', tone: '' };
+    return { label: '本轮已完成', tone: '' };
   }
 
   function currentQualityResult(account) {
@@ -351,7 +351,7 @@ globalThis.Lite2APIUsage = function createUsage(context) {
                 .join('')
             : '<i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i>';
           const runLabel = roundLabels.length ? `三轮直测：${roundLabels.join('；')}` : '尚未执行三轮直测';
-          return `<tr data-quality-id="${escapeHTML(item.id)}"><td data-label="渠道"><div class="quota-identity">${providerIconHTML(key)}<div class="cell-main"><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.id)}</span></div></div></td><td data-label="最近使用" class="numeric">${item.samples} 次</td><td data-label="成功率" class="numeric">${successRate}</td><td data-label="平均 / P95" class="numeric">${avg} / ${p95}</td><td data-label="三轮直测"><span class="quality-run" role="img" aria-label="${escapeHTML(runLabel)}">${run}</span></td><td data-label="质量结论"><span class="status-pill ${conclusion.tone}">${conclusion.label}</span></td><td data-label="操作"><div class="row-actions"><button type="button" data-action="channel-chat" data-id="${escapeHTML(item.id)}" ${chatAvailable ? '' : 'disabled'}>聊天</button><button type="button" data-action="quality-test" data-id="${escapeHTML(item.id)}" ${usageState.qualityRunning.has(item.id) ? 'disabled' : ''}>${usageState.qualityRunning.has(item.id) ? '测试中' : '直测 3 轮'}</button></div></td></tr>`;
+          return `<tr data-quality-id="${escapeHTML(item.id)}"><td data-label="渠道"><div class="quota-identity">${providerIconHTML(key)}<div class="cell-main"><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.id)}</span></div></div></td><td data-label="最近使用" class="numeric">${item.samples} 次</td><td data-label="成功率" class="numeric">${successRate}</td><td data-label="平均 / P95" class="numeric">${avg} / ${p95}</td><td data-label="三轮直测"><span class="quality-run" role="img" aria-label="${escapeHTML(runLabel)}">${run}</span></td><td data-label="本轮观测"><span class="status-pill ${conclusion.tone}">${conclusion.label}</span></td><td data-label="操作"><div class="row-actions"><button type="button" data-action="channel-chat" data-id="${escapeHTML(item.id)}" ${chatAvailable ? '' : 'disabled'}>聊天</button><button type="button" data-action="quality-test" data-id="${escapeHTML(item.id)}" ${usageState.qualityRunning.has(item.id) ? 'disabled' : ''}>${usageState.qualityRunning.has(item.id) ? '测试中' : '直测 3 轮'}</button></div></td></tr>`;
         })
         .join('') || '<tr><td colspan="7" class="empty-copy">还没有 API 连接</td></tr>',
     );
@@ -385,7 +385,7 @@ globalThis.Lite2APIUsage = function createUsage(context) {
               body: JSON.stringify({
                 account_id: id,
                 model,
-                messages: [{ role: 'user', content: '质量探针：只回复 OK' }],
+                messages: [{ role: 'user', content: '完整性探针：只回复 OK' }],
                 temperature: 0,
                 max_tokens: 16,
               }),
@@ -762,7 +762,17 @@ globalThis.Lite2APIUsage = function createUsage(context) {
             credentialLine = credentialText
               ? `<span title="${escapeHTML(record.credential_id || '')}">${escapeHTML(credentialText)}</span>`
               : '';
-          return `<tr><td data-label="时间">${escapeHTML(formatTime(record.time))}</td><td data-label="客户端模型"><div class="cell-main"><strong>${modelLabelHTML(record.model, 'request-model-label')}</strong><span>${escapeHTML(record.request_id || '')}</span></div></td><td data-label="真实上游"><div class="request-channel-cell">${providerIconHTML(key, 'provider-mini')}<div><strong>${escapeHTML(record.account_id || '—')}</strong>${credentialLine}<span class="route-preview-model">${modelIconHTML(record.upstream_model, 'inline-model-icon')}${escapeHTML(record.upstream_model || '—')}</span></div></div></td><td data-label="Token" class="numeric">${record.usage_available ? `${number(record.input_tokens)} / ${number(record.output_tokens)}` : '—'}</td><td data-label="结果"><span class="status-pill ${requestOK(record) ? '' : 'bad'}">${requestOK(record) ? '成功' : `HTTP ${record.status || '—'}`}</span></td><td data-label="耗时" class="numeric">${latency === null ? '—' : number(latency) + ' ms'}</td><td data-label="错误"><span class="request-error" title="${escapeHTML(record.error || '')}">${escapeHTML(record.error || '—')}</span></td></tr>`;
+          const resultLabels = {
+            incomplete_response: '响应未完整', invalid_response: '响应无效',
+            uncertain_submission: '提交结果不确定', client_cancelled: '客户端取消',
+            downstream_timeout: '交付超时',
+          };
+          const resultLabel = requestOK(record) ? (record.outcome ? '已完成' : '历史 HTTP 成功')
+            : resultLabels[record.outcome] || `HTTP ${record.status || '—'}`;
+          const attempts = Array.isArray(record.attempts) && record.attempts.length
+            ? `<details><summary>${number(record.attempt_count || record.attempts.length)} 次发送</summary>${record.attempts.map((attempt) => `<div>${escapeHTML(attempt.account_id)} · ${escapeHTML(attempt.upstream_model)} · ${escapeHTML(attempt.status || attempt.outcome)} · ${number(attempt.latency_ms)} ms</div>`).join('')}</details>`
+            : '';
+          return `<tr><td data-label="时间">${escapeHTML(formatTime(record.time))}</td><td data-label="客户端模型"><div class="cell-main"><strong>${modelLabelHTML(record.model, 'request-model-label')}</strong><span>${escapeHTML(record.request_id || '')}</span></div></td><td data-label="真实上游"><div class="request-channel-cell">${providerIconHTML(key, 'provider-mini')}<div><strong>${escapeHTML(record.account_id || '—')}</strong>${credentialLine}<span class="route-preview-model">${modelIconHTML(record.upstream_model, 'inline-model-icon')}${escapeHTML(record.upstream_model || '—')}</span></div></div></td><td data-label="Token" class="numeric">${record.usage_available ? `${number(record.input_tokens)} / ${number(record.output_tokens)}` : '—'}</td><td data-label="结果"><span class="status-pill ${requestOK(record) ? '' : 'bad'}">${escapeHTML(resultLabel)}</span></td><td data-label="耗时" class="numeric">${latency === null ? '—' : number(latency) + ' ms'}</td><td data-label="错误"><span class="request-error" title="${escapeHTML(record.error || '')}">${escapeHTML(record.error || '—')}</span>${attempts}</td></tr>`;
         })
         .join('') || '<tr><td colspan="7" class="empty-copy">没有匹配的请求</td></tr>',
     );

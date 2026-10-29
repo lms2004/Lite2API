@@ -3,3 +3,7 @@
 /.env
 /channels/runtime/
 *.log
+# Sanitized acceptance logs are part of the versioned evidence archive.
+!/docs/evidence/**/*.log
+__pycache__/
+*.py[cod]

@@ -1,0 +1,58 @@
+{
+  "measured_at_utc": "2026-10-27T02:45:30.259688+00:00",
+  "scenario": "Scheduler.Select with no configured accounts or routes",
+  "scope": "local scheduler only; not HTTP latency, throughput or a production SLO",
+  "wait_seconds": 30,
+  "samples_per_revision": 3,
+  "toolchain": "go version go1.26.5 linux/amd64",
+  "revisions": [
+    {
+      "label": "baseline",
+      "commit": "1d6002668554742d153449a00d6b2a558b07c40b",
+      "measurements": [
+        {
+          "elapsed_ms": 30025.465614,
+          "error": "no healthy account has available capacity",
+          "sample": 1
+        },
+        {
+          "elapsed_ms": 30029.322766,
+          "error": "no healthy account has available capacity",
+          "sample": 2
+        },
+        {
+          "elapsed_ms": 30026.626456,
+          "error": "no healthy account has available capacity",
+          "sample": 3
+        }
+      ],
+      "median_ms": 30026.626456,
+      "min_ms": 30025.465614,
+      "max_ms": 30029.322766
+    },
+    {
+      "label": "current",
+      "commit": "32c26047300e7fb17efd4b0ac282569838f7fd78",
+      "measurements": [
+        {
+          "elapsed_ms": 0.032932,
+          "error": "no enabled account supports the requested model and operation",
+          "sample": 1
+        },
+        {
+          "elapsed_ms": 0.001142,
+          "error": "no enabled account supports the requested model and operation",
+          "sample": 2
+        },
+        {
+          "elapsed_ms": 0.000441,
+          "error": "no enabled account supports the requested model and operation",
+          "sample": 3
+        }
+      ],
+      "median_ms": 0.001142,
+      "min_ms": 0.000441,
+      "max_ms": 0.032932
+    }
+  ]
+}

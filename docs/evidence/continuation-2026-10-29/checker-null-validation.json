@@ -1,0 +1,31 @@
+{
+  "scope": "local synthetic protocol payloads and loopback HTTP fixture only; actual provider Chat bodies were not retained or replayed",
+  "before": "checker-null-before.json",
+  "fix": "Treat optional null tool collections as empty arrays while rejecting non-array non-null values.",
+  "checks": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 deploy/verify_service_null_test.py -v",
+      "exit_code": 0,
+      "tests": 5,
+      "cases": [
+        "Chat JSON and SSE optional null tool_calls accepted",
+        "required tool exchange still rejected without calls",
+        "malformed collections remain invalid",
+        "missing finish, content, DONE and trailing frames remain rejected",
+        "full verify() HTTP fixture accepts both formats and preserves anonymous/admin credential rejection"
+      ]
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 deploy/lifecycle_review_test.py -v",
+      "exit_code": 0,
+      "tests": 8
+    }
+  ],
+  "sha256": {
+    "deploy/verify_service.py": "d73b7eda2ee877677c7d4080698ba6c214de6f9156cc3990f4359e0be0879f72",
+    "deploy/verify_service_null_test.py": "21a8ec6a530ec89879fd2f282dbc8be5bdb76734ea07e86101596eba5ab998d3"
+  },
+  "limits": [
+    "Historical real-upstream Chat cases remain false in their original report; only a new actual response can establish corrected client acceptance because raw bodies were intentionally not retained."
+  ]
+}

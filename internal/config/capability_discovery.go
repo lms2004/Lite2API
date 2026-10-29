@@ -120,6 +120,16 @@ func inferDiscoveredLogicalModel(account Account, upstreamModel string) (string,
 	return inferGenericDiscoveredCapability(account, upstreamModel)
 }
 
+// DiscoveryProvider identifies a provider-scoped adapter connection. An empty
+// value denotes a shared pool, matching the model catalog filtering boundary.
+func DiscoveryProvider(account Account) string {
+	scope := discoveryScope(account)
+	if scope == "claude-code" {
+		return "anthropic"
+	}
+	return scope
+}
+
 func discoveryScope(account Account) string {
 	if !strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
 		return ""

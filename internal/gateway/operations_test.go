@@ -22,15 +22,15 @@ func TestOperationsNoSamplesRemainUnknown(t *testing.T) {
 	}
 }
 
-func TestOperationsUsesLatestRealDataRegardlessOfAge(t *testing.T) {
+func TestOperationsRetainsHistoryWithoutClaimingCurrentAvailability(t *testing.T) {
 	now := time.Now().UTC()
-	record := RequestRecord{Time: now.Add(-72 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
+	record := RequestRecord{Time: now.Add(-72 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
 	cfg := config.Defaults()
 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}, RouteLatest: []RequestRecord{record}})
-	if snapshot.Window.Samples != 1 || snapshot.Routes[0].Window.Samples != 1 || snapshot.State != HealthReady {
-		t.Fatalf("latest real data must remain valid regardless of age: %+v", snapshot)
+	if snapshot.Window.Samples != 1 || snapshot.Routes[0].Window.Samples != 1 || snapshot.State != HealthUnknown || snapshot.Routes[0].Observations[0].Fresh {
+		t.Fatalf("historical evidence must remain visible without proving present availability: %+v", snapshot)
 	}
 	if snapshot.Window.ObservedAt != record.Time || snapshot.Window.SuccessRate == nil || *snapshot.Window.SuccessRate != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 12 {
 		t.Fatalf("latest real data must drive metrics: %+v", snapshot.Window)
@@ -43,11 +43,11 @@ func TestOperationsMetricsUseOnlyLatestRecord(t *testing.T) {
 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
 	records := []RequestRecord{
-		{Time: now.Add(-48 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 503, LatencyMS: 9000},
-		{Time: now.Add(-24 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 42},
+		{Time: now.Add(-48 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 503, LatencyMS: 9000},
+		{Time: now.Add(-24 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, LatencyMS: 42},
 	}
 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: records, RouteLatest: []RequestRecord{records[1]}})
-	if snapshot.Window.Samples != 1 || snapshot.Window.Successful != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 42 || snapshot.State != HealthReady {
+	if snapshot.Window.Samples != 1 || snapshot.Window.Successful != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 42 || snapshot.State != HealthUnknown || snapshot.Window.Scope != "latest_logical_request" {
 		t.Fatalf("only latest record should drive health metrics: %+v", snapshot)
 	}
 }
@@ -77,7 +77,7 @@ func TestOperationsChecksEveryConfiguredRoute(t *testing.T) {
 		"ready":  {Accounts: []string{"upstream"}},
 		"broken": {Targets: []config.RouteTarget{{Account: "missing"}}},
 	}
-	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "ready", AccountID: "upstream", Status: 200, LatencyMS: 25}
+	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "ready", UpstreamModel: "ready", AccountID: "upstream", Status: 200, LatencyMS: 25}
 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}, RouteLatest: []RequestRecord{record}})
 	if snapshot.State != HealthUnavailable || len(snapshot.Routes) != 2 {
 		t.Fatalf("global health must include broken route coverage: %+v", snapshot)
@@ -89,10 +89,26 @@ func TestOperationsRecentFailureIsDegraded(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
-	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 503, LatencyMS: 25}
+	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 503, LatencyMS: 25}
 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}, RouteLatest: []RequestRecord{record}})
 	if snapshot.State != HealthDegraded || snapshot.Routes[0].State != HealthDegraded || snapshot.Routes[0].DegradedTargets != 1 {
 		t.Fatalf("an eligible target with recent failures must be degraded: %+v", snapshot)
+	}
+}
+
+func TestOperationsScopesExplicitTargetsByCredentialAndModel(t *testing.T) {
+	now := time.Now().UTC()
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{ID: "pool", Type: "openai", BaseURL: "https://example.invalid/v1", Models: []string{"m1", "m2"}, Enabled: true, Concurrency: 4}}
+	cfg.Routes = map[string]config.Route{"alias": {Targets: []config.RouteTarget{
+		{Account: "pool", Credential: "0123456789abcdef", Model: "m1"},
+		{Account: "pool", Credential: "fedcba9876543210", Model: "m2"},
+	}}}
+	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "alias", AccountID: "pool", CredentialID: "0123456789abcdef", UpstreamModel: "m1", Status: 200, Outcome: "success"}
+	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "pool", Enabled: true, Concurrency: 4}}, StatsSnapshot{RouteLatest: []RequestRecord{record}})
+	route := snapshot.Routes[0]
+	if route.Targets != 2 || route.ReadyTargets != 1 || route.UnknownTargets != 1 || route.DegradedTargets != 0 {
+		t.Fatalf("target-scoped health collapsed distinct targets: %+v", route)
 	}
 }
 
@@ -131,7 +147,7 @@ func TestLivenessAndReadinessAreSeparate(t *testing.T) {
 	}
 
 	fingerprint := g.state.Load().routeFingerprints["chat"]
-	success := RequestRecord{Time: time.Now().UTC().Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, Outcome: "success", RouteFingerprint: fingerprint}
+	success := RequestRecord{Time: time.Now().UTC().Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, Outcome: "success", RouteFingerprint: fingerprint}
 	g.stats.Record(success)
 	g.stats.RecordRouteObservation(success)
 	ready = httptest.NewRecorder()
@@ -140,7 +156,7 @@ func TestLivenessAndReadinessAreSeparate(t *testing.T) {
 		t.Fatalf("fresh route readiness=%d body=%s", ready.Code, ready.Body.String())
 	}
 
-	failure := RequestRecord{Time: time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 500, Outcome: "uncertain_submission", RouteFingerprint: fingerprint}
+	failure := RequestRecord{Time: time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 500, Outcome: "uncertain_submission", RouteFingerprint: fingerprint}
 	g.stats.Record(failure)
 	g.stats.RecordRouteObservation(failure)
 	ready = httptest.NewRecorder()
@@ -194,11 +210,11 @@ func TestReadinessUsesLatestRouteObservationAcrossOperations(t *testing.T) {
 	fingerprint := g.state.Load().routeFingerprints["chat"]
 	now := time.Now().UTC()
 	g.stats.RecordRouteObservation(RequestRecord{
-		Time: now.Add(-10 * time.Minute).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream",
+		Time: now.Add(-10 * time.Minute).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream",
 		Operation: config.OperationEmbeddings, Status: http.StatusOK, Outcome: "success", RouteFingerprint: fingerprint,
 	})
 	g.stats.RecordRouteObservation(RequestRecord{
-		Time: now.Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream",
+		Time: now.Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream",
 		Operation: config.OperationOpenAIChat, Status: http.StatusOK, Outcome: "success", RouteFingerprint: fingerprint,
 	})
 	ready := httptest.NewRecorder()

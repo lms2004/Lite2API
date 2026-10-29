@@ -49,7 +49,7 @@ func TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes(t *testing.T) {
 	if containsModel(s.Models(), "empty") {
 		t.Fatal("empty route was advertised")
 	}
-	cfg.Routes["all"] = config.Route{AllAccounts: true}
+	cfg.Routes["all"] = config.Route{AllAccounts: true, UpstreamModel: "m"}
 	s = NewScheduler(cfg)
 	selection, err := s.Select(context.Background(), "all", config.OperationOpenAIChat, "", nil, 0)
 	if err != nil {
@@ -610,6 +610,37 @@ func TestSchedulerAdvertisesAndResolvesUnroutedLogicalCapability(t *testing.T) {
 	defer selection.Release()
 	if selection.Model != "gpt-5.6-sol" || selection.ReasoningEffort != "max" {
 		t.Fatalf("routed capability selection=%+v", selection)
+	}
+}
+
+func TestSchedulerResolvesUnroutedModelMapAlias(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{
+		ID: "mapped", Type: "openai", BaseURL: "http://127.0.0.1:1/v1",
+		Models: []string{"real-model"}, ModelMap: map[string]string{"alias": "real-model"}, Enabled: true, Weight: 1,
+	}}
+	s := NewScheduler(cfg)
+	if !containsModel(s.Models(), "alias") {
+		t.Fatalf("model map alias was not advertised: %v", s.Models())
+	}
+	selection, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer selection.Release()
+	if selection.Model != "real-model" {
+		t.Fatalf("model map alias selected %q", selection.Model)
+	}
+}
+
+func TestSchedulerDoesNotAdvertiseExplicitlyUnsupportedCapability(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{
+		ID: "blocked", Type: "openai", BaseURL: "http://127.0.0.1:1/v1", Models: []string{"real-model"}, Enabled: true, Weight: 1,
+		Capabilities: []config.ChannelCapability{{Model: "alias", UpstreamModel: "real-model", ReasoningEfforts: []string{"auto"}, Evidence: config.CapabilityEvidence{Status: "unsupported"}}},
+	}}
+	if containsModel(NewScheduler(cfg).Models(), "alias") || containsModel(NewScheduler(cfg).Models(), "real-model") {
+		t.Fatalf("unsupported capability was advertised: %v", NewScheduler(cfg).Models())
 	}
 }
 

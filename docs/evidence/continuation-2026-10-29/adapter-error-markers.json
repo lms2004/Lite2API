@@ -1,0 +1,130 @@
+{
+  "scope": "journal_markers_only_no_raw_lines",
+  "rows": [
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "429",
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "429",
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "403"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "403"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "429",
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "429",
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "429",
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "503"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "credit"
+      ],
+      "http_status": []
+    },
+    {
+      "markers": [
+        "thinking"
+      ],
+      "http_status": []
+    }
+  ]
+}

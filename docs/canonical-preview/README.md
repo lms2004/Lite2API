@@ -105,7 +105,7 @@ document, one CSP-pinned script and no frontend runtime or build dependencies.
 The files in `.github/qa/` provide a local acceptance harness. They start
 deterministic upstreams and a credential-pool fixture, build a real Lite2API
 binary, seed real traffic, and drive one sequential Playwright browser through usage,
-quality testing, direct channel chat, common-account actions, every uncommon onboarding
+call completion testing, direct channel chat, common-account actions, every uncommon onboarding
 branch, automatic connection test/save, immediate route activation, route
 validation/save, import dry-run, and mobile layouts.
 

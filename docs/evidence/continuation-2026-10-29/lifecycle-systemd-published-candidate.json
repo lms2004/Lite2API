@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "scope": "real_systemd_private_state_fixture_upstream",
+  "production_service_changed": false,
+  "external_provider_calls": 0,
+  "binary_sha256": "800ceea4924ae40754883e34203b529dc6cea0588b7ab9fcc3e081984788e6c9",
+  "unit_template_sha256": "8a001cf67614878b13c69b79194d24ca1e9c4b28b89cb02e9cc355e66dedc42a",
+  "private_unit_removed": true,
+  "cases": [
+    {
+      "name": "start_and_completed_local_call",
+      "ok": true
+    },
+    {
+      "name": "invalid_and_valid_hup_preserve_service",
+      "ok": true
+    },
+    {
+      "name": "restart_and_completed_local_call",
+      "ok": true
+    },
+    {
+      "name": "sigkill_restart_on_failure_and_completed_local_call",
+      "ok": true
+    },
+    {
+      "name": "graceful_stop_delivers_active_call_flushes_log_releases_pid_and_port",
+      "ok": true
+    }
+  ]
+}

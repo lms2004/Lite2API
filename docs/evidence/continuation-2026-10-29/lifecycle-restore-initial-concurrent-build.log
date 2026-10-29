@@ -1,0 +1,19 @@
+setUpClass (__main__.RestoreLifecycle) ... ERROR
+
+======================================================================
+ERROR: setUpClass (__main__.RestoreLifecycle)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/deploy/restore_lifecycle_test.py", line 125, in setUpClass
+    command(["go", "build", "-o", cls.binary, "./cmd/lite2api"],
+  File "/root/Lite2API/deploy/restore_lifecycle_test.py", line 77, in command
+    raise AssertionError(f"{Path(str(args[0])).name} returned unexpected status {process.returncode}; "
+AssertionError: go returned unexpected status 1; diagnostic=nal/gateway
+internal/gateway/oauthadapter.go:476:18: g.reconcileOAuthPoolAccount undefined (type *Gateway has no field or method reconcileOAuthPoolAccount)
+internal/gateway/oauthadapter.go:508:18: g.reconcileOAuthPoolAccount undefined (type *Gateway has no field or method reconcileOAuthPoolAccount)
+
+
+----------------------------------------------------------------------
+Ran 0 tests in 2.259s
+
+FAILED (errors=1)

@@ -1,0 +1,93 @@
+{
+  "observed_at": "2026-10-29T13:49:37.598574+00:00",
+  "reviewer": "final_protocol_review",
+  "scope": "Independent source review and focused local fixture execution for final protocol completion, OAuth import compensation, and release acceptance exceptions. No production service, credential or provider calls.",
+  "conclusion": "No unresolved actionable finding in the reviewed final scope.",
+  "source_stable_during_final_python_checks": true,
+  "sha256": {
+    "Makefile": "1f111ee95e134ab71d6606eac31f1fedd25e9b9079ba92b029cf1e30f3458b8d",
+    "internal/gateway/gateway.go": "909c54a440aad5361fc5e5c16dc9c7e9470e7ef1ac11ae8b257530042d3fb3e2",
+    "internal/gateway/response_completion.go": "f4443096164a447f0cb35b674bcd8a98bed32d841ba83d5aefa50cf60b54ee3f",
+    "internal/gateway/completion_stream_contract.go": "f74026d4db8c57192ac3026a884a857c45f18cb2aac580ae4b8a88085f671ddd",
+    "internal/gateway/completion_final_review_test.go": "9927eb06fbfd5e281e57f483427a9ae2f98c3f9058fa5fb1a998e77d495344b1",
+    "internal/gateway/accountimport.go": "6cf32e3b90de039706a0eac1386ac2a949f0b75d8a669354ec60d42c6a86a799",
+    "internal/gateway/oauth_boundary_regression_test.go": "d4b37f458d69c5c0fa4d0fe3774563a7d16178cb1abdead437ff2999a41d3a38",
+    "internal/gateway/response_completion_test.go": "34149c41d51a2c7a6554a672ccedf1a9608af75ef6ced525ad24222b9b1b95c9",
+    "deploy/verify_service.py": "b4ba7716d049ceba0e71286266c707769fb69f6f3870d6363cb4309b13ed2f90",
+    "deploy/verify_service_failure_test.py": "9032333106241e419dad419907cc561b322fb3375276a8daadf3298a719d5c5e",
+    "deploy/lifecycle_review_test.py": "ac4eb24fb26cd93fd2162f72cd20874333293279c96cea53811e9201d9955c9f"
+  },
+  "checks": [
+    {
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "./internal/gateway",
+        "-run",
+        "^(TestStreamDeliveryRejectsBufferedPartialTailAfterTerminal|TestMessagesStreamDeltaMatchesBlockAndStringPayload|TestStreamTerminalCompletesWithoutTransportEOF|TestAccountImportRollsBackNewAndReplacedCredentialsOnCommitFailure)$",
+        "-count=5",
+        "-timeout=90s",
+        "-json"
+      ],
+      "environment": {
+        "GOTOOLCHAIN": "local",
+        "GOMAXPROCS": "2"
+      },
+      "exit_code": 0,
+      "package_elapsed_seconds": 4.679,
+      "scope": "Independently executed before this report; real localhost HTTP fixtures and synthetic credentials only. All four selected top-level tests and their subtests passed across five repetitions under the race detector."
+    },
+    {
+      "command": [
+        "python3",
+        "deploy/verify_service_failure_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.326,
+      "output": "...\n----------------------------------------------------------------------\nRan 3 tests in 0.006s\n\nOK\n"
+    },
+    {
+      "command": [
+        "python3",
+        "deploy/lifecycle_review_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.773,
+      "output": "test_business_acceptance_checks_requested_tools_and_indexes (__main__.LifecycleReview.test_business_acceptance_checks_requested_tools_and_indexes) ... ok\ntest_business_acceptance_rejects_frames_after_stream_terminal (__main__.LifecycleReview.test_business_acceptance_rejects_frames_after_stream_terminal) ... ok\ntest_created_hardlinked_state_is_readable_by_own_restorer (__main__.LifecycleReview.test_created_hardlinked_state_is_readable_by_own_restorer) ... ok\ntest_manifest_must_be_a_complete_object (__main__.LifecycleReview.test_manifest_must_be_a_complete_object) ... ok\ntest_messages_acceptance_checks_delta_type_and_block (__main__.LifecycleReview.test_messages_acceptance_checks_delta_type_and_block) ... ok\ntest_oauth_channel_release_metadata_and_patch_manifest_match (__main__.LifecycleReview.test_oauth_channel_release_metadata_and_patch_manifest_match) ... ok\ntest_restorer_can_write_material_files (__main__.LifecycleReview.test_restorer_can_write_material_files) ... ok\ntest_sigterm_cleans_plaintext_restore_and_child (__main__.LifecycleReview.test_sigterm_cleans_plaintext_restore_and_child) ... ok\ntest_snapshot_does_not_report_success_when_producer_resume_fails (__main__.LifecycleReview.test_snapshot_does_not_report_success_when_producer_resume_fails) ... ok\ntest_stream_acceptance_requires_dispatched_protocol_terminal (__main__.LifecycleReview.test_stream_acceptance_requires_dispatched_protocol_terminal) ... ok\n\n----------------------------------------------------------------------\nRan 10 tests in 0.546s\n\nOK\n"
+    }
+  ],
+  "findings": [
+    {
+      "issue": "Terminal stream branch returned success without checking already-buffered incomplete trailing event.",
+      "resolution": "Finish() runs after Feed and before delivering the terminal chunk; undelivered event metadata is included in Finish. Legitimate terminal streams still finish without waiting for transport EOF.",
+      "status": "fixed_and_independently_checked"
+    },
+    {
+      "issue": "Messages typed deltas allowed malformed text values or a payload for the wrong content block.",
+      "resolution": "Known delta types check the corresponding block kind and required non-null string field; unknown extension handling remains unchanged.",
+      "status": "fixed_and_independently_checked"
+    },
+    {
+      "issue": "OAuth import compensation could restore token bytes while losing the prior disabled runtime state or permit cancellation to commit.",
+      "resolution": "Bounded cleanup independent of cancellation restores file and original status then confirms status. Post-upload/discovery cancellation checks prevent candidate commit. Six cancellation/commit and prior-state combinations passed under race detector.",
+      "status": "fixed_and_independently_checked"
+    },
+    {
+      "issue": "HTTP 200 followed by protocol/source parsing exception retained row.ok=true and could pass release acceptance.",
+      "resolution": "Exception paths now explicitly fail the row and preserve diagnostic failure reports. Independent in-memory reproduction with HTTP200/not-json previously returned overall ok=true; final regression rejects this shape and requires nonzero CLI exit.",
+      "status": "fixed_and_independently_checked"
+    },
+    {
+      "issue": "Release SSE checker accepted EOF-undispatched terminal frames and ignored Chat [DONE] in other protocols.",
+      "resolution": "Reject trailing data/event fields without a blank-line dispatch and limit [DONE] to Chat. Three-protocol fixtures cover truncated terminal/tail, valid comment trailer and extra protocol marker.",
+      "status": "fixed_and_independently_checked"
+    }
+  ],
+  "limits": [
+    "This review establishes scoped source and local-fixture behavior, not external provider or real client acceptance.",
+    "The gateway intentionally closes after a validated terminal chunk; it checks all bytes already returned by that Read and does not wait for hypothetical later transport frames.",
+    "Full repository, real age, Docker, chroot, systemd and deployment checks are owned by the primary agent and were not repeated independently here.",
+    "OAuth adapter restore failures remain explicit incomplete-compensation results requiring state inspection; real revoked provider grants still require reauthorization."
+  ]
+}

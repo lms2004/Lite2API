@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "name": "missing_profile_rejected_before_mutation",
+      "ok": true
+    },
+    {
+      "name": "committed_upgrade_passed_real_business_and_access_acceptance",
+      "ok": true
+    },
+    {
+      "candidate_mutations_confirmed": true,
+      "incomplete_200_rejected": true,
+      "managed_key_call_and_whitelist": true,
+      "name": "rollback_restored_active_enabled",
+      "ok": true,
+      "restored": [
+        "absolute_client_keys",
+        "binary",
+        "config",
+        "environment",
+        "state_marker",
+        "unit"
+      ]
+    },
+    {
+      "candidate_mutations_confirmed": true,
+      "incomplete_200_rejected": true,
+      "managed_key_call_and_whitelist": true,
+      "name": "rollback_restored_inactive_disabled",
+      "ok": true,
+      "restored": [
+        "absolute_client_keys",
+        "binary",
+        "config",
+        "environment",
+        "state_marker",
+        "unit"
+      ]
+    }
+  ],
+  "elapsed_seconds": 13.73,
+  "host_systemd_used": false,
+  "ok": true,
+  "scope": "private_git_commit_private_chroot_real_go_real_http"
+}

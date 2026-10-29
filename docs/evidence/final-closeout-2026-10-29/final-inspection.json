@@ -1,0 +1,18 @@
+{
+  "observed_at": "2026-10-29T21:53:52.381562+08:00",
+  "staged_files_inspected": 301,
+  "sensitive_signature_hits": 0,
+  "explicitly_reviewed_synthetic_url_fixtures": [
+    "internal/gateway/gateway_test.go",
+    "internal/gateway/information_test.go",
+    "internal/web/app-core.test.js"
+  ],
+  "local_doc_links_checked": 250,
+  "missing_local_doc_links": 0,
+  "source_manifest_matches_final_files": true,
+  "independent_review_source_hashes_match": true,
+  "historical_evidence_hashes_unchanged": true,
+  "staged_diff_check_exit_code": 0,
+  "unstaged_changes_at_inspection": false,
+  "evidence_whitespace": "Original log diagnostics and unified patch context are preserved byte for byte using narrowly scoped .gitattributes rules; applied source whitespace is checked normally."
+}

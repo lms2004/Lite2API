@@ -5,12 +5,12 @@ services:
       context: .
       dockerfile: channels/cliproxyapi/Dockerfile
       args:
-        VERSION: v6.10.9-lite2api.6
+        VERSION: v6.10.9-lite2api.9
         COMMIT: 785b00c3127eea6aa207f1207ead8a2aa93690a3
         # Quote ISO dates: YAML otherwise coerces this into a timestamp and
         # Compose rejects the build-arg schema before any container starts.
-        BUILD_DATE: "2026-08-24"
-    image: lite2api/cliproxyapi:v6.10.9-lite2api.6
+        BUILD_DATE: "2026-10-28"
+    image: lite2api/cliproxyapi:v6.10.9-lite2api.9
     container_name: lite2api-cliproxyapi
     restart: unless-stopped
     networks: [channel-oauth]

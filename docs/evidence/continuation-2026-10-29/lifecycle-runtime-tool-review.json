@@ -1,0 +1,43 @@
+{
+  "observed_at": "2026-10-29T06:35:49.160179+00:00",
+  "scope": [
+    "tools/verify-business-runtime.py",
+    "tools/verify_business_runtime_test.py"
+  ],
+  "findings": [
+    {
+      "id": "TERM-cleanup",
+      "priority": 1,
+      "issue": "No SIGTERM/SIGHUP handler in main; default termination bypasses finally and can orphan gateway/client sessions.",
+      "status": "fixed_and_source_reviewed; final integration regression owned by primary agent"
+    },
+    {
+      "id": "missing-requested-operation",
+      "priority": 2,
+      "issue": "An explicitly requested source operation with no candidates is silently skipped if another operation succeeds.",
+      "status": "fixed_and_source_reviewed; final integration regression owned by primary agent"
+    },
+    {
+      "id": "explicit-completed-field",
+      "priority": 2,
+      "issue": "Exact source complete calculation should require completed is True in addition to ok and evidence_saved.",
+      "status": "fixed_and_source_reviewed; final integration regression owned by primary agent"
+    }
+  ],
+  "reviewed_at": "2026-10-29T06:37:45.902070+00:00",
+  "additional_finding": {
+    "id": "timeout-pipe-close",
+    "status": "fixed_and_source_reviewed",
+    "evidence": "lifecycle-runtime-tool-review.log captured ResourceWarning before repair; subsequent nonbuild tests emitted none"
+  },
+  "conclusion": "No unresolved actionable finding in the reviewed changes. Repaired signal handling reaches cleanup without being swallowed by per-client exception handlers. Missing requested operations cannot yield overall success, and exact-source completion requires completed, ok and evidence_saved.",
+  "independent_execution": {
+    "selection_completion_cleanup_tests": 7,
+    "exit_code": 0,
+    "integration_recheck": "blocked by an intermediate concurrent OAuth compilation error; do not treat as passing. Primary agent owns frozen-source final rerun."
+  },
+  "source_sha256": {
+    "tools/verify-business-runtime.py": "a826eaa4562b8bc8a6024cae3620813a8427fcd6ef599507eff3fce4eaab8160",
+    "tools/verify_business_runtime_test.py": "5d19795e0a10b9d69a92dc3fe633f89e55071ae2dd220ba8949172cd8806019a"
+  }
+}

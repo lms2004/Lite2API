@@ -1,0 +1,109 @@
+{
+  "reconstructed_at": "2026-10-29T21:47:21.022188+08:00",
+  "status": "historical_archive_reconstructed_from_surviving_outputs",
+  "original_summary_available": false,
+  "scope": "Preserve surviving results referenced by BUSINESS_ALIGNMENT_ROUND2_2026-10-28.md; this is not new acceptance of the current workspace. Original source manifest and full orchestration summary were not retained.",
+  "go_race": {
+    "first_observed_event": "2026-10-28T16:59:42.518371502Z",
+    "last_observed_event": "2026-10-28T17:00:17.124539905Z",
+    "tests": {
+      "pass": 500,
+      "fail": 0,
+      "skip": 0
+    },
+    "process_exit_code": "not independently retained; package pass/fail events are preserved in the original log"
+  },
+  "upgrade": {
+    "cases": [
+      {
+        "name": "missing_profile_rejected_before_mutation",
+        "ok": true
+      },
+      {
+        "name": "committed_upgrade_passed_real_business_and_access_acceptance",
+        "ok": true
+      },
+      {
+        "candidate_mutations_confirmed": true,
+        "incomplete_200_rejected": true,
+        "managed_key_call_and_whitelist": true,
+        "name": "rollback_restored_active_enabled",
+        "ok": true,
+        "restored": [
+          "absolute_client_keys",
+          "binary",
+          "config",
+          "environment",
+          "state_marker",
+          "unit"
+        ]
+      },
+      {
+        "candidate_mutations_confirmed": true,
+        "incomplete_200_rejected": true,
+        "managed_key_call_and_whitelist": true,
+        "name": "rollback_restored_inactive_disabled",
+        "ok": true,
+        "restored": [
+          "absolute_client_keys",
+          "binary",
+          "config",
+          "environment",
+          "state_marker",
+          "unit"
+        ]
+      }
+    ],
+    "elapsed_seconds": 18.04,
+    "host_systemd_used": false,
+    "ok": true,
+    "scope": "private_git_commit_private_chroot_real_go_real_http"
+  },
+  "files": {
+    "go-race-accepted.jsonl": {
+      "recovered_from": "/tmp/lite2api-round2-go-accepted.jsonl",
+      "sha256": "3976322dad24104730be3f0c17f29f22cae60bf427cf719e2197b2e81b8757fe"
+    },
+    "web-accepted.tap": {
+      "recovered_from": "/tmp/lite2api-round2-web-accepted.tap",
+      "sha256": "358e2f1ac327b4b1d7c6127060a0a0b2624fd50dd80c4be9192119724217b127"
+    },
+    "deploy-accepted.log": {
+      "recovered_from": "/tmp/lite2api-round2-deploy-accepted.log",
+      "sha256": "c8f5757df1a88b278fd9805bc489a9db7599fa765077e7669ab3ff545b399fc8"
+    },
+    "lifecycle-final.log": {
+      "recovered_from": "/tmp/lite2api-round2-lifecycle-final.log",
+      "sha256": "5de670e1ea6c9f3e8385504ade342d1f58c576401e334bedb7b32db1e76c1513"
+    },
+    "compose.log": {
+      "recovered_from": "/tmp/lite2api-round2-compose.log",
+      "sha256": "95e49d8a7ffc98cc4a5549d2dec0fe0a9d361e441c2cb035490b474254141c38"
+    },
+    "upgrade-results.json": {
+      "recovered_from": "/tmp/lite2api-round2-upgrade-results.json",
+      "sha256": "abad3789338347a0cb8d0c581b5b5e0e8e4677e3685d023a9689b9b7ed134def"
+    },
+    "restore-tests.log": {
+      "recovered_from": "/tmp/lite2api-round2-restore-tests.log",
+      "sha256": "2e57fb37cc1ed45dafbbc4b834705c0f71bb11221c9fc3a3ee7d955ba91ba55a"
+    },
+    "real-final-live.json": {
+      "recovered_from": "/tmp/lite2api-round2-final-live.json",
+      "sha256": "dac70d1c4ca0c3699afec6c40bd7a216b3d2d4e30df31a4f6ee0c1a94ebcb97b"
+    },
+    "real-initial-live.json": {
+      "recovered_from": "/tmp/lite2api-round2-live.json",
+      "sha256": "b2a7567c6bbd0e858989748b1a5896887dcb6457ef97ca5d41ffb9079d3dc34b"
+    },
+    "real-source-live.json": {
+      "recovered_from": "/tmp/lite2api-round2-source-live.json",
+      "sha256": "b8ce103a85b0a1bf431f665b8d0489866e64196a5e46f8a79259c04830fac76f"
+    }
+  },
+  "limits": [
+    "Historical real-client reports are scoped to their recorded binary/source and timestamp; later Claude Code 429 failures remain failures in continuation-2026-10-29.",
+    "Recovered lifecycle results use local synthetic upstreams and do not prove production disaster recovery.",
+    "No missing historical source digest or original command exit code has been invented."
+  ]
+}

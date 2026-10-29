@@ -1,0 +1,50 @@
+[
+  {
+    "name": "go-full",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "-json",
+      "./...",
+      "-count=1"
+    ],
+    "exit_code": 0,
+    "seconds": 19.93
+  },
+  {
+    "name": "go-race",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "-race",
+      "-json",
+      "./...",
+      "-count=1"
+    ],
+    "exit_code": 0,
+    "seconds": 28.31
+  },
+  {
+    "name": "go-vet",
+    "command": [
+      "go",
+      "vet",
+      "./..."
+    ],
+    "exit_code": 0,
+    "seconds": 3.14
+  },
+  {
+    "name": "deploy-final",
+    "command": [
+      "make",
+      "test-deploy"
+    ],
+    "exit_code": 0,
+    "seconds": 6.96
+  }
+]

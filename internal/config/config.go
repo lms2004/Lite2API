@@ -104,9 +104,11 @@ type Route struct {
 }
 
 type ChannelCapability struct {
-	Model            string   `json:"model"`
-	UpstreamModel    string   `json:"upstream_model"`
-	ReasoningEfforts []string `json:"reasoning_efforts"`
+	Model            string                        `json:"model"`
+	UpstreamModel    string                        `json:"upstream_model"`
+	ReasoningEfforts []string                      `json:"reasoning_efforts"`
+	Evidence         CapabilityEvidence            `json:"evidence,omitempty"`
+	Features         map[string]CapabilityEvidence `json:"features,omitempty"`
 }
 
 type RouteTarget struct {
@@ -233,6 +235,7 @@ func cloneConfig(cfg Config) Config {
 		for capabilityIndex, capability := range account.Capabilities {
 			copyAccount.Capabilities[capabilityIndex] = capability
 			copyAccount.Capabilities[capabilityIndex].ReasoningEfforts = append([]string(nil), capability.ReasoningEfforts...)
+			copyAccount.Capabilities[capabilityIndex].Features = CloneCapabilityFeatures(capability.Features)
 		}
 		result.Accounts[index] = copyAccount
 	}
@@ -366,6 +369,7 @@ func applyDefaults(cfg *Config) {
 			}
 			capability.ReasoningEfforts = normalizeStringList(capability.ReasoningEfforts)
 		}
+		invalidateAccountCapabilityEvidence(a)
 	}
 	for alias, route := range cfg.Routes {
 		route.Model = strings.TrimSpace(route.Model)
@@ -441,8 +445,14 @@ func (c Config) Validate() error {
 		return errors.New("server gateway API key set cannot contain more than 4096 keys")
 	} else {
 		for _, key := range keys {
-			if len(key) > 64<<10 {
-				return errors.New("server gateway API keys cannot exceed 64KiB")
+			if len(key) > 512 {
+				return errors.New("server gateway API keys cannot exceed 512 bytes")
+			}
+			if strings.HasPrefix(key, "sk-l2a-") {
+				return errors.New("server gateway API keys cannot use the reserved managed-key prefix sk-l2a-")
+			}
+			if adminToken := c.ResolvedAdminToken(); adminToken != "" && key == adminToken {
+				return errors.New("admin token and client gateway API keys must be different")
 			}
 		}
 	}
@@ -606,6 +616,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("account %q cannot define more than %d capabilities", a.ID, MaxCapabilitiesPerAccount)
 		}
 		for index, capability := range a.Capabilities {
+			if err := validateCapabilityEvidence(capability); err != nil {
+				return fmt.Errorf("account %q capability %d: %w", a.ID, index+1, err)
+			}
 			if strings.TrimSpace(capability.Model) == "" || strings.TrimSpace(capability.UpstreamModel) == "" {
 				return fmt.Errorf("account %q capability %d requires model and upstream_model", a.ID, index+1)
 			}
@@ -691,6 +704,7 @@ func (c Config) Validate() error {
 		if route.Model != "" && !ValidReasoningEffort(route.ReasoningEffort) {
 			return fmt.Errorf("route %q has unsupported reasoning_effort %q", model, route.ReasoningEffort)
 		}
+		seenTargets := make(map[string]struct{}, len(route.Targets))
 		for index, target := range route.Targets {
 			accountID := strings.TrimSpace(target.Account)
 			if accountID == "" {
@@ -707,6 +721,15 @@ func (c Config) Validate() error {
 			if credential != "" && !strings.EqualFold(strings.TrimSpace(account.AdapterID), "cli-proxy-api") {
 				return fmt.Errorf("route %q target %d: credential pinning requires a cli-proxy-api account", model, index+1)
 			}
+			effectiveModel, effectiveEffort := target.Model, target.ReasoningEffort
+			if route.Model != "" {
+				effectiveModel, effectiveEffort = route.Model, route.ReasoningEffort
+			}
+			targetIdentity := accountID + "\x00" + credential + "\x00" + effectiveModel + "\x00" + effectiveEffort
+			if _, duplicate := seenTargets[targetIdentity]; duplicate {
+				return fmt.Errorf("route %q target %d duplicates an earlier account, credential, model, and reasoning target", model, index+1)
+			}
+			seenTargets[targetIdentity] = struct{}{}
 			if route.Model != "" {
 				if _, _, ok := ResolveRouteTarget(account, route, target); !ok {
 					return fmt.Errorf("route %q target %d: channel %q does not support %q at reasoning %q", model, index+1, accountID, route.Model, route.ReasoningEffort)
@@ -774,7 +797,7 @@ func ResolveRouteTarget(account Account, route Route, target RouteTarget) (model
 	}
 	logicalModel := strings.TrimSpace(route.Model)
 	for _, capability := range account.Capabilities {
-		if capability.Model != logicalModel || !slices.Contains(capability.ReasoningEfforts, effort) {
+		if capability.Evidence.Status == "unsupported" || capability.Model != logicalModel || !slices.Contains(capability.ReasoningEfforts, effort) {
 			continue
 		}
 		return capability.UpstreamModel, effort, true

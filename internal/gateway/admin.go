@@ -53,7 +53,8 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case path == "/state" && r.Method == http.MethodGet:
 		stats, accounts := g.Stats(), state.scheduler.Snapshot()
-		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.models, "config": redactedConfig(state.cfg)})
+		w.Header().Set("ETag", `"`+runtimeConfigRevision(state)+`"`)
+		writeJSON(w, http.StatusOK, map[string]any{"stats": stats, "operations": buildOperationsSnapshot(time.Now(), state.cfg, accounts, stats), "request_log": g.RequestLog(), "accounts": accounts, "models": state.models, "config": redactedConfig(state.cfg), "config_revision": runtimeConfigRevision(state), "access_policy": g.accessPolicy(state)})
 	case path == "/trends" && r.Method == http.MethodGet:
 		duration, err := parseTrendRange(r.URL.Query().Get("range"))
 		if err != nil {
@@ -66,7 +67,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/prompt-test" && r.Method == http.MethodPost:
 		g.servePromptTest(w, r, state)
 	case path == "/client-keys" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"data": g.clientKeys.List()})
+		writeJSON(w, http.StatusOK, map[string]any{"data": g.clientKeys.List(), "policy": g.accessPolicy(state)})
 	case path == "/client-keys" && r.Method == http.MethodPost:
 		var input ClientKeyCreate
 		if err := decodeAdminJSON(w, r, &input); err != nil {
@@ -100,7 +101,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			writeAPIErrorCode(w, http.StatusNotFound, err.Error(), "invalid_request_error", "client_key_not_found")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revoked_for": "new_requests", "in_flight": "continue"})
 	case path == "/reload" && r.Method == http.MethodPost:
 		if err := g.Reload(); err != nil {
 			writeAPIError(w, 400, err.Error(), "config_error")
@@ -129,6 +130,16 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		g.serveOAuthRoutingUpdate(w, r)
 	case path == "/accounts/test" && r.Method == http.MethodPost:
 		g.serveAccountTest(w, r, state)
+	case path == "/accounts/verify" && r.Method == http.MethodPost:
+		g.serveCapabilityVerification(w, r, state)
+	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/impact") && r.Method == http.MethodGet:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/impact")
+		impact, err := g.accountRemovalImpact(state, id)
+		if err != nil {
+			writeAPIError(w, http.StatusNotFound, err.Error(), "invalid_request_error")
+			return
+		}
+		writeJSON(w, http.StatusOK, impact)
 	case path == "/accounts/export" && r.Method == http.MethodPost:
 		var input AccountExportRequest
 		if err := decodeAdminJSON(w, r, &input); err != nil {
@@ -145,10 +156,11 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		if err := decodeAdminJSON(w, r, &input); err != nil {
 			return
 		}
+		input.ExpectedRevision = requestConfigRevision(r)
 		result, err := g.ImportAccounts(r.Context(), input)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, ErrConfigConflict) {
+			if errors.Is(err, ErrConfigConflict) || errors.Is(err, ErrConfigRevisionConflict) {
 				status = http.StatusConflict
 			}
 			writeAPIErrorCode(w, status, err.Error(), "invalid_request_error", "invalid_account_import")
@@ -160,7 +172,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		if err := decodeAdminJSON(w, r, &account); err != nil {
 			return
 		}
-		if err := g.UpsertAccount(account); err != nil {
+		if err := g.upsertAccountAtRevision(account, requestConfigRevision(r)); err != nil {
 			writeConfigMutationError(w, err)
 			return
 		}
@@ -171,7 +183,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, 400, "account id is required", "config_error")
 			return
 		}
-		if err := g.DeleteAccount(id); err != nil {
+		if err := g.deleteAccountAtRevision(id, requestConfigRevision(r)); err != nil {
 			writeConfigMutationError(w, err)
 			return
 		}
@@ -181,7 +193,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 		if err := decodeAdminJSON(w, r, &routes); err != nil {
 			return
 		}
-		if err := g.ReplaceRoutes(routes); err != nil {
+		if err := g.replaceRoutesAtRevision(routes, requestConfigRevision(r)); err != nil {
 			writeConfigMutationError(w, err)
 			return
 		}
@@ -193,7 +205,7 @@ func (g *Gateway) ServeAdminAPI(w http.ResponseWriter, r *http.Request) {
 
 func writeConfigMutationError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
-	if errors.Is(err, ErrConfigConflict) {
+	if errors.Is(err, ErrConfigConflict) || errors.Is(err, ErrConfigRevisionConflict) {
 		status = http.StatusConflict
 	}
 	writeAPIError(w, status, err.Error(), "config_error")
@@ -281,7 +293,14 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
 }
 
 func (g *Gateway) UpsertAccount(account config.Account) error {
-	return g.updateConfig(func(cfg *config.Config) (bool, error) {
+	return g.upsertAccountAtRevision(account, "")
+}
+
+func (g *Gateway) upsertAccountAtRevision(account config.Account, revision string) error {
+	return g.updateConfigAtRevision(revision, func(cfg *config.Config) (bool, error) {
+		if err := restoreAccountDisplaySecrets(&account, configuredAccountByID(cfg.Accounts, account.ID)); err != nil {
+			return false, err
+		}
 		found := false
 		for i := range cfg.Accounts {
 			if cfg.Accounts[i].ID != account.ID {
@@ -292,11 +311,6 @@ func (g *Gateway) UpsertAccount(account config.Account) error {
 			}
 			if len(account.Capabilities) == 0 && len(cfg.Accounts[i].Capabilities) > 0 {
 				account.Capabilities = cfg.Accounts[i].Capabilities
-			}
-			for name, value := range account.Headers {
-				if value == "********" {
-					account.Headers[name] = cfg.Accounts[i].Headers[name]
-				}
 			}
 			cfg.Accounts[i] = account
 			found = true
@@ -310,48 +324,60 @@ func (g *Gateway) UpsertAccount(account config.Account) error {
 }
 
 func (g *Gateway) DeleteAccount(id string) error {
-	return g.updateConfig(func(cfg *config.Config) (bool, error) {
-		next := cfg.Accounts[:0]
-		found := false
-		for _, account := range cfg.Accounts {
-			if account.ID == id {
-				found = true
-				continue
-			}
-			next = append(next, account)
-		}
-		if !found {
-			return false, errors.New("account not found")
-		}
-		cfg.Accounts = next
-		for model, route := range cfg.Routes {
-			hadExplicitTargets := len(route.Accounts) > 0 || len(route.Targets) > 0
-			filtered := route.Accounts[:0]
-			for _, accountID := range route.Accounts {
-				if accountID != id {
-					filtered = append(filtered, accountID)
-				}
-			}
-			route.Accounts = filtered
-			filteredTargets := route.Targets[:0]
-			for _, target := range route.Targets {
-				if target.Account != id {
-					filteredTargets = append(filteredTargets, target)
-				}
-			}
-			route.Targets = filteredTargets
-			if hadExplicitTargets && len(route.Accounts) == 0 && len(route.Targets) == 0 {
-				delete(cfg.Routes, model)
-				continue
-			}
-			cfg.Routes[model] = route
-		}
-		return true, nil
+	return g.deleteAccountAtRevision(id, "")
+}
+
+func (g *Gateway) deleteAccountAtRevision(id, revision string) error {
+	return g.updateConfigAtRevision(revision, func(cfg *config.Config) (bool, error) {
+		return removeAccountFromConfig(cfg, id)
 	})
 }
 
+func removeAccountFromConfig(cfg *config.Config, id string) (bool, error) {
+	next := cfg.Accounts[:0]
+	found := false
+	for _, account := range cfg.Accounts {
+		if account.ID == id {
+			found = true
+			continue
+		}
+		next = append(next, account)
+	}
+	if !found {
+		return false, errors.New("account not found")
+	}
+	cfg.Accounts = next
+	for model, route := range cfg.Routes {
+		hadExplicitTargets := len(route.Accounts) > 0 || len(route.Targets) > 0
+		filtered := route.Accounts[:0]
+		for _, accountID := range route.Accounts {
+			if accountID != id {
+				filtered = append(filtered, accountID)
+			}
+		}
+		route.Accounts = filtered
+		filteredTargets := route.Targets[:0]
+		for _, target := range route.Targets {
+			if target.Account != id {
+				filteredTargets = append(filteredTargets, target)
+			}
+		}
+		route.Targets = filteredTargets
+		if hadExplicitTargets && len(route.Accounts) == 0 && len(route.Targets) == 0 {
+			delete(cfg.Routes, model)
+			continue
+		}
+		cfg.Routes[model] = route
+	}
+	return true, nil
+}
+
 func (g *Gateway) ReplaceRoutes(routes map[string]config.Route) error {
-	return g.updateConfig(func(cfg *config.Config) (bool, error) {
+	return g.replaceRoutesAtRevision(routes, "")
+}
+
+func (g *Gateway) replaceRoutesAtRevision(routes map[string]config.Route, revision string) error {
+	return g.updateConfigAtRevision(revision, func(cfg *config.Config) (bool, error) {
 		cfg.Routes = make(map[string]config.Route, len(routes))
 		for alias, route := range routes {
 			cfg.Routes[alias] = cloneRoute(route)
@@ -366,13 +392,26 @@ var ErrConfigConflict = errors.New("configuration changed on disk")
 // changes. The latest on-disk document is loaded after taking reloadMu, so
 // concurrent admin, discovery and SIGHUP work cannot commit stale snapshots.
 func (g *Gateway) updateConfig(mutate func(*config.Config) (bool, error)) error {
+	return g.updateConfigAtRevision("", mutate)
+}
+
+func (g *Gateway) updateConfigAtRevision(revision string, mutate func(*config.Config) (bool, error)) error {
 	g.reloadMu.Lock()
 	defer g.reloadMu.Unlock()
+	return g.updateConfigAtRevisionLocked(revision, mutate)
+}
+
+// updateConfigAtRevisionLocked lets external-state transactions retain the
+// configuration lock through compensation if persistence fails.
+func (g *Gateway) updateConfigAtRevisionLocked(revision string, mutate func(*config.Config) (bool, error)) error {
 	cfg, err := config.Load(g.configPath)
 	if err != nil {
 		return fmt.Errorf("load latest config: %w", err)
 	}
 	current := g.state.Load()
+	if revision != "" && revision != runtimeConfigRevision(current) {
+		return fmt.Errorf("%w; reload and review the change before retrying", ErrConfigRevisionConflict)
+	}
 	if current == nil || !sameEffectiveConfig(cfg, current.cfg) || !sameRuntimeEnvironment(cfg, current) {
 		return fmt.Errorf("%w; reload before retrying the update", ErrConfigConflict)
 	}
@@ -383,6 +422,9 @@ func (g *Gateway) updateConfig(mutate func(*config.Config) (bool, error)) error 
 	}
 	if !changed {
 		return nil
+	}
+	if aliases := implicitlyReexposedModels(current.cfg, cfg); len(aliases) > 0 {
+		return fmt.Errorf("removing explicit routes would expose implicit sources for %s; configure explicit replacement targets or remove their implicit model declarations first", strings.Join(aliases, ", "))
 	}
 	state, err := g.buildState(cfg)
 	if err != nil {
@@ -442,6 +484,8 @@ func redactedConfig(cfg config.Config) config.Config {
 	result.Server.APIKeys = nil
 	result.Server.AdminToken = ""
 	for i := range result.Accounts {
+		result.Accounts[i].BaseURL = redactedAccountURL(result.Accounts[i].BaseURL)
+		result.Accounts[i].ProxyURL = redactedAccountURL(result.Accounts[i].ProxyURL)
 		if result.Accounts[i].APIKey != "" {
 			result.Accounts[i].APIKey = "********"
 		}
@@ -463,6 +507,7 @@ func cloneAccount(account config.Account) config.Account {
 	for i, capability := range account.Capabilities {
 		result.Capabilities[i] = capability
 		result.Capabilities[i].ReasoningEfforts = cloneStringSlice(capability.ReasoningEfforts)
+		result.Capabilities[i].Features = config.CloneCapabilityFeatures(capability.Features)
 	}
 	return result
 }

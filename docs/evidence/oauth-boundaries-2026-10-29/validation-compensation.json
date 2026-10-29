@@ -1,0 +1,70 @@
+{
+  "observed_at": "2026-10-29T14:54:48.275821+08:00",
+  "scope": "Follow-up closes the remote OAuth mutation/local persistence failure boundary identified in validation.json; local HTTP fixtures only",
+  "supersedes_limit_in": "validation.json: adapter deletion/status succeeds but local persistence fails",
+  "production_mutations": false,
+  "real_provider_calls": 0,
+  "implementation": {
+    "deletion": "Resolve exact auth filename and original disabled state, download original JSON to memory before submitting DELETE; never mutate when a restorable snapshot cannot be acquired.",
+    "status": "Resolve exact auth filename and original disabled value before PATCH.",
+    "commit_and_compensation": "Hold reloadMu across adapter mutation, local commit, and compensation; set attempted before HTTP submission. Failed/ambiguous acknowledgement or local commit failure restores original file/status using an independent 15-second context, then verifies status and effective disk config.",
+    "local_disk": "Confirm effective config still matches unchanged runtime after a failed save (including rename-before-fsync errors), restoring and rechecking when required.",
+    "cancellation": "Check context after apply and before returning the configuration mutation callback; cancellation during post-apply catalog refresh cannot be converted to a successful warning.",
+    "runtime_parent": "Compensation confirmation resolves runtime-only virtual auth rows by parent filename as well as public auth index.",
+    "error_contract": {
+      "oauth_credential_change_rolled_back": "Original credential/status and gateway configuration confirmed restored. Original operation failed.",
+      "oauth_credential_rollback_incomplete": "Restoration cannot be confirmed. Restore adapter connectivity/configuration write access and inspect both sides before retrying. Never claim recovery."
+    }
+  },
+  "verified_cases": [
+    "delete active credential",
+    "delete disabled credential",
+    "disable active credential",
+    "enable disabled credential",
+    "local SaveEffective failure",
+    "HTTP failure after adapter mutation",
+    "transport disconnect after adapter mutation",
+    "request cancellation during mutation",
+    "request cancellation after apply during catalog refresh",
+    "compensation request failure",
+    "compensation readback failure",
+    "missing deletion snapshot blocks mutation",
+    "runtime-only parent filename verification",
+    "subsequent gateway call completes after successful rollback, or remains rejected for originally disabled source"
+  ],
+  "latest_targeted_verification": {
+    "command": "GOTOOLCHAIN=local go test -race -json ./internal/gateway -run 'TestOAuthCredential(MutationCompensatesFailure|DeleteRequiresSnapshotBeforeMutation|MutationTargetVerifiesRuntimeParent)' -count=5 -timeout=120s",
+    "exit_code": 0,
+    "passed_events": 155,
+    "failed_events": 0,
+    "output": "compensation-cancellation-race-final.jsonl",
+    "git_diff_check_exit_code": 0
+  },
+  "independent_review": {
+    "reviewer": "protocol_health",
+    "result": "accepted",
+    "final_evidence": "../continuation-2026-10-29/oauth-independent-review-accepted.json",
+    "cancellation_stress_pass_events": 180,
+    "final_group_pass_events": 36,
+    "failed_events": 0,
+    "source_stable": true,
+    "historical_failure_preserved": "../continuation-2026-10-29/oauth-independent-review-final.json"
+  },
+  "limitations": [
+    "No real provider grant was deleted, disabled, or restored.",
+    "If the external adapter or filesystem remains unavailable, bounded compensation can fail; the API explicitly returns oauth_credential_rollback_incomplete and requires state inspection after recovery.",
+    "Credential snapshots are memory-only; this is runtime compensation, not a durable cross-process crash transaction.",
+    "Direct out-of-band adapter file changes are outside the gateway configuration lock.",
+    "Connections deliberately disabled after removal or route invalidation require reviewed repair and explicit re-enable."
+  ],
+  "source_sha256": {
+    "internal/gateway/oauthadapter.go": "e62310d8ad1ac68f09de5ee34a6adb3e58b7ccd305849c33dc00a836fb3307b1",
+    "internal/gateway/accountimport.go": "4f121651940082c4ca82d6b16b7929064055b3759af3d57ee629528eec4d936f",
+    "internal/gateway/admin.go": "44d80ab72f5d3206b29f08e42ef63e086e335bb577d5bf57d2c27cabe4fe4416",
+    "internal/config/capability_discovery.go": "d49cc8725c66a44e988d52cfffc40c8276b8eb953f5260efea4bb0de0e04d6d3",
+    "internal/gateway/oauth_boundary_regression_test.go": "ce24c0ace447334470f4eff6ea2a84f56717ae91b264289a35fdda09f3332581",
+    "internal/gateway/oauth_mutation_compensation_test.go": "9c5f9e9b91c54e698323a6e8fcd480a33e67641c329569d49652dd1fdeb8f832",
+    "internal/gateway/oauthadapter_test.go": "1d94b0078dad18457f73e0233df173f181a12d3c31595fab204b2592011f1ffc",
+    "internal/gateway/accountimport_test.go": "ab0f471dd83d18745c8ecd612f358ee3495fcfa374a0615970d7e85fec40def7"
+  }
+}

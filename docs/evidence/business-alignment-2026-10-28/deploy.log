@@ -1,0 +1,5 @@
+bash deploy/bootstrap.test.sh
+bootstrap contracts passed
+bash deploy/backup-verifiers.test.sh
+backup verifier contracts passed
+bash -n deploy/*.sh deploy/server-ops/*.sh

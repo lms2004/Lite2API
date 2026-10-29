@@ -6,7 +6,7 @@
 })(globalThis, function () {
   'use strict';
 
-  function createRequestClient({ base, csrf, unauthorized, fetch: fetcher = globalThis.fetch }) {
+  function createRequestClient({ base, csrf, revision = () => '', unauthorized, fetch: fetcher = globalThis.fetch }) {
     const pending = new Map();
 
     async function send(path, options) {
@@ -16,6 +16,8 @@
       if (init.body !== undefined && !headers.has('Content-Type'))
         headers.set('Content-Type', 'application/json');
       if (!['GET', 'HEAD'].includes(method) && csrf()) headers.set('X-CSRF-Token', csrf());
+      if (!['GET', 'HEAD'].includes(method) && revision() && !headers.has('If-Match'))
+        headers.set('If-Match', `"${revision()}"`);
       const controller = new AbortController();
       const abort = () => controller.abort();
       const external = init.signal;

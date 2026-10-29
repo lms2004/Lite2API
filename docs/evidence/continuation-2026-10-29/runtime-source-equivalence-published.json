@@ -1,0 +1,7 @@
+{
+  "from_version": "continuation-20261029-d2c5dd763eef",
+  "to_version": "continuation-20261029-b30368e8257e",
+  "runtime_files": 126,
+  "runtime_source_differences": [],
+  "new_version_scope": "Same runtime implementation; acceptance tools now handle nullable tool arrays and use bounded minimal CLI settings."
+}

@@ -1,0 +1,461 @@
+{
+  "captured_at": "2026-10-28T23:06:28.804179+08:00",
+  "source_directory": "/root/Lite2API",
+  "hostname": "ser451803379164",
+  "base_commit": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "git_status": [
+    " M AGENTS.md",
+    " M internal/config/config.go",
+    " M internal/gateway/accountimport.go",
+    " M internal/gateway/accounttest.go",
+    " M internal/gateway/accounttest_test.go",
+    " M internal/gateway/admin.go",
+    " M internal/gateway/capabilitysync.go",
+    " M internal/gateway/claude_compat_test.go",
+    " M internal/gateway/clientkeys.go",
+    " M internal/gateway/clientkeys_preflight.go",
+    " M internal/gateway/clientkeys_test.go",
+    " M internal/gateway/gateway.go",
+    " M internal/gateway/gateway_test.go",
+    " M internal/gateway/oauthadapter.go",
+    " M internal/gateway/oauthrecovery.go",
+    " M internal/gateway/oauthrecovery_test.go",
+    " M internal/gateway/operations.go",
+    " M internal/gateway/operations_test.go",
+    " M internal/gateway/prompttest.go",
+    " M internal/gateway/request_inspector_test.go",
+    " M internal/gateway/requestlog.go",
+    " M internal/gateway/runtime.go",
+    " M internal/gateway/runtime_test.go",
+    " M internal/gateway/server.go",
+    " M internal/gateway/stats.go",
+    " M internal/web/app-metrics.js",
+    " M internal/web/app-onboarding.js",
+    " M internal/web/app-runtime.test.js",
+    " M internal/web/app-shared.js",
+    " M internal/web/app-usage.js",
+    " M internal/web/app.html",
+    "?? docs/BUSINESS_CAPABILITIES.md",
+    "?? docs/LITE2API_PROJECT_NARRATIVE_2026-10-28.md",
+    "?? docs/LITE2API_PROJECT_OVERVIEW_2026-10-28.md",
+    "?? docs/PROJECT_CASE_STUDY.md",
+    "?? docs/evidence/",
+    "?? internal/config/capability_evidence.go",
+    "?? internal/config/capability_evidence_test.go",
+    "?? internal/gateway/clientkeys_access_test.go",
+    "?? internal/gateway/completion_review_test.go",
+    "?? internal/gateway/evidence_test.go",
+    "?? internal/gateway/information.go",
+    "?? internal/gateway/information_test.go",
+    "?? internal/gateway/request_requirements.go",
+    "?? internal/gateway/request_requirements_test.go",
+    "?? internal/gateway/request_rewrite_operation.go",
+    "?? internal/gateway/response_completion.go",
+    "?? internal/gateway/response_completion_test.go"
+  ],
+  "snapshot_directory": "/tmp/lite2api-usecases-final-b1btdh00",
+  "files": [
+    {
+      "path": "go.mod",
+      "sha256": "b315469e10ee8825bd2148ffb0d4f1cb9f62fa0c974bae0724c48802b5ec886a"
+    },
+    {
+      "path": "cmd/lite2api/main.go",
+      "sha256": "ee3c282db06e4eb130eb1150611958aa573148d9ccab34a613e076b2fa4128cc"
+    },
+    {
+      "path": "internal/config/capabilities.go",
+      "sha256": "1c3649e67143b102863e17691c7c69b0db28db720ddaabcd20d38a94cebbaa26"
+    },
+    {
+      "path": "internal/config/capability_discovery.go",
+      "sha256": "3ed4f3f1bf01e7dfe3eb66dcf29251ad9f4e8accb595f585782de103e1fffcb7"
+    },
+    {
+      "path": "internal/config/capability_discovery_test.go",
+      "sha256": "515107beaa5afaa8dd54194724c5e215cc02afb2021b84017457fe5bb67b13fa"
+    },
+    {
+      "path": "internal/config/capability_evidence.go",
+      "sha256": "614874e4ae76cab146afd163915597a06cf2659697ea2da453548b2a5ea4a95a"
+    },
+    {
+      "path": "internal/config/capability_evidence_test.go",
+      "sha256": "77a9d46094fe46ea7c7bc540359d21625e53ae3b1e7be1c99d945b48d4be85c3"
+    },
+    {
+      "path": "internal/config/capability_sources.go",
+      "sha256": "a0dd5573b6415b2a3a05b43d4cb274bb35acbc6bb8b937e020f1209efa2c1e8e"
+    },
+    {
+      "path": "internal/config/config.go",
+      "sha256": "a5a7d87b4e6b441552c491ea6b46a0f6784d6e773bc95f0cc2d0c3421cd3740e"
+    },
+    {
+      "path": "internal/config/config_test.go",
+      "sha256": "16a45a9756aea81ef07499457d3a64b7e916ddcea6f4cf6a5841f33eff4f05cd"
+    },
+    {
+      "path": "internal/config/operations.go",
+      "sha256": "3cb223b5fdedb8572990f80cecc72f8c9aa93d4cb041daa5aca0dbc9c9bd434e"
+    },
+    {
+      "path": "internal/config/operations_test.go",
+      "sha256": "9e3ed60921f07be492a6907a318d19bc4aef46725b2924aae7d766c5eaf16675"
+    },
+    {
+      "path": "internal/config/reasoning_ultra_test.go",
+      "sha256": "58f4e6bd17973c3b8cf304ebd3402c5f82e010f9bc416db0fb7d5ec036c6f29a"
+    },
+    {
+      "path": "internal/config/route_profiles.go",
+      "sha256": "9e05a5835161fcb1237fc4d33b0008947c489145a670d6031e8bb39f624cdff0"
+    },
+    {
+      "path": "internal/gateway/accountdelete_test.go",
+      "sha256": "4b48ece231da00a21bce3dc11de4f5b1fcf83a1b17357607dd18c48a65866252"
+    },
+    {
+      "path": "internal/gateway/accountexport.go",
+      "sha256": "62db2d6ce9d6675f71ce3a32e3af3f5981386b213329edb69f92e6cefeee0a7c"
+    },
+    {
+      "path": "internal/gateway/accountimport.go",
+      "sha256": "98d7cbe653de18eb47e9c0462731fbdc23021bcad8f3f1cb6ca82f5f0029ddf8"
+    },
+    {
+      "path": "internal/gateway/accountimport_test.go",
+      "sha256": "0ac0eef7b6c3a9a4c4987e5a70fdba843bea518c9bc252ca8df47365483e1b84"
+    },
+    {
+      "path": "internal/gateway/accounttest.go",
+      "sha256": "742109a5150492194bb57a313f4a657fbe94fd4b9443cdb6aeab766fa39f4240"
+    },
+    {
+      "path": "internal/gateway/accounttest_test.go",
+      "sha256": "a345e1eb16ddabb46965634819b5af2fd84c045b1be4405c82bde5b889941551"
+    },
+    {
+      "path": "internal/gateway/adapters.go",
+      "sha256": "369391eeabe4fa3bfb30b751c36cfcdf1c55683544f31706b02bdf5797904253"
+    },
+    {
+      "path": "internal/gateway/adapters_export_test.go",
+      "sha256": "44253193fc94782ec77f9241b3d48421824ed1414c050b2dca0c61f0c678db9b"
+    },
+    {
+      "path": "internal/gateway/adapters_probe_test.go",
+      "sha256": "dff136c7dfcd398cf24c54ec18238f590be4982eb8e49cb21daad252ff524fb3"
+    },
+    {
+      "path": "internal/gateway/admin.go",
+      "sha256": "cfdc92972dfd66c27f95030d2921654919d2c8c4b7fc06349f1b37eb966d4cf5"
+    },
+    {
+      "path": "internal/gateway/admin_transaction_test.go",
+      "sha256": "51adf7db38f406ec4175065cf058d493ea45c243ddb7526ffedc9ef91c36e04c"
+    },
+    {
+      "path": "internal/gateway/adminauth.go",
+      "sha256": "b5b1002a3c0d6c52bc7707eeffa78c212bba7cd5745d4bb0d9ad87503a6bd9d5"
+    },
+    {
+      "path": "internal/gateway/adminauth_test.go",
+      "sha256": "1301a4498bd6ac730c269e30df70720acc5cf4fee3739d2faff8aa245ce79f41"
+    },
+    {
+      "path": "internal/gateway/capabilitysync.go",
+      "sha256": "3d85b174ca4e78f87c605277d9fe04e276896988ce0324feff7aac78d610130c"
+    },
+    {
+      "path": "internal/gateway/capabilitysync_aggregate_test.go",
+      "sha256": "6312b503d78c2619faab3f4ec4695b420202e09a7bafe062f8c959617707d67e"
+    },
+    {
+      "path": "internal/gateway/capabilitysync_test.go",
+      "sha256": "b132e1b3a93b430aa54f6b860bf67096795a9c4c1eae83c66b640549717ddc1b"
+    },
+    {
+      "path": "internal/gateway/claude_compat_test.go",
+      "sha256": "35d1ce5b0a1311e844bef59e6f46da86391e34e6244b98dc0506a4480fc339de"
+    },
+    {
+      "path": "internal/gateway/clientkeys.go",
+      "sha256": "1d6bebf5a5eaf0bfd23b7000cc3b265f67888b8c135623d7c0baff806b23e9b1"
+    },
+    {
+      "path": "internal/gateway/clientkeys_access_test.go",
+      "sha256": "c0a265eeddc53326012ea860815c66c93459164c8a1d905a1d259f25d0b74259"
+    },
+    {
+      "path": "internal/gateway/clientkeys_preflight.go",
+      "sha256": "3b6b7683ca446b6bfdca81ee564b94ae41320a4561f197417f8b433740f376c5"
+    },
+    {
+      "path": "internal/gateway/clientkeys_test.go",
+      "sha256": "1250e1b26db19a8757d859a1ca61699a804c0f0db57b73430d58e829c2a47881"
+    },
+    {
+      "path": "internal/gateway/completion_review_test.go",
+      "sha256": "5df91800b1f38f8b52ac3692c488a0f2eac2311b61d9a70217d88c95fe82b6ca"
+    },
+    {
+      "path": "internal/gateway/errors.go",
+      "sha256": "7be6714bb8be923e12c52309bae1d6c3e7bded43e6433da553185e1516515fa7"
+    },
+    {
+      "path": "internal/gateway/evidence_test.go",
+      "sha256": "f03d78572189477945db196f5e31d961985e79f85dca830b57584106eeb21bce"
+    },
+    {
+      "path": "internal/gateway/gateway.go",
+      "sha256": "713e264717352122658f9fb8b0dee1a8bd267fc58f1a955edf25eac0bb87298b"
+    },
+    {
+      "path": "internal/gateway/gateway_test.go",
+      "sha256": "c224cac04376a4d12dfe8513e23378cf9c5209e16e8af83e0b42bd5f5d21580a"
+    },
+    {
+      "path": "internal/gateway/information.go",
+      "sha256": "ce4113f6eddf92df29b333487d1e41eab6767bf11a697906fa212f5add1eeca0"
+    },
+    {
+      "path": "internal/gateway/information_test.go",
+      "sha256": "d1d16a316e470300a30d4a386b2a50ca068be8ba6fe955f340d3e609c0d89969"
+    },
+    {
+      "path": "internal/gateway/oauthadapter.go",
+      "sha256": "d5b9f7fd4828c2955c86b3a5a6c015e657e4c8264dcc519255aad0f34f1cd685"
+    },
+    {
+      "path": "internal/gateway/oauthadapter_test.go",
+      "sha256": "425f7bdac61299d659a6dd30ff0d03c78917d708425914d7aec6531e55902f62"
+    },
+    {
+      "path": "internal/gateway/oauthimport.go",
+      "sha256": "b1abb988a015fbecf2ef1ab56aaa362e04efdb4108b4ca40e5560051f61ce307"
+    },
+    {
+      "path": "internal/gateway/oauthimport_test.go",
+      "sha256": "f5428ff2dd33928c60240536d763cc6a7cf1b5973c5491f09c7b01fb2839248e"
+    },
+    {
+      "path": "internal/gateway/oauthrecovery.go",
+      "sha256": "c8016a0e08890c78121580867ef7914b2480039f1e781fc4eeaf05acca62bbe2"
+    },
+    {
+      "path": "internal/gateway/oauthrecovery_test.go",
+      "sha256": "74a4be2c38f08af54e083cf138e131a7d354930cd038856c4a9f17909bd043b5"
+    },
+    {
+      "path": "internal/gateway/operations.go",
+      "sha256": "aceefd1fe04acbbb793c94664e9f44acd8357767db3d4b77c1fe0bdc1f281542"
+    },
+    {
+      "path": "internal/gateway/operations_test.go",
+      "sha256": "12eff45d3c5a872772da1de73021125d8d12e7a50f0d3fe1899d34d0cb14d649"
+    },
+    {
+      "path": "internal/gateway/prompttest.go",
+      "sha256": "50728c93f21d8821509e8ed2f262422476e13c34e79763b571ee4c3ab639708b"
+    },
+    {
+      "path": "internal/gateway/request_inspector.go",
+      "sha256": "bdcedd2097250a960fc129bbbc005d768978addc4bfdd09361e005e439dbc184"
+    },
+    {
+      "path": "internal/gateway/request_inspector_test.go",
+      "sha256": "9e8d3bdbff5af2735540c96d8411d3fd800b7f3ffcfe96b90da85a62186ba0cc"
+    },
+    {
+      "path": "internal/gateway/request_requirements.go",
+      "sha256": "266e1003b0b1a933bcfe78b5b7a01d7781ad829edcd50f093e5b319615c8a31e"
+    },
+    {
+      "path": "internal/gateway/request_requirements_test.go",
+      "sha256": "f7fb3188ebf01f5030b83dd87f47dcaa05a066daa419b351112f58e47a2949aa"
+    },
+    {
+      "path": "internal/gateway/request_rewrite_operation.go",
+      "sha256": "950ae620efcc059f7672912adc2fd9289338f73616019a5cfb62adc31a07d204"
+    },
+    {
+      "path": "internal/gateway/requestlog.go",
+      "sha256": "338dc25957d7f1b98d74feafcbda24a76fdfc1767186283e0ddadb4519975428"
+    },
+    {
+      "path": "internal/gateway/response_completion.go",
+      "sha256": "e5cf9d161fc743de5545f604d7be7c4386ea2a57cbfe4648f83e558b256e8bc9"
+    },
+    {
+      "path": "internal/gateway/response_completion_test.go",
+      "sha256": "bb671615597be069b9f3301b4a02177860f4ef19475e1128feaf8f951c4dfb04"
+    },
+    {
+      "path": "internal/gateway/routeprofiles.go",
+      "sha256": "6ed576a6a461ec41695b36ae310e0bcfbb9f6794e976132d96c75a3e6584abd7"
+    },
+    {
+      "path": "internal/gateway/routeprofiles_test.go",
+      "sha256": "f6f7b2a415fac9f4bee652e4d1e36e44c26c5502cf191e036b03b29ef7b0ee50"
+    },
+    {
+      "path": "internal/gateway/runtime.go",
+      "sha256": "0615ece0c386ed83b6d26a317bbddfc74572792721eee37e0a21a0a2a81c275b"
+    },
+    {
+      "path": "internal/gateway/runtime_test.go",
+      "sha256": "7c5d92b0bc113408dce7202432fa339fc526cc7d80683fccf4ef452f5d6a6780"
+    },
+    {
+      "path": "internal/gateway/server.go",
+      "sha256": "cfa102cb3a1cd6b854340bf0e47d627230f69a9d073c9e50bfc4dae544d7905c"
+    },
+    {
+      "path": "internal/gateway/server_security_test.go",
+      "sha256": "59d1cc71c6c407bd1951d34fd4a947a9844f45e3e29f82e8211bd7045f7a3f4d"
+    },
+    {
+      "path": "internal/gateway/stats.go",
+      "sha256": "9264c2666a2ecc9987d474bc0130484ff0f1e77afbd6e88f5e1d03fbfa5e53c4"
+    },
+    {
+      "path": "internal/gateway/stats_test.go",
+      "sha256": "6fbee363d461bcb7b73227092a7c90ad8bdb25dbf83bc81ab1734ecc916c99fa"
+    },
+    {
+      "path": "internal/web/app-accounts.js",
+      "sha256": "d2f4fe9b164ec951fd998a63a5c04d5e374d428456164b5cf1a1d29bab5aecde"
+    },
+    {
+      "path": "internal/web/app-chat.js",
+      "sha256": "672a2d269d4213e7e580273b27b6dde7b42c4edf2880374f095bf79b739c7a04"
+    },
+    {
+      "path": "internal/web/app-clients.js",
+      "sha256": "c0945b4902c4468719aef42e7ac2185be490a6f0354f0d2fc42d56b5a9297100"
+    },
+    {
+      "path": "internal/web/app-core.js",
+      "sha256": "4c270eb6589412eb7ea87015e9f4f9f71de906604b6ab34da9fc142fb7501f73"
+    },
+    {
+      "path": "internal/web/app-core.test.js",
+      "sha256": "3c19ccdc76f5af40014a05a8cf072753ad14c709ad9f1cc8ecf4ae2e5b85c139"
+    },
+    {
+      "path": "internal/web/app-metrics.js",
+      "sha256": "6aa16db264bf15c0cd0df27c13ffb75f9c85dd2d44783906f51a2e77529a1e2a"
+    },
+    {
+      "path": "internal/web/app-onboarding.js",
+      "sha256": "da6ec7b6dfebc3a6782e7b499e177b21ad439d6582c67acff210f323c8d17d5b"
+    },
+    {
+      "path": "internal/web/app-routes.js",
+      "sha256": "9f6f555c390249a3acc36ff68136faf8ae5cb71e06e955e27a9eee18405c6140"
+    },
+    {
+      "path": "internal/web/app-runtime.js",
+      "sha256": "3b2d45e9aa470d5d35f266160e222e0a79f710091004f343bbaf8cdbf6963608"
+    },
+    {
+      "path": "internal/web/app-runtime.test.js",
+      "sha256": "e518d3178a847847f5008845a3f0c9a125de9964800be626f4022ded1ce4a06c"
+    },
+    {
+      "path": "internal/web/app-shared.js",
+      "sha256": "0c3592c3654a48840fe57c959ee04ce02fdada72f54b58c5518101a09c26fb05"
+    },
+    {
+      "path": "internal/web/app-ui.js",
+      "sha256": "30e9221bcfa10be80980f3dcc7bb2c213d978c959ac4e289a65d17f126ed639a"
+    },
+    {
+      "path": "internal/web/app-usage.js",
+      "sha256": "f9e75a8c6f02ecd10c1bd13fdaa47b7c53dd535afdf1af373dcd18a23d2b9a55"
+    },
+    {
+      "path": "internal/web/app.css",
+      "sha256": "488aff74a470dcf470acc8c3b27588124491b52a0cf381f824fca0aa35c04791"
+    },
+    {
+      "path": "internal/web/app.html",
+      "sha256": "2887df5a27f6d5f0eb64dc91f7fbaf996baac448a3457c74910bcf929041c9a3"
+    },
+    {
+      "path": "internal/web/app.js",
+      "sha256": "bbc5d11a8a2238b000718564e471d5f053912573dae76ea58d9786271357fb3b"
+    },
+    {
+      "path": "internal/web/assets/model-icons/README.md",
+      "sha256": "10fa9e83cdbbf22329c1da11735d88613d50bf8e72d4d6bdbb73e75ca07f00d9"
+    },
+    {
+      "path": "internal/web/assets/model-icons/antigravity.png",
+      "sha256": "e0cd08ccd10cd8d08ccf0ba449823ee88495825c0841619618100d3ab089f51e"
+    },
+    {
+      "path": "internal/web/assets/model-icons/claude.svg",
+      "sha256": "059e22f525d67c6258c4f64514f0b0e717c914df8a706936d0299d5e6b8082d9"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gemini-api-logo.svg",
+      "sha256": "807904a9ec0098fe5d2e29811ff5e99944b7f49308964447644abc6d57dee1b4"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.3-codex.png",
+      "sha256": "b7a40ff5ce301e1b5ecb12ce86ffa103aa38e9be0d5ae391be385623554620c4"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.4-mini.png",
+      "sha256": "3eda813840032caf11ad39334201c9e79425cfb305643aa1a543958d4c355e3c"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.4.png",
+      "sha256": "07c15a9d1871fe3779ae14e169bfb2ba7cf05d7d8ec8a961c51b026c7896a4e1"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.5.png",
+      "sha256": "c5171b4934e7c6fde92ce3fad7daa275b56c84e501e52bcab05073d3f20ffeff"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.6-luna.png",
+      "sha256": "34831355137ab3b6e0556fb84a32ebc5ce3b45625fc4a5dde8ed149140f605ee"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.6-sol.png",
+      "sha256": "80b6bd79877266c9d542ceb2f1067dbe7c8e804bb6f92e04a6095b9a562a6888"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-5.6-terra.png",
+      "sha256": "cefdabb02ef0679f9e7ab1eb71a8c668fbadf4addbdd52682b0ef1d5651c8329"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-image-2.png",
+      "sha256": "859083caae2b94e75ef45170a5c0fe58bd1271a83a2917844d5d3d7dcdb779e7"
+    },
+    {
+      "path": "internal/web/assets/model-icons/gpt-oss-120b.png",
+      "sha256": "f0f2079833f75bde86824ed37bce342ac5fbf93f4fe2d1ce52a31b691e43918f"
+    },
+    {
+      "path": "internal/web/assets/model-icons/openai.svg",
+      "sha256": "8e1b976ba47e927ac2928303fd5362fcadfefd68743506510596f107df676e58"
+    },
+    {
+      "path": "internal/web/embed.go",
+      "sha256": "97f4d245a6d55a688b351ea8238853cc33b44fa5b712e2a8863a55a9c206884a"
+    },
+    {
+      "path": "internal/web/embed_test.go",
+      "sha256": "19d65371e0318c737361b338235e3e1dec8980828a1c67a604fec8c8068776e8"
+    },
+    {
+      "path": "config.example.json",
+      "sha256": "7df94aecd731e4dca324c2e2b7516a586a53116e119feac4a0724e364bfe1e0e"
+    }
+  ],
+  "changed_during_copy": [],
+  "scope": "Final bounded snapshot of changing uncommitted working tree; isolated tests only."
+}

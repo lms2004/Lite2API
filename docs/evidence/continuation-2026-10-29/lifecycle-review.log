@@ -1,0 +1,13 @@
+test_business_acceptance_checks_requested_tools_and_indexes (__main__.LifecycleReview.test_business_acceptance_checks_requested_tools_and_indexes) ... ok
+test_business_acceptance_rejects_frames_after_stream_terminal (__main__.LifecycleReview.test_business_acceptance_rejects_frames_after_stream_terminal) ... ok
+test_created_hardlinked_state_is_readable_by_own_restorer (__main__.LifecycleReview.test_created_hardlinked_state_is_readable_by_own_restorer) ... ok
+test_manifest_must_be_a_complete_object (__main__.LifecycleReview.test_manifest_must_be_a_complete_object) ... ok
+test_oauth_channel_release_metadata_and_patch_manifest_match (__main__.LifecycleReview.test_oauth_channel_release_metadata_and_patch_manifest_match) ... ok
+test_restorer_can_write_material_files (__main__.LifecycleReview.test_restorer_can_write_material_files) ... ok
+test_sigterm_cleans_plaintext_restore_and_child (__main__.LifecycleReview.test_sigterm_cleans_plaintext_restore_and_child) ... ok
+test_snapshot_does_not_report_success_when_producer_resume_fails (__main__.LifecycleReview.test_snapshot_does_not_report_success_when_producer_resume_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.637s
+
+OK

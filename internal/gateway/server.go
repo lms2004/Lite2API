@@ -92,15 +92,14 @@ func (g *Gateway) serveReadiness(w http.ResponseWriter, _ *http.Request) {
 	state := g.state.Load()
 	stats, accounts := g.Stats(), state.scheduler.Snapshot()
 	operations := buildOperationsSnapshot(now, state.cfg, accounts, stats)
-	const observationFreshness = 5 * time.Minute
 	latestAt := time.Time{}
-	routeObservations := make(map[string]RequestRecord, len(state.cfg.Routes))
+	routeObservations := make(map[string][]RequestRecord, len(state.cfg.Routes))
 	for _, record := range stats.RouteLatest {
 		fingerprint := state.routeFingerprints[record.Model]
 		if fingerprint == "" || record.RouteFingerprint != fingerprint || !routeHealthObservation(record) {
 			continue
 		}
-		routeObservations[record.Model] = record
+		routeObservations[record.Model] = append(routeObservations[record.Model], record)
 		if observed, err := time.Parse(time.RFC3339Nano, record.Time); err == nil && observed.After(latestAt) {
 			latestAt = observed
 		}
@@ -113,14 +112,19 @@ func (g *Gateway) serveReadiness(w http.ResponseWriter, _ *http.Request) {
 		if !state.scheduler.RouteAvailable(route.Alias, now) {
 			unavailableRoutes = append(unavailableRoutes, route.Alias)
 		}
-		record, observedRoute := routeObservations[route.Alias]
+		records, observedRoute := routeObservations[route.Alias]
 		if !observedRoute {
 			unobservedRoutes = append(unobservedRoutes, route.Alias)
 			continue
 		}
-		observed, err := time.Parse(time.RFC3339Nano, record.Time)
-		routeStale := err != nil || now.Sub(observed) > observationFreshness
-		routeFailed := !routeStale && !recordSucceeded(record)
+		routeStale, routeFailed := true, false
+		for _, record := range records {
+			observed, err := time.Parse(time.RFC3339Nano, record.Time)
+			if err == nil && now.Sub(observed) <= observationFreshness && !observed.After(now.Add(time.Minute)) {
+				routeStale = false
+				routeFailed = routeFailed || !recordSucceeded(record)
+			}
+		}
 		if routeStale {
 			staleRoutes = append(staleRoutes, route.Alias)
 		}
@@ -162,13 +166,26 @@ func (g *Gateway) serveReadiness(w http.ResponseWriter, _ *http.Request) {
 		"status": status, "reason": reason, "service": "lite2api",
 		"observation_stale": stale, "stale_routes": staleRoutes, "unobserved_routes": unobservedRoutes,
 		"failed_routes": failedRoutes, "unavailable_routes": unavailableRoutes, "observed_at": observedAt,
+		"observation_max_age_seconds": int64(observationFreshness / time.Second),
+		"observation_scope":           "route_target_credential_model_operation_features_contract",
 	})
 }
 
 func shutdown(server *http.Server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return server.Shutdown(ctx)
+	return shutdownWithin(ctx, server)
+}
+
+func shutdownWithin(ctx context.Context, server *http.Server) error {
+	if err := server.Shutdown(ctx); err != nil {
+		// Shutdown leaves active connections open when its grace period expires.
+		// Close them as well so cancelled Run callers release upstream requests
+		// and capacity even when the embedding process does not exit.
+		_ = server.Close()
+		return err
+	}
+	return nil
 }
 
 func (g *Gateway) serveHealth(w http.ResponseWriter, _ *http.Request) {

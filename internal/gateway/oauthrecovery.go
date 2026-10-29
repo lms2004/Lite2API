@@ -137,6 +137,24 @@ func trustedOAuthAccount(account config.Account) bool {
 	return err == nil && parseErr == nil && upstream.User == nil && upstream.Scheme == base.Scheme && upstream.Host == base.Host
 }
 
+// Only the configured local adapter can attest which public credential index
+// was selected. Arbitrary upstream headers are not trusted observation data.
+func selectedOAuthCredential(account config.Account, response *http.Response, fallback string) string {
+	if response == nil || !trustedOAuthAccount(account) {
+		return fallback
+	}
+	selected := strings.TrimSpace(response.Header.Get(credentialSelectedHeader))
+	if len(selected) != 16 {
+		return fallback
+	}
+	for _, ch := range selected {
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+			return fallback
+		}
+	}
+	return selected
+}
+
 func refreshOAuthCredential(ctx context.Context, credential string) bool {
 	if credential == "" || strings.TrimSpace(os.Getenv("CLIPROXYAPI_MANAGEMENT_KEY")) == "" {
 		return false
@@ -161,12 +179,20 @@ func refreshOAuthCredential(ctx context.Context, credential string) bool {
 
 // Only an explicit 401 proves that the provider rejected the submission. No
 // timeout, transport error, 5xx or partially delivered stream is replayed here.
-func (g *Gateway) doUpstreamWithOAuthRecovery(ctx context.Context, state *runtimeState, selection *Selection, inbound *http.Request, body []byte, id string) (*http.Response, error) {
-	resp, err := g.doUpstream(ctx, state, selection.Account, inbound, body, id, selection.Credential)
+func (g *Gateway) doUpstreamWithOAuthRecovery(ctx context.Context, state *runtimeState, selection *Selection, inbound *http.Request, body []byte, id string, observers ...func(*http.Response, error, time.Duration)) (*http.Response, error) {
+	send := func() (*http.Response, error) {
+		started := time.Now()
+		resp, err := g.doUpstream(ctx, state, selection.Account, inbound, body, id, selection.Credential)
+		for _, observe := range observers {
+			observe(resp, err, time.Since(started))
+		}
+		return resp, err
+	}
+	resp, err := send()
 	if err != nil || resp.StatusCode != http.StatusUnauthorized || !trustedOAuthAccount(selection.Account.Config) {
 		return resp, err
 	}
-	credential := firstNonEmpty(strings.TrimSpace(resp.Header.Get(credentialSelectedHeader)), selection.Credential)
+	credential := selectedOAuthCredential(selection.Account.Config, resp, selection.Credential)
 	if credential == "" || strings.TrimSpace(os.Getenv("CLIPROXYAPI_MANAGEMENT_KEY")) == "" {
 		return resp, nil
 	}
@@ -177,7 +203,7 @@ func (g *Gateway) doUpstreamWithOAuthRecovery(ctx context.Context, state *runtim
 	}) {
 		return resp, nil
 	}
-	return g.doUpstream(ctx, state, selection.Account, inbound, body, id, selection.Credential)
+	return send()
 }
 
 func normalizeUpstreamAuthError(response *bufferedResponse, operation string) {

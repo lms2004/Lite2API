@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "scope": "real_systemd_private_state_fixture_upstream",
+  "error": "systemd-run failed (1): Failed to find executable /run/lite2api-lifecycle-_tqj_9ux/lite2api: Permission denied"
+}

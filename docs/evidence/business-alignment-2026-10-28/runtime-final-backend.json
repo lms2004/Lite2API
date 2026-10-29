@@ -1,0 +1,28 @@
+{
+  "observed_at": "2026-10-28T15:26:12.725735+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "case": "responses_stream",
+      "client": "curl",
+      "operation": "responses",
+      "stream": true,
+      "http_status": 200,
+      "transport_exit": 0,
+      "latency_ms": 3509,
+      "complete": true
+    }
+  ],
+  "binary_sha256": "a25a516ccd65aa1fec9d7e72f94880a228f3115871a734c0f7681bba849079be",
+  "logical_calls": [
+    {
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    }
+  ]
+}

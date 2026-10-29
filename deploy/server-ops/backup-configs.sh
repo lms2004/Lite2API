@@ -14,7 +14,12 @@ fi
 
 output_dir=$1
 age_recipient=$2
-for command in age find install mktemp mv sha256sum tar; do
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+# An offline filesystem root supports recovery drills without touching live state.
+state_root=${LITE2API_BACKUP_ROOT:-/}
+[[ $state_root == /* && -d $state_root && ! -L $state_root ]] || { echo 'unsafe state root' >&2; exit 1; }
+state_root=${state_root%/}
+for command in age find install mktemp mv sha256sum tar python3; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
         exit 1
@@ -34,7 +39,7 @@ required_core_paths=(
     /etc/lite2api/lite2api.env
 )
 for required_path in "${required_core_paths[@]}"; do
-    [[ -f $required_path && ! -L $required_path ]] || {
+    [[ -f $state_root$required_path && ! -L $state_root$required_path ]] || {
         echo "required Lite2API state is missing or unsafe: $required_path" >&2
         exit 1
     }
@@ -54,30 +59,30 @@ configured_paths=(
 
 cliproxy_present=0
 for cliproxy_path in /etc/systemd/system/cliproxyapi.service /etc/cliproxyapi /var/lib/cliproxyapi/auths; do
-    [[ ! -e $cliproxy_path && ! -L $cliproxy_path ]] || cliproxy_present=1
+    [[ ! -e $state_root$cliproxy_path && ! -L $state_root$cliproxy_path ]] || cliproxy_present=1
 done
 if (( cliproxy_present == 1 )); then
-    [[ -f /etc/cliproxyapi/config.yaml && ! -L /etc/cliproxyapi/config.yaml ]] || {
+    [[ -f $state_root/etc/cliproxyapi/config.yaml && ! -L $state_root/etc/cliproxyapi/config.yaml ]] || {
         echo 'installed OAuth adapter config is incomplete or unsafe' >&2
         exit 1
     }
-    [[ -f /etc/cliproxyapi/cliproxyapi.env && ! -L /etc/cliproxyapi/cliproxyapi.env ]] || {
+    [[ -f $state_root/etc/cliproxyapi/cliproxyapi.env && ! -L $state_root/etc/cliproxyapi/cliproxyapi.env ]] || {
         echo 'installed OAuth adapter environment is incomplete or unsafe' >&2
         exit 1
     }
-    [[ -d /var/lib/cliproxyapi/auths && ! -L /var/lib/cliproxyapi/auths ]] || {
+    [[ -d $state_root/var/lib/cliproxyapi/auths && ! -L $state_root/var/lib/cliproxyapi/auths ]] || {
         echo 'installed OAuth adapter auth directory is incomplete or unsafe' >&2
         exit 1
     }
 fi
 archive_paths=()
 for absolute_path in "${configured_paths[@]}"; do
-    [[ -e $absolute_path ]] || continue
-    [[ ! -L $absolute_path ]] || {
+    [[ -e $state_root$absolute_path ]] || continue
+    [[ ! -L $state_root$absolute_path ]] || {
         echo "refusing symlinked backup source: $absolute_path" >&2
         exit 1
     }
-    if [[ -d $absolute_path ]] && [[ -n $(find "$absolute_path" -type l -print -quit) ]]; then
+    if [[ -d $state_root$absolute_path ]] && [[ -n $(find "$state_root$absolute_path" -type l -print -quit) ]]; then
         echo "refusing nested symlink in backup source: $absolute_path" >&2
         exit 1
     fi
@@ -113,13 +118,13 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-tar -C / -cf - -- "${archive_paths[@]}" |
+python3 "$project_dir/deploy/state_archive.py" create --root "${state_root:-/}" "${archive_paths[@]}" |
     age -r "$age_recipient" -o "$stage_dir/systemd-state.tar.age"
 (
     cd "$stage_dir"
     sha256sum systemd-state.tar.age >SHA256SUMS
 )
-printf 'created_utc=%s\nformat=lite2api-systemd-state-v1\n' \
+printf 'created_utc=%s\nformat=lite2api-systemd-state-v2\nconsistency=unchanged_during_capture\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$stage_dir/METADATA"
 chmod 0600 "$stage_dir"/*
 mv -- "$stage_dir" "$output_dir"

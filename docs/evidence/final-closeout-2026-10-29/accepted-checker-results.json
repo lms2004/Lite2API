@@ -1,0 +1,48 @@
+{
+  "runtime_unchanged": true,
+  "changes_since_runtime_verification": [
+    "deploy/lifecycle_review_test.py",
+    "deploy/verify_service.py"
+  ],
+  "source_stable": true,
+  "commands": [
+    {
+      "name": "accepted-deploy",
+      "command": [
+        "make",
+        "test-deploy"
+      ],
+      "exit_code": 0,
+      "seconds": 8.99
+    },
+    {
+      "name": "accepted-restore",
+      "command": [
+        "python3",
+        "deploy/restore_lifecycle_test.py"
+      ],
+      "exit_code": 0,
+      "seconds": 13.52
+    },
+    {
+      "name": "accepted-upgrade",
+      "command": [
+        "python3",
+        "deploy/upgrade_lifecycle_test.py",
+        "--output",
+        "/tmp/lite2api-final-closeout/accepted-upgrade-results.json"
+      ],
+      "exit_code": 0,
+      "seconds": 14.1
+    },
+    {
+      "name": "accepted-compose",
+      "command": [
+        "python3",
+        "deploy/compose_snapshot_test.py"
+      ],
+      "exit_code": 0,
+      "seconds": 7.7
+    }
+  ]
+}

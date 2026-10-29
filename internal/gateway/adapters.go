@@ -85,6 +85,14 @@ func AdapterCatalog(accounts []config.Account) []AdapterDescriptor {
 	items := make([]AdapterDescriptor, len(adapterCatalog))
 	for index := range adapterCatalog {
 		item := adapterCatalog[index]
+		if item.ID == "cli-proxy-api" {
+			// The management URL is the source of truth for the local OAuth
+			// adapter. Keep the catalog probe and the actual OAuth pool on the
+			// same loopback endpoint when operators choose a non-default port.
+			if base, err := oauthAdapterBaseURL(); err == nil {
+				item.LocalURL = strings.TrimRight(base.String(), "/") + "/v1"
+			}
+		}
 		installStatus := item.Status
 		item.Platforms = append([]string(nil), item.Platforms...)
 		item.Protocols = append([]string(nil), item.Protocols...)

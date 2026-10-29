@@ -1,0 +1,65 @@
+{
+  "observed_at": "2026-10-29T08:52:41.453127+00:00",
+  "ok": true,
+  "version": "continuation-20261029-d2c5dd763eef",
+  "binary_path": "/root/lite2api-release-continuation-d2c5dd763eef/lite2api",
+  "binary_sha256": "d5a190351744c61836d0e7c5bcb1fb36e19a0235aa8c10a928714932bd8ea2b7",
+  "scope": "frozen_release_real_systemd_real_age_restoration_chroot_docker_local_synthetic_upstream",
+  "production_service_changed": false,
+  "real_external_upstream_calls": 0,
+  "tests": [
+    {
+      "name": "real transient systemd lifecycle",
+      "exit_code": 0,
+      "passed_cases": 5,
+      "evidence": "lifecycle-systemd-release.json",
+      "covered": [
+        "start and complete local call",
+        "invalid HUP preserves serving config",
+        "valid HUP publishes new alias without replacing process",
+        "restart and complete local call",
+        "SIGKILL automatic Restart=on-failure and complete local call",
+        "graceful stop completes admitted call, drains durable observation, releases PID and listener"
+      ]
+    },
+    {
+      "name": "real age restoration final binary business paths",
+      "exit_code": 0,
+      "passed_tests": 3,
+      "skipped": 0,
+      "elapsed_seconds": 7.547,
+      "evidence": "lifecycle-restore-release.log",
+      "covered": [
+        "real encrypted material restored into private chroot; managed client allows completed call, rejects disallowed model and revoked/expired/disabled keys before upstream",
+        "restoring expired/revoked synthetic provider grant remains failed business acceptance",
+        "real private Docker volume with restored material starts final binary; managed key business gate succeeds and denied calls do not reach upstream"
+      ]
+    }
+  ],
+  "cleanup": {
+    "systemd_private_unit_removed": true,
+    "test_unit_inventory_empty": true,
+    "test_container_inventory_empty": true,
+    "test_volume_label_inventory_empty": true
+  },
+  "reused_unchanged_scope": {
+    "reference": "lifecycle-summary.json",
+    "previous_results": [
+      "8 real restore/encryption/path checks",
+      "private installer upgrade and rollback 4 scenarios",
+      "real Docker producer snapshot and failure-resume test"
+    ],
+    "note": "Previous results remain scoped to their tested binary/source. Final rerun above covers only final binary runtime paths; no claim of a fresh full upgrade suite or production disaster recovery."
+  },
+  "limits": [
+    "All model traffic in these lifecycle checks uses synthetic local upstreams; real provider acceptance belongs to main agent.",
+    "Production gateway, adapter, credentials and public exposure were not modified.",
+    "No source edits during final binary verification."
+  ],
+  "test_source_sha256": {
+    "deploy/systemd_lifecycle_test.py": "ec442337a85930ecf14309b3dd57d35785917d1b44dbd375d1049351cfd05745",
+    "deploy/restore_lifecycle_test.py": "9a395174a75dc0911ba624f6da3f3aa4e5f551d334008e1e5d5eef06ab9b9c60",
+    "deploy/verify_service.py": "f7feefaeb730351350d96fafba71f67be1727c8ab606c7dfc6c6e97fa2496e68",
+    "deploy/lite2api.service": "8a001cf67614878b13c69b79194d24ca1e9c4b28b89cb02e9cc355e66dedc42a"
+  }
+}

@@ -38,7 +38,17 @@
       "api_key_env": "ATOMCODE2API_KEY",
       "models": ["deepseek-v4-flash", "Qwen/Qwen3-VL-8B-Instruct"],
       "capabilities": [
-        {"model": "deepseek-v4", "upstream_model": "deepseek-v4-flash", "reasoning_efforts": ["auto", "low", "medium", "high"]}
+        {
+          "model": "deepseek-v4",
+          "upstream_model": "deepseek-v4-flash",
+          "reasoning_efforts": ["auto", "low", "medium", "high"],
+          "evidence": {"status": "declared", "source": "example_configuration"},
+          "features": {
+            "openai.chat:stream": {"status": "unknown"},
+            "openai.chat:tools": {"status": "unknown"},
+            "openai.chat:image_input": {"status": "unknown"}
+          }
+        }
       ],
       "model_map": {
         "deepseek-fast": "deepseek-v4-flash",

@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "name": "anonymous_access_rejected",
+      "operation": null,
+      "expected_status": 401,
+      "ok": true,
+      "status": 401,
+      "latency_ms": 4
+    },
+    {
+      "name": "admin_credential_separated",
+      "operation": null,
+      "expected_status": 401,
+      "ok": true,
+      "status": 401,
+      "latency_ms": 2
+    },
+    {
+      "name": "openai.chat",
+      "operation": "openai.chat",
+      "expected_status": 200,
+      "ok": true,
+      "status": 200,
+      "request_id": "ceed21337d55b99708c5dce2",
+      "complete": true,
+      "source_confirmed": true,
+      "latency_ms": 2255
+    },
+    {
+      "name": "openai.responses",
+      "operation": "openai.responses",
+      "expected_status": 200,
+      "ok": true,
+      "status": 200,
+      "request_id": "0428110bad2588a11459e2c7",
+      "complete": true,
+      "source_confirmed": true,
+      "latency_ms": 2119
+    },
+    {
+      "name": "anthropic.messages",
+      "operation": "anthropic.messages",
+      "expected_status": 200,
+      "ok": true,
+      "status": 200,
+      "request_id": "4e070ad5977942eee1996f38",
+      "complete": true,
+      "source_confirmed": true,
+      "latency_ms": 2564
+    }
+  ]
+}

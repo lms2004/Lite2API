@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -281,6 +282,10 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	input.State = strings.TrimSpace(input.State)
 	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
+	if _, ok := oauthProviders[input.Provider]; input.Provider != "" && !ok {
+		writeAPIErrorCode(w, http.StatusBadRequest, "unsupported OAuth provider", "invalid_request_error", "unsupported_oauth_provider")
+		return
+	}
 	if !validOAuthState(input.State) {
 		writeAPIErrorCode(w, http.StatusBadRequest, "invalid OAuth state", "invalid_request_error", "invalid_oauth_state")
 		return
@@ -290,11 +295,12 @@ func (g *Gateway) serveOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		writeOAuthAdapterError(w, err)
 		return
 	}
-	response := map[string]any{"status": result.Status}
+	status := strings.ToLower(strings.TrimSpace(result.Status))
+	response := map[string]any{"status": status}
 	if result.Error != "" {
 		response["error"] = result.Error
 	}
-	if result.Status == "ok" {
+	if status == "ok" {
 		if err := ensureOAuthCredentialPrefixes(r.Context(), input.Provider); err != nil {
 			response["warning"] = "OAuth credential was saved, but provider isolation failed: " + err.Error()
 		}
@@ -462,12 +468,12 @@ func (g *Gateway) serveOAuthAccountDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	name := resolveOAuthAccountName(r.Context(), input.ID)
-	if err := callOAuthAdapter(r.Context(), http.MethodDelete, "auth-files", url.Values{"name": []string{name}}, nil, nil); err != nil {
+	ready, warning, err := g.reconcileOAuthPoolAccount(r.Context(), &oauthCredentialMutation{id: input.ID})
+	if err != nil {
 		writeOAuthAdapterError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pool_ready": ready, "warning": warning})
 }
 
 func (g *Gateway) serveOAuthAccountStatus(w http.ResponseWriter, r *http.Request) {
@@ -485,16 +491,12 @@ func (g *Gateway) serveOAuthAccountStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var result struct {
-		Status   string `json:"status"`
-		Disabled bool   `json:"disabled"`
-	}
-	payload := map[string]any{"name": resolveOAuthAccountName(r.Context(), input.ID), "disabled": *input.Disabled}
-	if err := callOAuthAdapter(r.Context(), http.MethodPatch, "auth-files/status", nil, payload, &result); err != nil {
+	ready, warning, err := g.reconcileOAuthPoolAccount(r.Context(), &oauthCredentialMutation{id: input.ID, disabled: input.Disabled})
+	if err != nil {
 		writeOAuthAdapterError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "disabled": *input.Disabled})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "disabled": *input.Disabled, "pool_ready": ready, "warning": warning})
 }
 
 // resolveOAuthAccountName translates the stable auth_index exposed in the
@@ -521,6 +523,113 @@ func resolveOAuthAccountName(ctx context.Context, id string) string {
 		}
 	}
 	return id
+}
+
+// A credential change has an external side effect before its config commit.
+// Keep the exact previous file (for deletion) and status only in memory, and
+// retain the configuration lock until any compensation has completed.
+type oauthCredentialMutation struct {
+	id               string
+	disabled         *bool // nil means deletion
+	name             string
+	originalDisabled bool
+	originalFile     json.RawMessage
+	attempted        bool
+}
+
+type oauthCredentialMutationError struct {
+	cause       error
+	rollbackErr error
+}
+
+func (err *oauthCredentialMutationError) Error() string {
+	if err.rollbackErr != nil {
+		return "OAuth credential change failed; restoration is incomplete"
+	}
+	return "OAuth credential change failed; prior state restored"
+}
+
+func (err *oauthCredentialMutationError) Unwrap() error { return err.cause }
+
+func (mutation *oauthCredentialMutation) prepare(ctx context.Context) error {
+	name, disabled, err := oauthCredentialMutationTarget(ctx, mutation.id)
+	if err != nil {
+		return err
+	}
+	mutation.name, mutation.originalDisabled = name, disabled
+	if mutation.disabled == nil {
+		if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files/download", url.Values{"name": []string{name}}, nil, &mutation.originalFile); err != nil {
+			return fmt.Errorf("snapshot OAuth credential before deletion: %w", err)
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(mutation.originalFile, &object) != nil || len(object) == 0 {
+			return errors.New("OAuth adapter returned an invalid credential snapshot")
+		}
+	}
+	return nil
+}
+
+func oauthCredentialMutationTarget(ctx context.Context, id string) (string, bool, error) {
+	var listing oauthAuthFilesResponse
+	if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &listing); err != nil {
+		return "", false, err
+	}
+	for _, item := range listing.Files {
+		parentName := ""
+		if item.RuntimeOnly && strings.TrimSpace(item.Path) != "" {
+			parentName = filepath.Base(strings.TrimSpace(item.Path))
+		}
+		if id != strings.TrimSpace(item.AuthIndex) && id != strings.TrimSpace(item.ID) && id != strings.TrimSpace(item.Name) && id != shortCredentialID(firstNonEmpty(item.ID, item.Name)) && id != parentName {
+			continue
+		}
+		name := firstNonEmpty(strings.TrimSpace(item.Name), strings.TrimSpace(item.ID))
+		disabled := item.Disabled || strings.EqualFold(strings.TrimSpace(item.Status), "disabled")
+		if item.RuntimeOnly {
+			name = filepath.Base(strings.TrimSpace(item.Path))
+			for _, parent := range listing.Files {
+				if !parent.RuntimeOnly && (parent.Name == name || parent.ID == name) {
+					disabled = parent.Disabled || strings.EqualFold(strings.TrimSpace(parent.Status), "disabled")
+					break
+				}
+			}
+		}
+		if name == "" || filepath.Base(name) != name || !strings.HasSuffix(strings.ToLower(name), ".json") {
+			return "", false, errors.New("OAuth credential does not resolve to a restorable auth file")
+		}
+		return name, disabled, nil
+	}
+	return "", false, errors.New("OAuth credential was not found; no change was made")
+}
+
+func (mutation *oauthCredentialMutation) apply(ctx context.Context) error {
+	// Set this before submitting: an error or lost acknowledgement does not
+	// establish that the adapter left the credential unchanged.
+	mutation.attempted = true
+	if mutation.disabled == nil {
+		return callOAuthAdapter(ctx, http.MethodDelete, "auth-files", url.Values{"name": []string{mutation.name}}, nil, nil)
+	}
+	return callOAuthAdapter(ctx, http.MethodPatch, "auth-files/status", nil, map[string]any{"name": mutation.name, "disabled": *mutation.disabled}, nil)
+}
+
+func (mutation *oauthCredentialMutation) rollback(ctx context.Context) error {
+	if mutation.disabled == nil {
+		if err := uploadOAuthAuthFile(ctx, mutation.name, mutation.originalFile); err != nil {
+			return fmt.Errorf("restore deleted OAuth credential: %w", err)
+		}
+	}
+	// Uploading a file creates an active runtime entry, so restore its disabled
+	// flag explicitly as well. Status changes use the same bounded inverse.
+	if err := callOAuthAdapter(ctx, http.MethodPatch, "auth-files/status", nil, map[string]any{"name": mutation.name, "disabled": mutation.originalDisabled}, nil); err != nil {
+		return fmt.Errorf("restore OAuth credential status: %w", err)
+	}
+	_, disabled, err := oauthCredentialMutationTarget(ctx, mutation.name)
+	if err != nil {
+		return fmt.Errorf("verify restored OAuth credential: %w", err)
+	}
+	if disabled != mutation.originalDisabled {
+		return errors.New("OAuth credential status restoration could not be confirmed")
+	}
+	return nil
 }
 
 func listOAuthCredentials(ctx context.Context) ([]oauthCredential, error) {
@@ -698,7 +807,24 @@ func callOAuthAdapter(ctx context.Context, method, endpoint string, query url.Va
 		}
 		return fmt.Errorf("OAuth adapter rejected the request: %s", problem.Error)
 	}
-	if target == nil || len(bytes.TrimSpace(data)) == 0 {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	var business struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if json.Unmarshal(data, &business) == nil {
+		status := strings.ToLower(strings.TrimSpace(business.Status))
+		switch status {
+		case "error", "failed", "failure", "invalid", "unauthorized", "forbidden", "rejected":
+			return errors.New("OAuth adapter returned a business failure")
+		}
+		if strings.TrimSpace(business.Error) != "" {
+			return errors.New("OAuth adapter returned a business failure")
+		}
+	}
+	if target == nil {
 		return nil
 	}
 	if err := json.Unmarshal(data, target); err != nil {
@@ -754,6 +880,17 @@ func validCallbackURL(raw string) bool {
 }
 
 func writeOAuthAdapterError(w http.ResponseWriter, err error) {
+	var mutationError *oauthCredentialMutationError
+	if errors.As(err, &mutationError) {
+		code := "oauth_credential_change_rolled_back"
+		message := "OAuth credential change failed; the original credential and gateway configuration were restored"
+		if mutationError.rollbackErr != nil {
+			code = "oauth_credential_rollback_incomplete"
+			message = "OAuth credential change failed and restoration could not be confirmed; restore adapter connectivity and configuration write access, then inspect credential and gateway state before retrying"
+		}
+		writeAPIErrorCode(w, http.StatusBadGateway, message, "upstream_error", code)
+		return
+	}
 	status := http.StatusBadGateway
 	code := "oauth_adapter_error"
 	message := "OAuth adapter request failed; check the local adapter and its credentials"
@@ -771,51 +908,89 @@ func writeOAuthAdapterError(w http.ResponseWriter, err error) {
 }
 
 func (g *Gateway) ensureOAuthPoolAccount(ctx context.Context, provider string) (bool, error) {
+	var ready bool
+	err := g.updateConfig(func(cfg *config.Config) (bool, error) {
+		var changed bool
+		var err error
+		ready, changed, err = ensureOAuthPoolConfig(ctx, cfg, provider)
+		return changed, err
+	})
+	return ready && err == nil, err
+}
+
+// ensureOAuthPoolConfig runs inside the caller's configuration transaction.
+// Import uses this form so an OAuth-only import has the same revision boundary
+// as an import containing API-key accounts.
+func ensureOAuthPoolConfig(ctx context.Context, cfg *config.Config, provider string) (ready, changed bool, err error) {
 	provider = normalizeOAuthProvider(provider)
-	for _, account := range g.Config().Accounts {
-		if strings.TrimRight(account.BaseURL, "/") != defaultOAuthAdapterURL+"/v1" {
+	adapterBase, err := oauthAdapterBaseURL()
+	if err != nil {
+		return false, false, err
+	}
+	poolBaseURL := strings.TrimRight(adapterBase.String(), "/") + "/v1"
+	scopedPool := false
+	for index, account := range cfg.Accounts {
+		if strings.TrimRight(account.BaseURL, "/") != poolBaseURL {
 			continue
 		}
-		if !account.Enabled || provider != "codex" {
-			return account.Enabled, nil
+		if scope := config.DiscoveryProvider(account); scope != "" {
+			scopedPool = true
+			if scope != provider {
+				continue
+			}
 		}
 		models, err := discoverOAuthModels(ctx)
 		if err != nil {
-			return true, fmt.Errorf("OAuth credential was saved, but Codex model discovery failed: %w", err)
+			return false, false, fmt.Errorf("OAuth credential was saved, but model discovery failed: %w", err)
+		}
+		models = config.FilterDiscoveredModels(account, models)
+		if len(models) == 0 {
+			return false, false, errors.New("OAuth credential was saved, but no models match the configured provider scope")
 		}
 		updated := account
 		updated.Models = appendUniqueModels(account.Models, models)
 		updated.Capabilities = mergeChannelCapabilities(account.Capabilities, config.InferCodexCapabilities(updated.Models))
 		if !sameModels(account.Models, updated.Models) || !sameChannelCapabilities(account.Capabilities, updated.Capabilities) {
-			if err := g.UpsertAccount(updated); err != nil {
-				return false, fmt.Errorf("OAuth credential was saved, but Lite account capability update failed: %w", err)
-			}
+			cfg.Accounts[index] = updated
+			return account.Enabled, true, nil
 		}
-		return true, nil
+		return account.Enabled, false, nil
+	}
+	if scopedPool {
+		return false, false, errors.New("OAuth credential was saved, but no connection matches this provider; configure a reviewed provider-scoped connection")
 	}
 	if strings.TrimSpace(os.Getenv("CLIPROXYAPI_KEY")) == "" {
-		return false, errors.New("OAuth credential was saved, but CLIPROXYAPI_KEY is not configured")
+		return false, false, errors.New("OAuth credential was saved, but CLIPROXYAPI_KEY is not configured")
 	}
 	models, err := discoverOAuthModels(ctx)
 	if err != nil {
-		return false, fmt.Errorf("OAuth credential was saved, but model discovery failed: %w", err)
+		return false, false, fmt.Errorf("OAuth credential was saved, but model discovery failed: %w", err)
 	}
 	account := config.Account{
 		ID: "cliproxy-oauth", Name: "CLIProxy OAuth Pool", Type: "openai",
 		AdapterID: "cli-proxy-api", InstanceID: "local",
-		BaseURL: defaultOAuthAdapterURL + "/v1", APIKeyEnv: "CLIPROXYAPI_KEY",
+		BaseURL: poolBaseURL, APIKeyEnv: "CLIPROXYAPI_KEY",
 		AuthHeader: "authorization", AuthScheme: "Bearer", Models: models,
 		Capabilities: config.InferCodexCapabilities(models),
 		Operations:   []string{config.OperationOpenAIChat, config.OperationOpenAIResponses, config.OperationAnthropic},
 		Priority:     50, Weight: 1, Concurrency: 4, Enabled: true,
 	}
-	if err := g.UpsertAccount(account); err != nil {
-		return false, fmt.Errorf("OAuth credential was saved, but Lite account creation failed: %w", err)
+	if accountIndex(cfg.Accounts, account.ID) >= 0 {
+		return false, false, errors.New("OAuth pool account ID is already used by another endpoint")
 	}
-	return true, nil
+	cfg.Accounts = append(cfg.Accounts, account)
+	return true, true, nil
 }
 
 func discoverOAuthModels(ctx context.Context) ([]string, error) {
+	models, err := readOAuthModels(ctx)
+	if err == nil && len(models) == 0 {
+		err = errors.New("no models returned")
+	}
+	return models, err
+}
+
+func readOAuthModels(ctx context.Context) ([]string, error) {
 	base, err := oauthAdapterBaseURL()
 	if err != nil {
 		return nil, err
@@ -856,10 +1031,131 @@ func discoverOAuthModels(ctx context.Context) ([]string, error) {
 		seen[id] = struct{}{}
 		models = append(models, id)
 	}
-	if len(models) == 0 {
-		return nil, errors.New("no models returned")
-	}
 	return models, nil
+}
+
+// Explicit credential removal/status changes invalidate the shared pool's
+// previous catalog. An empty catalog must disable the connection: an empty
+// Models slice otherwise means wildcard support. A manually disabled pool is
+// never enabled as a side effect of credential maintenance.
+func (g *Gateway) reconcileOAuthPoolAccount(ctx context.Context, mutation *oauthCredentialMutation) (bool, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	base, err := oauthAdapterBaseURL()
+	if err != nil {
+		return false, "", err
+	}
+	poolURL := strings.TrimRight(base.String(), "/") + "/v1"
+	var ready bool
+	var warning string
+	g.reloadMu.Lock()
+	defer g.reloadMu.Unlock()
+	originalConfig := cloneConfig(g.state.Load().cfg)
+	err = g.updateConfigAtRevisionLocked("", func(cfg *config.Config) (bool, error) {
+		if err := mutation.prepare(ctx); err != nil {
+			return false, err
+		}
+		if err := mutation.apply(ctx); err != nil {
+			return false, err
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		matches := func(account config.Account) bool {
+			return strings.TrimRight(account.BaseURL, "/") == poolURL && (account.AdapterID == "cli-proxy-api" || account.ID == "cliproxy-oauth")
+		}
+		found := false
+		for _, account := range cfg.Accounts {
+			found = found || matches(account)
+		}
+		if !found {
+			return false, nil
+		}
+		credentials, discoveryErr := listOAuthCredentials(ctx)
+		available := map[string]int{}
+		for _, credential := range credentials {
+			// Temporary cooldowns retain their recovery path. Disabled and permanently
+			// invalid grants do not keep a provider connection available.
+			if !credential.Disabled && credential.HealthCode != "reauth_required" {
+				available[credential.Provider]++
+				available[""]++
+			}
+		}
+		var models []string
+		if available[""] > 0 {
+			models, discoveryErr = readOAuthModels(ctx)
+		}
+		if discoveryErr != nil {
+			warning = "Credential changed; affected pool connections were disabled because their catalog could not be refreshed. Review the adapter and re-enable the connections after verification."
+		}
+		changed := false
+		for index, account := range cfg.Accounts {
+			if !matches(account) {
+				continue
+			}
+			scopedModels := config.FilterDiscoveredModels(account, models)
+			if available[config.DiscoveryProvider(account)] == 0 {
+				scopedModels = nil
+			}
+			modelSet := make(map[string]bool, len(scopedModels))
+			for _, model := range scopedModels {
+				modelSet[model] = true
+			}
+			updated := account
+			updated.Models = append([]string(nil), scopedModels...)
+			updated.Capabilities = nil
+			for _, capability := range account.Capabilities {
+				if modelSet[firstNonEmpty(capability.UpstreamModel, capability.Model)] {
+					updated.Capabilities = append(updated.Capabilities, capability)
+				}
+			}
+			updated.Capabilities = mergeChannelCapabilities(updated.Capabilities, config.InferCodexCapabilities(scopedModels))
+			updated.ModelMap = make(map[string]string)
+			for alias, upstream := range account.ModelMap {
+				if modelSet[upstream] {
+					updated.ModelMap[alias] = upstream
+				}
+			}
+			if len(scopedModels) == 0 {
+				updated.Enabled = false
+			}
+			// Keep reviewed aliases intact. If their declarations are no longer valid,
+			// retain those declarations for repair but disable the connection, so they
+			// neither advertise models nor admit new requests. Never silently widen a
+			// route or delete an alias as a side effect of credential maintenance.
+			trial := cloneConfig(*cfg)
+			trial.Accounts[index] = updated
+			if err := config.Normalize(trial).Validate(); err != nil {
+				updated = account
+				updated.Enabled = false
+				warning = "Credential changed; affected pool connections were disabled because reviewed routes still reference removed models. Review those routes and re-enable the connections after verification."
+			}
+			ready = ready || updated.Enabled
+			if updated.Enabled != account.Enabled || !sameModels(account.Models, updated.Models) || !sameChannelCapabilities(account.Capabilities, updated.Capabilities) || !maps.Equal(account.ModelMap, updated.ModelMap) {
+				cfg.Accounts[index] = updated
+				changed = true
+			}
+		}
+		return changed, ctx.Err()
+	})
+	if mutation.attempted && err != nil {
+		cleanup, stopCleanup := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer stopCleanup()
+		rollbackErr := mutation.rollback(cleanup)
+		// A failed fsync can follow a successful rename. Confirm the disk still
+		// matches the unchanged runtime, restoring it if necessary before claiming
+		// that the control-plane transaction has been rolled back.
+		persisted, loadErr := config.Load(g.configPath)
+		if loadErr != nil || !sameEffectiveConfig(persisted, originalConfig) {
+			if restoreErr := g.store.SaveEffective(originalConfig); restoreErr != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore gateway configuration: %w", restoreErr))
+			} else if restored, readErr := config.Load(g.configPath); readErr != nil || !sameEffectiveConfig(restored, originalConfig) {
+				rollbackErr = errors.Join(rollbackErr, errors.New("gateway configuration restoration could not be confirmed"))
+			}
+		}
+		return false, "", &oauthCredentialMutationError{cause: err, rollbackErr: rollbackErr}
+	}
+	return ready && err == nil, warning, err
 }
 
 func appendUniqueModels(existing, discovered []string) []string {
@@ -919,7 +1215,7 @@ func sameChannelCapabilities(left, right []config.ChannelCapability) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].Model != right[index].Model || left[index].UpstreamModel != right[index].UpstreamModel || !sameModels(left[index].ReasoningEfforts, right[index].ReasoningEfforts) {
+		if left[index].Model != right[index].Model || left[index].UpstreamModel != right[index].UpstreamModel || !sameModels(left[index].ReasoningEfforts, right[index].ReasoningEfforts) || left[index].Evidence != right[index].Evidence || !maps.Equal(left[index].Features, right[index].Features) {
 			return false
 		}
 	}

@@ -1,0 +1,70 @@
+{
+  "observed_at": "2026-10-29T14:40:26.034062+08:00",
+  "scope": "OAuth handoff items 4, 5, and 8; implementation and isolated HTTP acceptance only",
+  "production_mutations": false,
+  "real_provider_calls": 0,
+  "changes": [
+    {
+      "path": "POST /admin/api/oauth/status",
+      "input": "valid state with unsupported nonempty provider",
+      "expected": "400 unsupported_oauth_provider before contacting adapter",
+      "observed": "passed; zero adapter requests; omitted provider remains compatible",
+      "test": "TestOAuthStatusRejectsUnknownProviderBeforeAdapter"
+    },
+    {
+      "path": "DELETE /admin/api/oauth/accounts and POST /admin/api/oauth/accounts/status",
+      "input": "delete or disable one credential, then last credential; shared and provider-scoped pools",
+      "expected": "refresh scoped models, remove dead source from subsequent requests and model listing, preserve unrelated providers",
+      "observed": "passed with subsequent request counts; explicit logical and legacy routes retained for review and affected connection disabled instead of removing aliases",
+      "tests": [
+        "TestOAuthCredentialRemovalReconcilesPoolAndSubsequentCalls",
+        "TestOAuthCredentialRemovalPreservesScopedRoutesAndOtherProviders"
+      ]
+    },
+    {
+      "path": "OAuth login/import pool update",
+      "input": "same adapter URL used by separately scoped provider connections; one manually disabled",
+      "expected": "select matching provider, filter catalog, preserve manual disable and avoid adding unreviewed broad pool",
+      "observed": "passed",
+      "test": "TestOAuthPoolEnsurePreservesProviderScopeAndManualDisable"
+    },
+    {
+      "path": "POST /admin/api/accounts/import",
+      "input": "stale OAuth-only revision; concurrent config update during upload; config commit failure after replacing existing and adding new credential",
+      "expected": "reject stale request before upload; serialize update; restore old credentials and delete only new ones after failed commit",
+      "observed": "passed; snapshots in memory only; 30 second import context, independent 15 second cleanup budget, reloadMu retained through compensation",
+      "tests": [
+        "TestAccountImportOAuthOnlyChecksRevisionBeforeUpload",
+        "TestAccountImportSerializesUploadWithConfigChanges",
+        "TestAccountImportRollsBackNewAndReplacedCredentialsOnCommitFailure"
+      ]
+    }
+  ],
+  "verification": {
+    "command": "GOTOOLCHAIN=local go test -race -json ./internal/gateway -run 'Test(AdminOAuth|EnsureOAuth|OAuth|AccountImport|Sub2APIData)' -count=1 -timeout=120s",
+    "exit_code": 0,
+    "passed_tests_and_subtests": 35,
+    "failed_tests": 0,
+    "output": "go-race.jsonl",
+    "git_diff_check_exit_code": 0
+  },
+  "review": {
+    "reviewer": "protocol_health sub-agent",
+    "status": "normal commit paths accepted after scoped-provider and explicit-route corrections",
+    "remaining_boundary": "If adapter deletion/status change succeeds but local configuration persistence fails, response explicitly reports reconciliation could not be committed. This does not prove gateway disable or automatic recovery; repair config persistence and reconcile adapter/gateway state. Unlike import, deletion has no credential snapshot rollback."
+  },
+  "limitations": [
+    "No real credentials, production config, production service, or provider was used by this subtask.",
+    "When reviewed routes reference removed models, original declarations stay available for review on a disabled connection. Review routes/catalog and explicitly re-enable after verification; credential maintenance does not silently enable a manually disabled pool.",
+    "Credential import compensation is bounded and may itself fail if the adapter is unavailable; error explicitly requires inspecting adapter state before retrying.",
+    "Direct out-of-band mutation of adapter files is outside the gateway configuration lock."
+  ],
+  "source_sha256": {
+    "internal/gateway/oauthadapter.go": "684a6820bfeeaad21d76141bc81b39dbc82dbce94d9e97dfb925711f4e589084",
+    "internal/gateway/accountimport.go": "4f121651940082c4ca82d6b16b7929064055b3759af3d57ee629528eec4d936f",
+    "internal/gateway/admin.go": "44d80ab72f5d3206b29f08e42ef63e086e335bb577d5bf57d2c27cabe4fe4416",
+    "internal/config/capability_discovery.go": "d49cc8725c66a44e988d52cfffc40c8276b8eb953f5260efea4bb0de0e04d6d3",
+    "internal/gateway/oauth_boundary_regression_test.go": "b45b322e94732b2116fa6a6376c59d46e2fcded03001d1a88dcea41b9d448809",
+    "internal/gateway/accountimport_test.go": "ab0f471dd83d18745c8ecd612f358ee3495fcfa374a0615970d7e85fec40def7"
+  }
+}

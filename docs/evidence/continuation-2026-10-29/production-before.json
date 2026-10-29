@@ -1,0 +1,246 @@
+{
+  "observed_at": "2026-10-29T06:24:03Z",
+  "git_head": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "services": {
+    "lite2api": {
+      "Restart": "on-failure",
+      "MainPID": "209943",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/etc/systemd/system/lite2api.service",
+      "ActiveEnterTimestamp": "Wed 2026-10-28 13:13:51 UTC",
+      "exe": "/usr/local/bin/lite2api",
+      "process_sha256": "a5b88fa1d01058d6955a6eee7304a79ee6003303fcee3bb7f1a6e368cf30ed65",
+      "installed_sha256": "a5b88fa1d01058d6955a6eee7304a79ee6003303fcee3bb7f1a6e368cf30ed65"
+    },
+    "cliproxyapi": {
+      "Restart": "on-failure",
+      "MainPID": "209931",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/etc/systemd/system/cliproxyapi.service",
+      "ActiveEnterTimestamp": "Wed 2026-10-28 13:13:50 UTC",
+      "exe": "/usr/local/bin/cliproxyapi",
+      "process_sha256": "6ba0cb5c2219594d962ab7aeccca411ae725d18ed4c1bd70989040fab8a42449",
+      "installed_sha256": "6ba0cb5c2219594d962ab7aeccca411ae725d18ed4c1bd70989040fab8a42449"
+    }
+  },
+  "config_summary": {
+    "listen": "127.0.0.1:45679",
+    "routes": {
+      "Shadow": {
+        "model": null,
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-antigravity",
+            "credential": "08a41398ec92b336",
+            "model": "antigravity/claude-opus-4-6-thinking"
+          },
+          {
+            "account": "cliproxy-claude-code",
+            "model": "claude-code/claude-opus-4-6",
+            "reasoning_effort": "auto"
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": null
+      },
+      "claude": {
+        "model": "claude-opus-4-6",
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-claude-code",
+            "model": ""
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": "auto"
+      },
+      "claude_code": {
+        "model": "claude-opus-5",
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-claude-code",
+            "model": ""
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": "high"
+      },
+      "gpt": {
+        "model": "luna",
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-codex",
+            "model": ""
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": "auto"
+      },
+      "grok": {
+        "model": "claude-sonnet-4-6",
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-antigravity",
+            "model": ""
+          },
+          {
+            "account": "cliproxy-claude-code",
+            "model": ""
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": "high"
+      },
+      "life": {
+        "model": null,
+        "upstream_model": null,
+        "accounts": null,
+        "targets": [
+          {
+            "account": "cliproxy-antigravity",
+            "credential": "08a41398ec92b336",
+            "model": "antigravity/claude-opus-4-6-thinking",
+            "reasoning_effort": "auto"
+          },
+          {
+            "account": "cliproxy-claude-code",
+            "credential": "f4a4c7dc99a43610",
+            "model": "claude-code/claude-opus-4-6",
+            "reasoning_effort": "auto"
+          },
+          {
+            "account": "cliproxy-antigravity",
+            "credential": "1d1a1dea063ee3ab",
+            "model": "antigravity/claude-opus-4-6-thinking",
+            "reasoning_effort": "auto"
+          }
+        ],
+        "all_accounts": null,
+        "reasoning_effort": null
+      }
+    },
+    "accounts": [
+      {
+        "id": "cliproxy-antigravity",
+        "type": "openai",
+        "adapter_id": "cli-proxy-api",
+        "enabled": true,
+        "operations": [
+          "openai.chat",
+          "openai.responses",
+          "anthropic.messages"
+        ],
+        "models": [
+          "antigravity/gemini-3.1-flash-image",
+          "antigravity/gemini-3.1-flash-lite",
+          "antigravity/gemini-3.5-flash-lite",
+          "antigravity/gemini-4-argon-high",
+          "antigravity/gemini-3-flash",
+          "antigravity/claude-opus-5-5-high",
+          "antigravity/claude-sonnet-5-5-high",
+          "antigravity/claude-sonnet-4-6",
+          "antigravity/gpt-oss-120b-medium",
+          "antigravity/claude-opus-4-6-thinking",
+          "antigravity/gemini-3.8-flash-high",
+          "antigravity/gemini-3.6-flash-high",
+          "antigravity/gemini-3.7-flash-high",
+          "antigravity/gemini-3-flash-agent",
+          "antigravity/gemini-pro-agent",
+          "antigravity/gemini-3.1-pro-low",
+          "antigravity/gemini-3.5-flash-extra-low",
+          "gpt-5.6-sol",
+          "gpt-image-2",
+          "gpt-5.6-luna",
+          "gpt-oss-120b-medium",
+          "gpt-5.3-codex-spark",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra",
+          "gpt-5.5",
+          "gpt-5.4",
+          "codex-auto-review",
+          "antigravity/gemini-3.5-flash-low",
+          "antigravity/gemini-3-pro-high",
+          "antigravity/gemini-3.1-pro-high",
+          "antigravity/gemini-3-pro-low"
+        ],
+        "model_map": null
+      },
+      {
+        "id": "cliproxy-claude-code",
+        "type": "openai",
+        "adapter_id": "cli-proxy-api",
+        "enabled": true,
+        "operations": [
+          "openai.chat",
+          "openai.responses",
+          "anthropic.messages"
+        ],
+        "models": [
+          "claude-code/claude-sonnet-5-5",
+          "claude-code/claude-3-5-haiku-20241022",
+          "claude-code/claude-haiku-4-5-20251001",
+          "claude-code/claude-haiku-5-5",
+          "claude-code/claude-fable-5",
+          "claude-code/claude-opus-5",
+          "claude-code/claude-fable-5-1",
+          "claude-code/claude-opus-4-1-20250805",
+          "claude-code/claude-opus-4-6",
+          "claude-code/claude-opus-4-20250514",
+          "claude-code/claude-sonnet-4-20250514",
+          "claude-code/claude-opus-4-7",
+          "claude-code/claude-opus-4-8",
+          "claude-code/claude-sonnet-4-6",
+          "claude-code/claude-sonnet-4-5-20250929",
+          "claude-code/claude-sonnet-5",
+          "claude-code/claude-opus-4-5-20251101",
+          "claude-code/claude-opus-5-5",
+          "claude-code/claude-3-7-sonnet-20250219"
+        ],
+        "model_map": null
+      },
+      {
+        "id": "cliproxy-codex",
+        "type": "openai",
+        "adapter_id": "cli-proxy-api",
+        "enabled": true,
+        "operations": [
+          "openai.chat",
+          "openai.responses"
+        ],
+        "models": [
+          "gpt-6-luna",
+          "gpt-5.6-sol",
+          "gpt-6-astra",
+          "gpt-6.1-sol",
+          "gpt-image-2",
+          "gpt-6-sol",
+          "gpt-6.1-terra",
+          "gpt-5.6-terra",
+          "gpt-5.6-luna",
+          "codex-auto-review",
+          "gpt-5.3-codex-spark",
+          "gpt-5.4-mini",
+          "gpt-5.5",
+          "gpt-5.4",
+          "gpt-5.2",
+          "gpt-5.3-codex"
+        ],
+        "model_map": null
+      }
+    ]
+  }
+}

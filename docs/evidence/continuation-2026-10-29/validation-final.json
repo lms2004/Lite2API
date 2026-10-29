@@ -1,0 +1,114 @@
+{
+  "observed_at": "2026-10-29T17:06:50.398661+08:00",
+  "result": "gateway_fixes_deployed_scoped_acceptance_complete_with_external_client_limit",
+  "repository": "/root/Lite2API",
+  "git_base": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "changes_uncommitted": true,
+  "version": "continuation-20261029-b30368e8257e",
+  "binary_sha256": "f81c05f81d8aaa2859805f079b75e1c53a5ab044157dd968b3155aea53ea25d0",
+  "source_process_installed_workspace_binary_match": true,
+  "release_directory": "/root/lite2api-release-continuation-b30368e8257e",
+  "deployment": {
+    "ok": true,
+    "service": {
+      "MainPID": "282086",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    "unit_environment_adapter_unchanged": true,
+    "rollback_directory": "/root/lite2api-release-continuation-b30368e8257e/rollback-20261029T090454Z"
+  },
+  "regression": {
+    "go_full_test_pass_events": 579,
+    "go_race_test_pass_events": 579,
+    "go_test_fail_events": 0,
+    "go_test_skip_events": 0,
+    "go_vet_exit_code": 0,
+    "web_exit_code": 0,
+    "deploy_regression_exit_code": 0,
+    "acceptance_tool_tests": 9,
+    "optional_null_checker_tests": 5,
+    "runtime_source_equivalence": "runtime-source-equivalence-published.json"
+  },
+  "acceptance": {
+    "lifecycle": {
+      "status": "passed_isolated_real_systemd_and_real_age_docker",
+      "systemd_cases": 5,
+      "latest_systemd_evidence": "lifecycle-systemd-published-candidate.json",
+      "restoration_final_runtime_cases": 3,
+      "unchanged_scope_crypto_restore_tests": 8,
+      "unchanged_scope_upgrade_rollback_scenarios": 4,
+      "unchanged_scope_docker_snapshot_tests": 1,
+      "external_upstream_used_in_lifecycle": false,
+      "production_disaster_recovery_claimed": false
+    },
+    "real_curl": {
+      "completed_cases": [
+        "responses_json",
+        "responses_stream",
+        "messages_json",
+        "messages_stream",
+        "chat_json",
+        "chat_stream"
+      ],
+      "count": 6,
+      "scope": "Shadow / cliproxy-antigravity / credential 08a41398ec92b336 / antigravity/claude-opus-4-6-thinking"
+    },
+    "real_source_features": {
+      "passed": [
+        "tools",
+        "image_input"
+      ],
+      "completed_and_evidence_saved": true,
+      "scope": "openai.chat only; private test configuration read back before cleanup"
+    },
+    "real_codex_cli": {
+      "status": "passed",
+      "tool_roundtrip": true,
+      "operation": "openai.responses",
+      "evidence": "real-chat-codex-recheck.json"
+    },
+    "real_claude_code": {
+      "status": "not_passed",
+      "reason": "upstream 429 at both default and minimal budget; no further retries",
+      "client_exit_code": 1,
+      "evidence": "real-claude-minimal-budget.json",
+      "recovery_condition": "Restore upstream quota/permission for actual Claude Code requests, then rerun same Read tool roundtrip; ordinary Messages success alone is insufficient."
+    },
+    "production_post_deploy": {
+      "status": "passed",
+      "completed_calls": 3,
+      "anonymous_admin_as_client_denials": 2,
+      "source_confirmed": true,
+      "evidence": "production-business-acceptance.json",
+      "active_requests_after_acceptance": 0
+    }
+  },
+  "remaining": [
+    {
+      "item": "Claude Code actual tool roundtrip",
+      "condition": "Upstream must admit its requests without 429; rerun with bounded minimal client settings."
+    },
+    {
+      "item": "Two permanently invalid OAuth grants",
+      "condition": "Reauthorize antigravity 1d1a1dea063ee3ab and codex 81c1278c15019737 through existing login flow; no credentials changed by this task."
+    },
+    {
+      "item": "Anthropic fallback credential upstream permission error",
+      "condition": "Restore provider account permission before exact source/model/client acceptance."
+    },
+    {
+      "item": "Other configured aliases and undeclared adapter operations/features",
+      "condition": "Select required exact scope and available authorized provider; current health/readiness unknown reflects unobserved routes, not universal acceptance."
+    }
+  ],
+  "historical_failures_retained": [
+    "real-upstream-clients.json",
+    "real-claude-zero-retry.json",
+    "real-claude-minimal-budget.json",
+    "oauth-independent-review-final-tests.jsonl",
+    "checker-null-before.json"
+  ],
+  "privacy": "No MyLife data accessed or changed; no public exposure or credential mutation; raw request/response bodies and auth material excluded from evidence."
+}

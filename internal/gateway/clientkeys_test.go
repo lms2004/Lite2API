@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagedClientKeyLifecycle(t *testing.T) {
@@ -67,6 +68,63 @@ func TestManagedClientKeyLifecycle(t *testing.T) {
 	}
 }
 
+func TestManagedClientKeyRejectsEpochAndPreEpochExpiry(t *testing.T) {
+	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expiry := range []string{"1969-12-31T23:59:59Z", "1970-01-01T00:00:00Z", "0001-01-01T00:00:00Z", time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)} {
+		_, secret, err := store.Create(ClientKeyCreate{Name: "expired", ExpiresAt: expiry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lease, failure := store.Authenticate(secret, nil); failure != KeyAuthInvalid {
+			lease.Complete(false)
+			t.Fatalf("expired key %s authenticated: %q", expiry, failure)
+		}
+		if store.validCredential(secret, nil) {
+			t.Fatalf("preflight accepted expiry %s", expiry)
+		}
+	}
+}
+
+func TestManagedClientKeyEditsPreserveUsageAndActiveLeases(t *testing.T) {
+	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, secret, err := store.Create(ClientKeyCreate{Name: "before", RPM: 2, Concurrency: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, failure := store.Authenticate(secret, nil)
+	if failure != "" {
+		t.Fatal(failure)
+	}
+	defer lease.Complete(false)
+	runtime := lease.runtime
+	// Seed the current minute explicitly to avoid crossing a wall-clock minute
+	// boundary between acquiring the request and editing its key.
+	now := time.Now()
+	rate := uint64(now.Unix()/60)<<rateCountBits | 2
+	runtime.rate.Store(rate)
+	name := "after"
+	updated, err := store.Update(key.ID, ClientKeyUpdate{Name: &name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Active != 1 || updated.TotalRequests != 1 || (*store.snapshot.Load())[key.ID] != runtime {
+		t.Fatal("editing the key replaced its live usage state")
+	}
+	if runtime.rate.Load() != rate || acquireRPM(&runtime.rate, 2, now) {
+		t.Fatal("edit reset the current minute's request limit")
+	}
+	lease.Complete(false)
+	if store.List()[0].Active != 0 {
+		t.Fatal("the original in-flight lease did not release the shared counter")
+	}
+}
+
 func TestManagedClientKeyCreateUsesDefaultName(t *testing.T) {
 	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
 	if err != nil {
@@ -81,6 +139,20 @@ func TestManagedClientKeyCreateUsesDefaultName(t *testing.T) {
 	}
 	if len(snapshot.Models) != 0 || snapshot.RPM != 0 || snapshot.Concurrency != 0 || snapshot.ExpiresAt != "" {
 		t.Fatalf("unexpected quick-create restrictions: %+v", snapshot)
+	}
+}
+
+func TestManagedClientKeyDetectsAdminTokenOverlap(t *testing.T) {
+	store, err := NewClientKeyStore(filepath.Join(t.TempDir(), "client_keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := store.Create(ClientKeyCreate{Name: "admin-overlap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.ConflictsWith(secret) || store.ConflictsWith("different-admin-token") {
+		t.Fatal("managed key overlap check did not stay within the hashed key boundary")
 	}
 }
 

@@ -1,0 +1,54 @@
+bash deploy/bootstrap.test.sh
+bootstrap contracts passed
+bash deploy/backup-verifiers.test.sh
+backup verifier contracts passed
+bash -n deploy/*.sh deploy/server-ops/*.sh
+PYTHONDONTWRITEBYTECODE=1 python3 deploy/lifecycle_review_test.py
+test_business_acceptance_checks_requested_tools_and_indexes (__main__.LifecycleReview.test_business_acceptance_checks_requested_tools_and_indexes) ... ok
+test_business_acceptance_rejects_frames_after_stream_terminal (__main__.LifecycleReview.test_business_acceptance_rejects_frames_after_stream_terminal) ... ok
+test_created_hardlinked_state_is_readable_by_own_restorer (__main__.LifecycleReview.test_created_hardlinked_state_is_readable_by_own_restorer) ... ok
+test_manifest_must_be_a_complete_object (__main__.LifecycleReview.test_manifest_must_be_a_complete_object) ... ok
+test_oauth_channel_release_metadata_and_patch_manifest_match (__main__.LifecycleReview.test_oauth_channel_release_metadata_and_patch_manifest_match) ... ok
+test_restorer_can_write_material_files (__main__.LifecycleReview.test_restorer_can_write_material_files) ... ok
+test_sigterm_cleans_plaintext_restore_and_child (__main__.LifecycleReview.test_sigterm_cleans_plaintext_restore_and_child) ... ok
+test_snapshot_does_not_report_success_when_producer_resume_fails (__main__.LifecycleReview.test_snapshot_does_not_report_success_when_producer_resume_fails) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.207s
+
+OK
+PYTHONDONTWRITEBYTECODE=1 python3 tools/verify_business_runtime_test.py
+...EE....
+======================================================================
+ERROR: test_cli_writes_report_and_returns_failure_for_incomplete_provider (__main__.ExitStatusIntegration.test_cli_writes_report_and_returns_failure_for_incomplete_provider)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 164, in test_cli_writes_report_and_returns_failure_for_incomplete_provider
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socketserver.py", line 453, in __init__
+    self.socket = socket.socket(self.address_family,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 233, in __init__
+    _socket.socket.__init__(self, family, type, proto, fileno)
+PermissionError: [Errno 1] Operation not permitted
+
+======================================================================
+ERROR: test_termination_writes_failure_and_reaps_gateway_and_client (__main__.ExitStatusIntegration.test_termination_writes_failure_and_reaps_gateway_and_client)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 120, in test_termination_writes_failure_and_reaps_gateway_and_client
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socketserver.py", line 453, in __init__
+    self.socket = socket.socket(self.address_family,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 233, in __init__
+    _socket.socket.__init__(self, family, type, proto, fileno)
+PermissionError: [Errno 1] Operation not permitted
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.633s
+
+FAILED (errors=2)
+make: *** [Makefile:26: test-deploy] Error 1

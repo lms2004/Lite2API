@@ -2,7 +2,7 @@
 
 Lite2API 核心不复制第三方项目的账号登录、Cookie 刷新或逆向协议代码。每个渠道作为独立进程暴露 OpenAI 兼容接口，核心只负责统一入口、密钥隔离、模型映射、并发、熔断、换号与统计。
 
-每个账号同时声明 `adapter_id`、`instance_id` 和 `operations`。前两者用于稳定关联实现与本机实例，`operations` 用于在调度前按 Chat、Responses、Anthropic Messages、Embeddings、Images 或 Rerank 能力过滤。适配器“进程运行”不等于“可承载流量”：只有凭据、模型和 Lite2API 账号配置都就绪时状态才是 `ready`。
+每个账号同时声明 `adapter_id`、`instance_id` 和 `operations`。前两者用于稳定关联实现与本机实例，`operations` 用于在调度前按 Chat、Responses、Anthropic Messages、Embeddings、Images 或 Rerank 能力过滤。适配器“进程运行”不等于“可承载流量”：凭据、模型目录和关联账号满足探针条件时，目录才显示 `ready`；该状态只证明依赖就绪，目标模型、接口和特性仍需单独完成调用验收。
 
 当前固定源码：
 
@@ -24,7 +24,7 @@ docker compose -f docker-compose.yml -f compose.channels.yml --profile grok up -
 docker compose -f docker-compose.yml -f compose.channels.yml --profile oauth up -d --build
 ```
 
-Gemini profile 需要上面的固定子模块；Grok 使用 Compose 中固定的镜像 digest；OAuth 镜像会在构建阶段拉取并核验 CLIProxyAPI 固定提交，再按固定顺序应用四组维护补丁，因此不会使用现场 dirty 子模块。端口只发布到宿主回环：Grok `45680`、Gemini `45681`、CLIProxyAPI `45682`。每个渠道使用独立 bridge 网络以保留上游访问但隔离横向流量，并以非 root UID、只读根文件系统、空 capabilities 和资源上限运行。
+Gemini profile 需要上面的固定子模块；Grok 使用 Compose 中固定的镜像 digest；OAuth 镜像会在构建阶段拉取并核验 CLIProxyAPI 固定提交，再按固定顺序应用五组维护补丁，因此不会使用现场 dirty 子模块。端口只发布到宿主回环：Grok `45680`、Gemini `45681`、CLIProxyAPI `45682`。每个渠道使用独立 bridge 网络以保留上游访问但隔离横向流量，并以非 root UID、只读根文件系统、空 capabilities 和资源上限运行。
 
 `bootstrap-channels.sh` 会在锁内原子补齐 `.env` 的渠道密钥并生成 `0600` 私有配置；已存在配置作为迁移源，所以 Gemini Cookie 和其他手工字段不会因重跑被清空，脚本只同步托管密钥、容器监听地址与 CLIProxyAPI 路由策略。占位符、长度错误的托管密钥以及 runtime 符号链接会被拒绝。root 执行时使用 UID/GID `10001:10001` 并修正 owner；普通 Docker 用户执行时记录当前 UID/GID，Compose 使用同一身份，因此 `0600` 配置可读。若 `.env` 已显式配置另一 UID/GID，脚本会拒绝用不匹配的非 root 用户继续。Compose 运行密钥、OAuth 文件和 Cookie 放在 `channels/runtime/`，该目录和 `.env` 均不会进入 Docker build context 或 Git。
 
@@ -39,7 +39,9 @@ sudo ./deploy/install-cliproxyapi-systemd.sh
 sudo ./deploy/server-ops/check-services.sh
 ```
 
-Lite2API 安装器会创建缺失的服务用户、目录、环境文件与初始配置。两个安装器都只从选定 Git 提交的 detached worktree 构建；dirty/untracked 文件不会进入产物。CLIProxyAPI 只接受子模块提交 `785b00c3127eea6aa207f1207ead8a2aa93690a3`，在隔离 worktree 中应用补丁，自动生成或复用两把独立密钥，并验证管理鉴权和模型鉴权。任一健康检查失败都会恢复升级前的文件和服务状态；root-only 回滚快照分别保存在 `/var/lib/lite2api-rollbacks/` 与 `/var/lib/cliproxyapi-rollbacks/`，不放在服务可写目录内。
+Lite2API 安装器会创建缺失的服务用户、目录、环境文件与初始配置。两个安装器都只从选定 Git 提交的 detached worktree 构建；dirty/untracked 文件不会进入产物。CLIProxyAPI 只接受子模块提交 `785b00c3127eea6aa207f1207ead8a2aa93690a3`，在隔离 worktree 中应用补丁，自动生成或复用两把独立密钥，并验证管理鉴权和模型鉴权。
+
+已有启用来源时，先按实际模型和接口准备 `/etc/lite2api/acceptance.json`，或显式设置 `LITE2API_ACCEPTANCE_CASES`，再运行安装器。核心升级检查完整调用与访问边界；已在使用的 OAuth 适配器升级还要求清单通过 `expect_account` 指认受影响的连接，避免备用来源掩盖升级失败。验收失败会恢复旧二进制、unit、配置、环境和必要状态；Lite2API 同时恢复自定义绝对 `client_keys_path` 文件及原活动/启用状态。没有启用来源的首次安装只证明 bootstrap 存活，不能宣称模型服务可用。root-only 回滚快照分别保存在 `/var/lib/lite2api-rollbacks/` 与 `/var/lib/cliproxyapi-rollbacks/`，不放在服务可写目录内；具体验收与备份恢复命令见 [运维说明](../docs/OPERATIONS.md)。
 
 - 服务：`cliproxyapi.service`
 - 配置：`/etc/cliproxyapi/config.yaml`
@@ -79,6 +81,8 @@ CLIProxyAPI 生产版本必须显式修改子模块 revision 和 Compose 的 `VE
 生产环境为 CLIProxyAPI 设置独立的 `CLIPROXYAPI_MANAGEMENT_KEY`，同时注入 Lite2API 与 CLIProxyAPI。CLIProxyAPI 仍只在宿主发布 `127.0.0.1:45682`，管理面板保持关闭；Lite 管理页仅代理 Codex、Claude、Gemini CLI、Antigravity 和 Kimi 的授权链接、回调、状态与脱敏凭据列表。临时 OAuth callback forwarder 在补丁中固定绑定 adapter 自身的 `127.0.0.1`，Compose 不发布这些回调端口；容器部署统一使用 Lite 管理页的“粘贴 localhost 回调”或设备码流程，不直接开启上游管理 Web UI。授权成功后，Compose 将凭据写入 `channels/runtime/cliproxyapi/auths/`，systemd 将其写入 `/var/lib/cliproxyapi/auths/`；浏览器无法读取管理密钥、Token 或凭据文件。
 
 认证池和路由池是两个层次：一个 `cliproxy-oauth` 路由连接可复用多个 OAuth 凭据。成功登录后应在“渠道账号”看到新的脱敏凭据和统计，路由连接数量不增加是正常且节省资源的行为。认证账号优先级使用高值优先，先选最高的可用优先级层；同级可轮询或固定首选，禁用、鉴权失败、额度/模型冷却和上游错误会自动换号。Lite 外层显式路由默认严格按 `targets[]` 顺序，也可在“账号策略”中改为外层 priority 小值优先、最少负载、轮询或会话粘滞；两层不要用相反的 priority 方向互相推断。
+
+接入后可在渠道对话窗或 `POST /admin/api/accounts/verify` 对指定来源、具体模型、接口及 `call/stream/tools/image_input` 进行验收，分别检查 `ok`、`completed` 和 `evidence_saved`。目录与登录成功只形成各自的声明或状态；验证结果绑定来源身份、上游模型、接口、推理强度和实际凭据。共享池一次成功只验证实际命中的公开凭据，不能推广到整个池；工具验收会回传无害结果并固定原凭据完成第二跳；图片验收会发送内置 PNG 的原生多模态请求。失败不自动等于“不支持”，来源或模型映射变化后需要重新验证。图片使用和流式工具组合不能由单项验收推定。
 
 Claude 官方与 Antigravity 会发布部分同名 Claude 模型。Lite2API 因此在 OAuth 完成及账号导入时分别把凭据收敛到 `claude-code/` 和 `antigravity/` 模型命名空间；这不是展示别名，而是 CLIProxyAPI 的凭据级隔离边界。若手工放置 auth 文件，也必须写入对应的 `prefix`，否则 `claude-code/...` 模型不会注册，或未限定前缀的同名模型会混入另一 provider 的账号池。可通过 `GET /v1/models` 验证带前缀模型已出现，再进行会消耗额度的生成测试。
 

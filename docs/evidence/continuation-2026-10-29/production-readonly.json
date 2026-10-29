@@ -1,0 +1,71 @@
+{
+  "checks": [
+    {
+      "check": "liveness",
+      "http_status": 200,
+      "summary": {
+        "status": "ok",
+        "liveness": null,
+        "readiness": null,
+        "version": null
+      }
+    },
+    {
+      "check": "health",
+      "http_status": 200,
+      "summary": {
+        "status": "unknown",
+        "liveness": "ok",
+        "readiness": null,
+        "version": null
+      }
+    },
+    {
+      "check": "anonymous_models",
+      "http_status": 401
+    },
+    {
+      "check": "client_models",
+      "http_status": 200,
+      "model_count": 53
+    },
+    {
+      "check": "admin_as_client",
+      "http_status": 401
+    },
+    {
+      "check": "oauth_state",
+      "http_status": 200,
+      "accounts": [
+        {
+          "id": "f4a4c7dc99a43610",
+          "provider": "anthropic",
+          "status": "active",
+          "ready": true,
+          "health_code": null
+        },
+        {
+          "id": "08a41398ec92b336",
+          "provider": "antigravity",
+          "status": "active",
+          "ready": true,
+          "health_code": null
+        },
+        {
+          "id": "1d1a1dea063ee3ab",
+          "provider": "antigravity",
+          "status": "reauth_required",
+          "ready": false,
+          "health_code": "reauth_required"
+        },
+        {
+          "id": "81c1278c15019737",
+          "provider": "codex",
+          "status": "reauth_required",
+          "ready": false,
+          "health_code": "reauth_required"
+        }
+      ]
+    }
+  ]
+}

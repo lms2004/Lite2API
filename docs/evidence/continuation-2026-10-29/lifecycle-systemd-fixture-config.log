@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "scope": "real_systemd_private_state_fixture_upstream",
+  "error": "bounded lifecycle condition did not complete; private_unit_diagnostic={\"time\":\"2026-10-29T06:32:13.200146454Z\",\"level\":\"ERROR\",\"msg\":\"startup failed\",\"error\":\"account \\\"lifecycle-fixture\\\" is enabled but has no API key\"}\nlite2api-lifecycle-6a7c9adb694c35c2.service: Main process exited, code=exited, status=1/FAILURE\nlite2api-lifecycle-6a7c9adb694c35c2.service: Failed with result 'exit-code'.\nlite2api-lifecycle-6a7c9adb694c35c2.service: Scheduled restart job, restart counter is at 2.\nStarted lite2api-lifecycle-6a7c9adb694c35c2.service - /var/lib/lite2api-lifecycle-ipmbepcl/lite2api -config /var/lib/lite2api-lifecycle-ipmbepcl/state/config.json.\n{\"time\":\"2026-10-29T06:32:16.591424283Z\",\"level\":\"ERROR\",\"msg\":\"startup failed\",\"error\":\"account \\\"lifecycle-fixture\\\" is enabled but has no API key\"}\nlite2api-lifecycle-6a7c9adb694c35c2.service: Main process exited, code=exited, status=1/FAILURE\nlite2api-lifecycle-6a7c9adb694c35c2.service: Failed with result 'exit-code'.\n"
+}

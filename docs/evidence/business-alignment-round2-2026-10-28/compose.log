@@ -1,0 +1,6 @@
+test_consistent_snapshot_roundtrip_and_failed_capture_resume (__main__.ComposeSnapshotLifecycle.test_consistent_snapshot_roundtrip_and_failed_capture_resume) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 20.896s
+
+OK

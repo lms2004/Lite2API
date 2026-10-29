@@ -95,6 +95,17 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 		writeAPIErrorCode(w, http.StatusBadRequest, "selected account does not support a chat operation", "invalid_request_error", "prompt_test_operation_unsupported")
 		return
 	}
+	upstreamModel := account.upstreamModel(input.Model, "")
+	if upstreamModel == "*" || (!account.supports(input.Model) && !config.AccountSupportsTargetModel(account.Config, input.Model)) ||
+		!config.AccountSupportsTargetModel(account.Config, upstreamModel) {
+		writeAPIErrorCode(w, http.StatusBadRequest, "selected account does not declare this model", "invalid_request_error", "prompt_test_model_unsupported")
+		return
+	}
+	releaseAdmission, admitted := g.admitMaintenanceCall(w, state)
+	if !admitted {
+		return
+	}
+	defer releaseAdmission()
 	if !account.tryAcquire() {
 		w.Header().Set("Retry-After", "1")
 		writeAPIErrorCode(w, http.StatusTooManyRequests, "selected account has reached its concurrency limit", "rate_limit_error", "prompt_test_concurrency_limit")
@@ -102,7 +113,6 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 	}
 	defer state.scheduler.releaseAccount(account)
 
-	upstreamModel := account.upstreamModel(input.Model, "")
 	path := "/v1/chat/completions"
 	payload := map[string]any{"model": upstreamModel, "messages": input.Messages, "stream": false}
 	if operation == config.OperationAnthropic {
@@ -130,6 +140,13 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 	if input.MaxTokens > 0 {
 		payload["max_tokens"] = input.MaxTokens
 	}
+	if _, fast := config.ParseRouteModelProfile(input.Model); fast {
+		if operation == config.OperationAnthropic {
+			writeAPIErrorCode(w, http.StatusBadRequest, "fast execution profiles are not mapped to the Messages interface", "invalid_request_error", "prompt_test_profile_unsupported")
+			return
+		}
+		payload["service_tier"] = "priority"
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "failed to encode test request", "gateway_error")
@@ -143,6 +160,7 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 	upstreamInbound.URL = &url.URL{Path: path}
 	upstreamInbound.Header = make(http.Header)
 	requestID := requestID()
+	verification := newCapabilityVerification(account, input.Model, upstreamModel, operation, "call", "auto", "", requestID)
 	started := time.Now()
 	resp, err := g.doUpstream(testContext, state, account, upstreamInbound, body, requestID)
 	if err != nil {
@@ -160,27 +178,23 @@ func (g *Gateway) servePromptTest(w http.ResponseWriter, r *http.Request, state 
 		writeAPIErrorCode(w, http.StatusBadGateway, "upstream test response exceeded 8 MiB", "upstream_error", "prompt_test_response_too_large")
 		return
 	}
-	if resp.StatusCode >= 400 {
-		var upstream any
-		if json.Unmarshal(responseBody, &upstream) != nil {
-			upstream = strings.TrimSpace(string(responseBody))
-		}
-		writeJSON(w, resp.StatusCode, map[string]any{
-			"error":    map[string]any{"message": "upstream returned " + resp.Status, "type": "upstream_error", "code": "prompt_test_upstream_status"},
-			"upstream": upstream,
-		})
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeAPIErrorCode(w, http.StatusBadGateway, "upstream test request was rejected; inspect account authorization and availability", "upstream_error", "prompt_test_upstream_status")
 		return
 	}
 	responseBody = bytes.TrimSpace(responseBody)
-	if !json.Valid(responseBody) {
-		writeAPIErrorCode(w, http.StatusBadGateway, "upstream returned a non-JSON response", "upstream_error", "prompt_test_invalid_response")
+	if err := validateBufferedCompletion(operation, path, responseBody); err != nil {
+		writeAPIErrorCode(w, http.StatusBadGateway, "upstream did not return a complete protocol result", "upstream_error", "prompt_test_invalid_response")
 		return
 	}
+	verification.credential = selectedOAuthCredential(account.Config, resp, "")
+	verificationResult := g.finishCapabilityVerification(verification, true, true, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"account_id":     input.AccountID,
 		"upstream_model": upstreamModel,
 		"request_id":     requestID,
 		"latency_ms":     latency.Milliseconds(),
 		"response":       json.RawMessage(responseBody),
+		"verification":   verificationResult,
 	})
 }

@@ -1,0 +1,51 @@
+{
+  "observed_at": "2026-10-29T08:56:33.557605+00:00",
+  "scope": "adapter_status_no_raw_messages",
+  "accounts": [
+    {
+      "auth_index": "1d1a1dea063ee3ab",
+      "provider": "antigravity",
+      "status": "error",
+      "disabled": false,
+      "unavailable": true,
+      "next_retry_after": null,
+      "error_markers": [],
+      "error_types": []
+    },
+    {
+      "auth_index": "08a41398ec92b336",
+      "provider": "antigravity",
+      "status": "error",
+      "disabled": false,
+      "unavailable": false,
+      "next_retry_after": null,
+      "error_markers": [],
+      "error_types": []
+    },
+    {
+      "auth_index": "f4a4c7dc99a43610",
+      "provider": "claude",
+      "status": "error",
+      "disabled": false,
+      "unavailable": false,
+      "next_retry_after": null,
+      "error_markers": [
+        "permission"
+      ],
+      "error_types": [
+        "error",
+        "permission_error"
+      ]
+    },
+    {
+      "auth_index": "81c1278c15019737",
+      "provider": "codex",
+      "status": "error",
+      "disabled": false,
+      "unavailable": true,
+      "next_retry_after": null,
+      "error_markers": [],
+      "error_types": []
+    }
+  ]
+}

@@ -46,7 +46,7 @@ func newTestGateway(t testing.TB, accounts []config.Account, routes map[string]c
 func BenchmarkGatewayParallel(b *testing.B) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(b, []config.Account{{ID: "bench", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 0, Weight: 1, Enabled: true}}, nil)
@@ -112,7 +112,7 @@ func TestGatewayRejectsMalformedQueryBeforeSelectingUpstream(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -143,7 +143,7 @@ func TestGatewayRewritesModelAndAuthenticates(t *testing.T) {
 			t.Errorf("model=%v", body["model"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "upstream-secret", Models: []string{"alias"}, ModelMap: map[string]string{"alias": "real-model"}, Concurrency: 2, Weight: 1, Enabled: true}}, nil)
@@ -163,7 +163,7 @@ func TestGatewayRewritesModelAndAuthenticates(t *testing.T) {
 func TestGatewayRecordsUsageAndModalities(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":3}},"choices":[{"message":{"content":"ok"}}]}`))
+		_, _ = w.Write([]byte(`{"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16,"prompt_tokens_details":{"cached_tokens":3}},"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{ID: "main", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "upstream-secret", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
@@ -191,7 +191,7 @@ func TestGatewayFailsOverAfterDefinitiveRejection(t *testing.T) {
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		secondCalls.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}]}`))
 	}))
 	defer second.Close()
 	accounts := []config.Account{{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 0, Concurrency: 1, Weight: 1, Enabled: true}, {ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "test", Models: []string{"m"}, Priority: 1, Concurrency: 1, Weight: 1, Enabled: true}}
@@ -224,7 +224,7 @@ func TestGatewayDoesNotReplayGenerativePostAfterAmbiguousStatus(t *testing.T) {
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		secondCalls.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer second.Close()
 	accounts := []config.Account{
@@ -252,7 +252,7 @@ func TestGatewayFailsOverGenerativePostOnDefinitivePaymentRejection(t *testing.T
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		secondCalls.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer second.Close()
 	accounts := []config.Account{
@@ -516,7 +516,7 @@ func TestTinyChunkedBodyLeaseIsReleasedBeforeLongStream(t *testing.T) {
 	releaseStream := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: first\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n"))
 		w.(http.Flusher).Flush()
 		select {
 		case <-streamStarted:
@@ -524,7 +524,7 @@ func TestTinyChunkedBodyLeaseIsReleasedBeforeLongStream(t *testing.T) {
 			close(streamStarted)
 		}
 		<-releaseStream
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -576,7 +576,7 @@ func TestTinyChunkedBodyLeaseIsReleasedBeforeLongStream(t *testing.T) {
 
 func TestQueuedLargeBodyRemainsChargedUntilUpstreamSubmission(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -649,7 +649,7 @@ func TestQueuedLargeBodyRemainsChargedUntilUpstreamSubmission(t *testing.T) {
 func TestLegalFortyMiBRequestIsNotRejectedByAmplificationAccounting(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -710,7 +710,7 @@ func TestRewrittenAttemptBodyIsIncludedInMemoryLease(t *testing.T) {
 			t.Errorf("upstream framing content_length=%d body=%d transfer_encoding=%v", r.ContentLength, len(upstreamBody), r.TransferEncoding)
 		}
 		observed.Store(g.bodyBytes.Load())
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	account := config.Account{
@@ -791,6 +791,12 @@ func TestTransportErrorRetainsAttemptLeaseUntilAsynchronousBodyClose(t *testing.
 	})
 	transport := &delayedCloseRoundTripper{returned: make(chan struct{}), release: make(chan struct{})}
 	g.state.Load().clients["delayed"] = &http.Client{Transport: transport}
+	var releaseOnce sync.Once
+	releaseTransport := func() { releaseOnce.Do(func() { close(transport.release) }) }
+	defer releaseTransport()
+	// These waits bound test scheduling, not the upload/ownership contract.
+	// Race instrumentation may need more than a second to scan the 1MiB input.
+	const schedulingTimeout = 5 * time.Second
 	payload := `{"model":"alias","padding":"` + strings.Repeat("x", 1<<20) + `"}`
 	response := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -800,24 +806,24 @@ func TestTransportErrorRetainsAttemptLeaseUntilAsynchronousBodyClose(t *testing.
 	}()
 	select {
 	case <-transport.returned:
-	case <-time.After(time.Second):
+	case <-time.After(schedulingTimeout):
 		t.Fatal("custom transport did not return its error")
 	}
 	if retained, minimum := g.bodyBytes.Load(), int64(len(payload))*3-(64<<10); retained < minimum {
-		close(transport.release)
+		releaseTransport()
 		<-done
 		t.Fatalf("attempt lease dropped before transport Body.Close: retained=%d want_at_least=%d", retained, minimum)
 	}
 	select {
 	case <-done:
-		close(transport.release)
+		releaseTransport()
 		t.Fatal("handler returned before transport relinquished request body ownership")
 	default:
 	}
-	close(transport.release)
+	releaseTransport()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(schedulingTimeout):
 		t.Fatal("handler did not resume after asynchronous Body.Close")
 	}
 	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "uncertain_submission") {
@@ -834,7 +840,7 @@ func TestGatewayAppliesFastProfileAfterAdmission(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		serviceTier, _ = body["service_tier"].(string)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -1035,7 +1041,7 @@ func TestStreamIdleWatchdogDoesNotTreatSlowDownstreamAsUpstreamIdle(t *testing.T
 
 func TestDownstreamWriteFailureDoesNotTripUpstreamBreaker(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{
@@ -1086,7 +1092,7 @@ func TestRouteObservationFromOldRuntimeCannotPolluteReplacementRoute(t *testing.
 	}))
 	defer oldUpstream.Close()
 	newUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer newUpstream.Close()
 	account := config.Account{
@@ -1151,7 +1157,7 @@ func TestUpstreamClientRejectionIsNeutralForRouteReadiness(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
-			_, _ = w.Write([]byte(`{"ok":true}`))
+			_, _ = w.Write([]byte(completedChat))
 			return
 		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -1206,7 +1212,7 @@ func TestRetryableErrorBodyHasIdleBoundaryAndReleasesLease(t *testing.T) {
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		secondCalls.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer second.Close()
 	accounts := []config.Account{
@@ -1302,9 +1308,10 @@ func TestCredentialPinIsTrustedAndSelectedCredentialIsRecorded(t *testing.T) {
 		}
 		w.Header().Set(credentialSelectedHeader, selectedCredential)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+		_, _ = w.Write([]byte(completedChat))
 	}))
 	defer upstream.Close()
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", upstream.URL)
 
 	g := newTestGateway(t, []config.Account{{
 		ID: "pool", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: upstream.URL + "/v1", APIKey: "test",
@@ -1345,7 +1352,7 @@ func TestCredentialRetrySafeHeaderAllowsTrustedFailover(t *testing.T) {
 			second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				fallbackCalls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+				_, _ = w.Write([]byte(completedChat))
 			}))
 			defer second.Close()
 
@@ -1468,8 +1475,8 @@ func TestRewriteRequestAppliesTargetReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "reasoning_effort") {
-		t.Fatalf("none should remove reasoning_effort: %s", body)
+	if !strings.Contains(string(body), `"reasoning_effort":"none"`) {
+		t.Fatalf("none must explicitly disable reasoning: %s", body)
 	}
 }
 
@@ -1497,7 +1504,7 @@ func TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel(t *testing.T) {
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&secondBody)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}]}`))
 	}))
 	defer second.Close()
 	accounts := []config.Account{
@@ -1567,7 +1574,7 @@ func TestAuthenticationFailureTripsCircuit(t *testing.T) {
 		http.Error(w, "bad token", http.StatusUnauthorized)
 	}))
 	defer first.Close()
-	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) }))
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(completedChat)) }))
 	defer second.Close()
 	accounts := []config.Account{{ID: "first", Type: "openai", BaseURL: first.URL + "/v1", APIKey: "bad", Models: []string{"m"}, Priority: 0, Concurrency: 1, Weight: 1, Enabled: true}, {ID: "second", Type: "openai", BaseURL: second.URL + "/v1", APIKey: "ok", Models: []string{"m"}, Priority: 1, Concurrency: 1, Weight: 1, Enabled: true}}
 	g := newTestGateway(t, accounts, map[string]config.Route{"m": {Accounts: []string{"first", "second"}, Strategy: "priority"}})
@@ -1589,11 +1596,11 @@ func TestStreamingHoldsConcurrencySlot(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		_, _ = w.Write([]byte("data: first\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n"))
 		w.(http.Flusher).Flush()
 		close(started)
 		<-release
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer upstream.Close()
 	g := newTestGateway(t, []config.Account{{ID: "stream", Type: "openai", BaseURL: upstream.URL + "/v1", APIKey: "test", Models: []string{"m"}, Concurrency: 1, Weight: 1, Enabled: true}}, nil)
@@ -1650,7 +1657,7 @@ func TestStreamIdleTimeoutReleasesSlot(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		_, _ = w.Write([]byte("data: first\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n"))
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	}))

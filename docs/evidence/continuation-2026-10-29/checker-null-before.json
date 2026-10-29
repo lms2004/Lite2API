@@ -1,0 +1,15 @@
+{
+  "scope": "synthetic local response; no upstream call",
+  "cases": [
+    {
+      "stream": false,
+      "error_type": "TypeError",
+      "error": "'NoneType' object is not iterable"
+    },
+    {
+      "stream": true,
+      "error_type": "TypeError",
+      "error": "'NoneType' object is not iterable"
+    }
+  ]
+}

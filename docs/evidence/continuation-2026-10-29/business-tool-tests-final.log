@@ -1,0 +1,27 @@
+test_client_timeout_kills_tool_process_group (__main__.CompletionChecks.test_client_timeout_kills_tool_process_group) ... /usr/lib/python3.12/traceback.py:241: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='UTF-8'>
+  tb.tb_frame.clear()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/traceback.py:241: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  tb.tb_frame.clear()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_incomplete_json_and_stream_are_not_success (__main__.CompletionChecks.test_incomplete_json_and_stream_are_not_success) ... ok
+test_unknown_only_is_rejected_before_startup (__main__.CompletionChecks.test_unknown_only_is_rejected_before_startup) ... ok
+test_cli_writes_report_and_returns_failure_for_incomplete_provider (__main__.ExitStatusIntegration.test_cli_writes_report_and_returns_failure_for_incomplete_provider) ... FAIL
+test_empty_membership_does_not_implicitly_expand (__main__.SourceSelection.test_empty_membership_does_not_implicitly_expand) ... ok
+test_explicit_membership_and_credential_are_preserved (__main__.SourceSelection.test_explicit_membership_and_credential_are_preserved) ... ok
+test_logical_capability_and_negative_evidence (__main__.SourceSelection.test_logical_capability_and_negative_evidence) ... ok
+test_wildcard_respects_enabled_operation_and_requested_model (__main__.SourceSelection.test_wildcard_respects_enabled_operation_and_requested_model) ... ok
+
+======================================================================
+FAIL: test_cli_writes_report_and_returns_failure_for_incomplete_provider (__main__.ExitStatusIntegration.test_cli_writes_report_and_returns_failure_for_incomplete_provider)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 130, in test_cli_writes_report_and_returns_failure_for_incomplete_provider
+    self.assertEqual(result.returncode, 0 if complete else 1, result.stderr)
+AssertionError: 1 != 0 : 
+
+----------------------------------------------------------------------
+Ran 8 tests in 7.595s
+
+FAILED (failures=1)

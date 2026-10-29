@@ -31,7 +31,7 @@ func (s *ClientKeyStore) validCredential(raw string, legacy map[[sha256.Size]byt
 		if subtle.ConstantTimeCompare(candidate[:], meta.hash[:]) != 1 {
 			return false
 		}
-		return meta.expiresUnix <= 0 || time.Now().Unix() < meta.expiresUnix
+		return meta.record.ExpiresAt == "" || time.Now().Unix() < meta.expiresUnix
 	}
 	candidate := sha256.Sum256([]byte(raw))
 	_, ok := legacy[candidate]

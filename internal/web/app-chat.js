@@ -17,7 +17,7 @@ globalThis.Lite2APIChat = function createChat(context) {
   } = context;
   function channelChatAccounts() {
     return (resourcesState.data?.config?.accounts || []).filter(
-      (account) => account.enabled !== false && Core.channelChatSupported(account),
+      (account) => account.enabled !== false && Core.channelVerificationSupported(account),
     );
   }
 
@@ -46,7 +46,7 @@ globalThis.Lite2APIChat = function createChat(context) {
     const container = $('channelChatMessages'),
       items = [...chatState.channelChatMessages];
     if (chatState.channelChatPending)
-      items.push({ role: 'pending', content: '上游正在生成回复…', at: new Date().toISOString() });
+      items.push({ role: 'pending', content: chatState.channelVerificationPending ? '正在用固定样例验收所选组合…' : '上游正在生成回复…', at: new Date().toISOString() });
     container.setAttribute('aria-busy', String(chatState.channelChatPending));
     if (!items.length) {
       setHTML(
@@ -78,6 +78,11 @@ globalThis.Lite2APIChat = function createChat(context) {
               );
             if (message.finish_reason) meta.push(message.finish_reason);
             if (message.request_id) meta.push(`请求 ${message.request_id}`);
+            if (message.verification) {
+              const check = message.verification;
+              meta.push(`${check.operation} · ${check.feature} · ${check.reasoning_effort || 'auto'}${check.credential_id ? ' · 凭据 ' + check.credential_id : ''}`);
+              meta.push(check.evidence_saved ? `验收依据已保存 · ${check.observed_at}` : `调用已完成，验收依据未保存：${check.message || '请刷新来源后重新验证'}`);
+            }
           }
           const raw = message.raw
             ? `<details><summary>查看原始响应</summary><pre>${escapeHTML(message.raw)}</pre></details>`
@@ -102,9 +107,17 @@ globalThis.Lite2APIChat = function createChat(context) {
     );
     if (resetModel || !modelInput.value.trim())
       modelInput.value = accountTestModel(account) || models[0] || '';
-    const protocol = account?.type === 'anthropic' ? 'Anthropic Messages' : 'OpenAI Chat Completions';
+    const protocol = !Core.channelChatSupported(account) ? '此连接仅支持接口验收' : account?.type === 'anthropic' ? 'Anthropic Messages' : 'OpenAI Chat Completions';
+    const pool = account?.adapter_id === 'cli-proxy-api';
+    $('channelVerifyCredentialField').hidden = !pool;
+    const selectedCredential = $('channelVerifyCredential').value;
+    setHTML($('channelVerifyCredential'), '<option value="">自动选择，记录实际账号</option>' +
+      (pool ? resourcesState.oauth || [] : []).filter((item) => !item.disabled)
+        .map((item) => `<option value="${escapeHTML(item.id)}">${escapeHTML(item.identity || item.id)} · ${escapeHTML(item.provider || '')}</option>`).join(''));
+    if ([...$('channelVerifyCredential').options].some((option) => option.value === selectedCredential))
+      $('channelVerifyCredential').value = selectedCredential;
     $('channelChatTarget').textContent = account
-      ? `直连 ${account.name || account.id} · ${protocol} · ${modelInput.value.trim() || '请填写模型'}。测试会产生真实上游调用并消耗额度。`
+      ? `直连 ${account.name || account.id} · 聊天使用 ${protocol} · ${modelInput.value.trim() || '请填写模型'}。验收使用所选接口和固定样例，工具项执行一次往返；均会真实调用并消耗额度。`
       : '当前没有可聊天测试的已启用渠道。';
   }
 
@@ -124,10 +137,12 @@ globalThis.Lite2APIChat = function createChat(context) {
       'channelChatInput',
       'clearChannelChat',
       'sendChannelChat',
+      'channelVerifyOperation', 'channelVerifyFeature', 'channelVerifyEffort', 'channelVerifyCredential', 'verifyChannelCapability',
     ])
       $(id).disabled = busy;
     $('stopChannelChat').hidden = !busy;
     $('sendChannelChat').textContent = busy ? '等待回复' : '发送测试';
+    if (!busy) $('sendChannelChat').disabled = !Core.channelChatSupported(configuredAccount($('channelChatAccount').value));
   }
 
   function resetChannelChat() {
@@ -259,6 +274,7 @@ globalThis.Lite2APIChat = function createChat(context) {
         total_tokens: parsed.total_tokens,
         finish_reason: parsed.finish_reason,
         request_id: result.request_id || parsed.response_id,
+        verification: result.verification,
         raw: channelChatRawPreview(result.response),
       });
       toast(`${account.name || account.id} 回复成功 · ${number(result.latency_ms)} ms`);
@@ -281,8 +297,42 @@ globalThis.Lite2APIChat = function createChat(context) {
     }
   }
 
+  async function verifyChannelCapability() {
+    if (chatState.channelChatPending) return;
+    const account = configuredAccount($('channelChatAccount').value), model = $('channelChatModel').value.trim();
+    if (!account || !model) { toast('请选择连接并填写模型', true); return; }
+    const generation = ++chatState.channelChatGeneration, controller = new AbortController();
+    chatState.channelChatController = controller;
+    chatState.channelVerificationPending = true;
+    setChannelChatBusy(true);
+    renderChannelChat();
+    try {
+      const result = await request('/accounts/verify', {
+        method: 'POST', timeout: 125000, signal: controller.signal,
+        body: JSON.stringify({ account_id: account.id, model, operation: $('channelVerifyOperation').value,
+          feature: $('channelVerifyFeature').value, reasoning_effort: $('channelVerifyEffort').value,
+          credential_id: account.adapter_id === 'cli-proxy-api' ? $('channelVerifyCredential').value : '' }),
+      });
+      if (generation !== chatState.channelChatGeneration) return;
+      chatState.channelChatMessages.push({ role: result.ok && result.completed ? 'assistant' : 'error',
+        content: `${result.ok && result.completed ? '所选调用组合完成验收' : '所选调用组合尚未通过验收'}：${account.name || account.id} · ${model} · ${result.operation || $('channelVerifyOperation').value} · ${result.feature || $('channelVerifyFeature').value}。${result.message || ''}${!result.ok ? result.evidence_saved ? '；本次失败依据已保存。' : '；本次依据未保存，请刷新来源后重试。' : ''}`,
+        verification: result, included: false, at: new Date().toISOString(), request_id: result.request_id });
+    } catch (error) {
+      if (generation === chatState.channelChatGeneration)
+        chatState.channelChatMessages.push({ role: 'error', content: error.message, included: false, at: new Date().toISOString() });
+    } finally {
+      if (generation === chatState.channelChatGeneration) {
+        chatState.channelChatController = null;
+        chatState.channelVerificationPending = false;
+        setChannelChatBusy(false);
+        renderChannelChat();
+      }
+    }
+  }
+
   function bind() {
     $('channelChatForm').addEventListener('submit', sendChannelChat);
+    $('verifyChannelCapability').addEventListener('click', verifyChannelCapability);
     $('channelChatAccount').addEventListener('change', () => {
       chatState.channelChatGeneration++;
       chatState.channelChatMessages = [];

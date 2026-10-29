@@ -29,6 +29,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     selectedRoute: '',
     routeBaseline: {},
     routeServerFingerprint: '',
+    configRevision: '',
     routeConflict: false,
     routesDirty: false,
     routeCreateAliasTouched: false,
@@ -38,8 +39,11 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
   const customRouteModelValue = '__lite2api_custom_model__';
   let saving = false;
 
-  function receiveSnapshot(serverRoutes = {}) {
+  function receiveSnapshot(serverRoutes = {}, revision = '') {
     const fingerprint = Core.routeFingerprint(serverRoutes);
+    if (routesState.routesDirty && revision && routesState.configRevision && revision !== routesState.configRevision)
+      routesState.routeConflict = true;
+    if (!routesState.routesDirty) routesState.configRevision = revision;
     if (!routesState.routesDirty && fingerprint !== routesState.routeServerFingerprint) {
       routesState.routeDraft = structuredClone(serverRoutes);
       routesState.routeBaseline = structuredClone(serverRoutes);
@@ -261,7 +265,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     return {
       ok: resolution.ok,
       target: { account: account.id, model, reasoning_effort: '' },
-      label: resolution.verified ? model : `${model} · 未声明目录`,
+      label: resolution.declared ? `${model} · 目录声明` : `${model} · 未声明目录`,
     };
   }
 
@@ -390,7 +394,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
       ? route.model
         ? `将解析为 ${resolution.upstream_model}`
         : resolution.verified
-          ? '模型已由连接声明'
+          ? '已验证指定接口'
           : resolution.reason
       : resolution.reason;
     if (disabled) reason = `连接已停用；${reason}`;
@@ -584,6 +588,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
       routesState.routeDraft = serverRoutes;
       routesState.routeBaseline = structuredClone(serverRoutes);
       routesState.routeServerFingerprint = Core.routeFingerprint(serverRoutes);
+      routesState.configRevision = resourcesState.data?.config_revision || '';
       routesState.routeConflict = false;
     }
   }
@@ -865,6 +870,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     routesState.routeDraft = routes;
     routesState.routeBaseline = structuredClone(routes);
     routesState.routeServerFingerprint = Core.routeFingerprint(routes);
+    routesState.configRevision = resourcesState.data?.config_revision || '';
     routesState.routeConflict = false;
     routesState.routesDirty = false;
     routesState.selectedRoute =
@@ -919,7 +925,7 @@ globalThis.Lite2APIRoutes = function createRoutes(context) {
     saving = true;
     renderRouteChangeState(validation);
     try {
-      await request('/routes', { method: 'PUT', body: JSON.stringify(routes) });
+      await request('/routes', { method: 'PUT', body: JSON.stringify(routes), headers: { 'If-Match': `"${routesState.configRevision}"` } });
       // The operator can continue editing while the save is in flight. Only
       // acknowledge the submitted snapshot; never erase newer local changes.
       if (draftFingerprint === Core.routeFingerprint(routesState.routeDraft))

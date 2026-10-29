@@ -1,0 +1,86 @@
+{
+  "observed_at": "2026-10-29T06:35:49.160179+00:00",
+  "scope": "isolated_lifecycle_real_age_chroot_docker_systemd_fixture_upstreams",
+  "production_service_mutations": false,
+  "external_provider_requests": 0,
+  "fix": "Force-close active HTTP connections when graceful Shutdown exceeds its deadline.",
+  "tests": [
+    {
+      "name": "shutdown Go race regression",
+      "exit_code": 0,
+      "tests": 2,
+      "evidence": "lifecycle-shutdown-go.jsonl"
+    },
+    {
+      "name": "deployment lifecycle review",
+      "exit_code": 0,
+      "tests": 8,
+      "evidence": "lifecycle-review.log"
+    },
+    {
+      "name": "real age restore and private Docker runtime",
+      "exit_code": 0,
+      "tests": 8,
+      "skipped": 0,
+      "evidence": "lifecycle-restore.log"
+    },
+    {
+      "name": "private chroot real installer upgrade and rollback",
+      "exit_code": 0,
+      "cases": 4,
+      "evidence": "lifecycle-upgrade.json"
+    },
+    {
+      "name": "real Docker producers snapshot and failed capture recovery",
+      "exit_code": 0,
+      "tests": 1,
+      "evidence": "lifecycle-compose.log"
+    },
+    {
+      "name": "real systemd transient service lifecycle",
+      "exit_code": 0,
+      "cases": 5,
+      "evidence": "lifecycle-systemd.json"
+    }
+  ],
+  "binary": {
+    "path": "/tmp/lite2api-continuation-lifecycle",
+    "sha256": "126d690fc5b862da12aa763db4bfac8d23bf2734657c70b0502b50d2748f92c5",
+    "build_command": "GOTOOLCHAIN=local CGO_ENABLED=0 go build -p 2 -trimpath -o /tmp/lite2api-continuation-lifecycle ./cmd/lite2api",
+    "scope_note": "Built at approximately 2026-10-29T06:29Z while other owners continued unrelated repairs; final release needs final-build validation."
+  },
+  "dependencies": {
+    "age_version": "1.1.1",
+    "age_binary_sha256": "529450dfeaf3055cb24d76789d0b1f5eb8cd23e03dc4add64f84776df1272b02",
+    "docker_version": "29.1.3"
+  },
+  "source_sha256": {
+    "internal/gateway/server.go": "c9eac33e0e87dc166d83251f585d13e4951014e4be3696be878426daa364ddaf",
+    "internal/gateway/server_lifecycle_test.go": "95abc6fbc6572d835024f6b27d4900e0bd4a4a721d939540c91be6ee8a0fc237",
+    "deploy/systemd_lifecycle_test.py": "ec442337a85930ecf14309b3dd57d35785917d1b44dbd375d1049351cfd05745",
+    "deploy/restore_lifecycle_test.py": "9a395174a75dc0911ba624f6da3f3aa4e5f551d334008e1e5d5eef06ab9b9c60",
+    "deploy/upgrade_lifecycle_test.py": "4c662195a801e1a53702a6669445ba17acbdccc3a96fb428a0d78c598c59f19a",
+    "deploy/compose_snapshot_test.py": "74951a5a06dfd644832d640de57d0eb5efa8a7013f6c14519735f618d15e0d98",
+    "deploy/state_archive.py": "809fd55bb63c7df9e8e4bd94153cafdaf41cc3582ec9471403b08587c1a15c98",
+    "deploy/verify_service.py": "cbf5dca196c1f9b317d33dda8a9e8a520b7c5d3114fe0dcc2932eac1fa79e8ee",
+    "deploy/install-lite2api-systemd.sh": "2e0d7f61c4956201e3aa715020bbc3a5c21e52b31d539c829ef1f63b5907bc57",
+    "deploy/lite2api.service": "8a001cf67614878b13c69b79194d24ca1e9c4b28b89cb02e9cc355e66dedc42a"
+  },
+  "retained_failed_attempts": [
+    "lifecycle-restore-initial-concurrent-build.log",
+    "lifecycle-systemd-initial.json",
+    "lifecycle-systemd-noexec.json",
+    "lifecycle-systemd-fixture-permissions.json",
+    "lifecycle-systemd-fixture-config.json",
+    "lifecycle-systemd-timewait.json"
+  ],
+  "failure_explanations": [
+    "Initial restore build overlapped another owners incomplete file edit; final restore used successfully built binary.",
+    "Transient systemd harness was corrected for noexec /run, private directory mode, missing fixture upstream key, and TIME_WAIT-compatible listener reuse. Earlier failures remain unchanged."
+  ],
+  "limits": [
+    "All upstream responses in these lifecycle drills are local synthetic fixtures, not external provider acceptance.",
+    "No production stop/restart, production upgrade rollback, or restoration of production credentials was performed.",
+    "Only the selected final binary can establish the final release runtime state."
+  ]
+}

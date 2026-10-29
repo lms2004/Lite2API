@@ -1,0 +1,13 @@
+test_authenticated_unsafe_archive_members_and_empty_manifest_are_rejected (__main__.RestoreLifecycle.test_authenticated_unsafe_archive_members_and_empty_manifest_are_rejected) ... ok
+test_compose_real_crypto_material_restore (__main__.RestoreLifecycle.test_compose_real_crypto_material_restore) ... ok
+test_compose_restored_material_runs_in_a_private_docker_volume (__main__.RestoreLifecycle.test_compose_restored_material_runs_in_a_private_docker_volume) ... ok
+test_existing_destination_and_symlink_ancestors_are_preserved_and_rejected (__main__.RestoreLifecycle.test_existing_destination_and_symlink_ancestors_are_preserved_and_rejected) ... ok
+test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access (__main__.RestoreLifecycle.test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access) ... ok
+test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate (__main__.RestoreLifecycle.test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate) ... ok
+test_source_symlinks_and_checksum_artifact_symlinks_are_rejected (__main__.RestoreLifecycle.test_source_symlinks_and_checksum_artifact_symlinks_are_rejected) ... ok
+test_wrong_identity_and_ciphertext_tamper_fail_without_partial_restore (__main__.RestoreLifecycle.test_wrong_identity_and_ciphertext_tamper_fail_without_partial_restore) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 16.604s
+
+OK

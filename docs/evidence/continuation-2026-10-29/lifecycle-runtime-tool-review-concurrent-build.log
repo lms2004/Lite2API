@@ -1,0 +1,15 @@
+...E....
+======================================================================
+ERROR: setUpClass (__main__.ExitStatusIntegration)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/Lite2API/tools/verify_business_runtime_test.py", line 101, in setUpClass
+    subprocess.run(["go", "build", "-o", str(cls.binary), "./cmd/lite2api"], cwd=ROOT, env={**os.environ, "GOTOOLCHAIN": "local"}, check=True, capture_output=True, timeout=90)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['go', 'build', '-o', '/tmp/lite2api-business-tool-test-vn9l_khf/lite2api', './cmd/lite2api']' returned non-zero exit status 1.
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.357s
+
+FAILED (errors=1)

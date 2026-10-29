@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "scope": "real_systemd_private_state_fixture_upstream",
+  "error": "bounded lifecycle condition did not complete"
+}

@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-10-28T15:20:03.223649+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "client": "Codex CLI",
+      "operation": "responses",
+      "transport_exit": 0,
+      "complete": true,
+      "latency_ms": 5442
+    }
+  ],
+  "binary_sha256": "05049e8f1ed14c50003dbff8893a90c567d28507ea3ff19d7ade1c498779cb99",
+  "logical_calls": [
+    {
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    }
+  ]
+}

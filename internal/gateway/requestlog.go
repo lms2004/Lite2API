@@ -324,7 +324,7 @@ func (h *recoveredRecordHeap) Pop() any {
 }
 
 // loadRequestState scans retained files once while keeping only a bounded
-// newest-record heap plus one latest observation per configured route. Startup
+// newest-record heap plus bounded route/target/operation observations. Startup
 // memory is independent of the configured multi-gigabyte retention envelope.
 func loadRequestState(path string, backups, maxRecords int, routeFingerprints map[string]string) ([]RequestRecord, map[string]RequestRecord, error) {
 	if maxRecords < 0 {
@@ -332,7 +332,7 @@ func loadRequestState(path string, backups, maxRecords int, routeFingerprints ma
 	}
 	records := make(recoveredRecordHeap, 0, maxRecords)
 	heap.Init(&records)
-	routeLatest := make(map[string]recoveredRecord, len(routeFingerprints))
+	routeLatest := make(map[string]RequestRecord, len(routeFingerprints))
 	for index := 0; index <= backups; index++ {
 		candidate := path
 		if index > 0 {
@@ -367,10 +367,10 @@ func loadRequestState(path string, backups, maxRecords int, routeFingerprints ma
 				}
 			}
 			if fingerprint := routeFingerprints[record.Model]; fingerprint != "" && record.RouteFingerprint == fingerprint && routeHealthObservation(record) {
-				key := routeObservationKey(record.Model, record.Operation)
+				key := routeObservationKey(record)
 				current, exists := routeLatest[key]
-				if !exists || observed.After(current.observed) {
-					routeLatest[key] = recovered
+				if !exists || observed.After(recordTime(current.Time)) {
+					retainRouteObservation(routeLatest, key, record)
 				}
 			}
 		}
@@ -392,11 +392,7 @@ func loadRequestState(path string, backups, maxRecords int, routeFingerprints ma
 		right, _ := time.Parse(time.RFC3339Nano, result[j].Time)
 		return left.Before(right)
 	})
-	latest := make(map[string]RequestRecord, len(routeLatest))
-	for alias, recovered := range routeLatest {
-		latest[alias] = recovered.record
-	}
-	return result, latest, nil
+	return result, routeLatest, nil
 }
 
 func loadRequestRecords(path string, backups int) ([]RequestRecord, error) {

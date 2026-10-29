@@ -1,0 +1,171 @@
+{
+  "observed_at": "2026-10-28T16:28:30.179776+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "client": "exact_source_verification",
+      "operation": "openai.chat",
+      "feature": "stream",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 59,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "exact_source_verification",
+      "operation": "openai.chat",
+      "feature": "tools",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 13,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "exact_source_verification",
+      "operation": "openai.responses",
+      "feature": "stream",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 27,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "exact_source_verification",
+      "operation": "openai.responses",
+      "feature": "tools",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 19,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "exact_source_verification",
+      "operation": "anthropic.messages",
+      "feature": "stream",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 15,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "exact_source_verification",
+      "operation": "anthropic.messages",
+      "feature": "tools",
+      "account_id": "cliproxy-antigravity",
+      "http_status": 401,
+      "complete": false,
+      "latency_ms": 13,
+      "completed": null,
+      "evidence_saved": null,
+      "credential_id": null,
+      "upstream_model": null,
+      "observed_at": null,
+      "request_id": null,
+      "message": null
+    },
+    {
+      "client": "Claude Code",
+      "operation": "messages",
+      "tool_roundtrip": true,
+      "transport_exit": 0,
+      "complete": true,
+      "latency_ms": 13679
+    },
+    {
+      "client": "Codex CLI",
+      "operation": "responses",
+      "tool_roundtrip": true,
+      "transport_exit": 0,
+      "complete": true,
+      "latency_ms": 8980
+    }
+  ],
+  "binary_sha256": "d95381d78a3426ea990eca1c6293570da5a1184fa1d3934fbcfd57c14d758c74",
+  "source_evidence": [],
+  "logical_calls": [
+    {
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 400,
+      "outcome": "upstream_rejected",
+      "account_id": "cliproxy-claude-code",
+      "attempt_count": 2
+    },
+    {
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-claude-code",
+      "attempt_count": 2
+    },
+    {
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-claude-code",
+      "attempt_count": 2
+    },
+    {
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-claude-code",
+      "attempt_count": 1
+    },
+    {
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    },
+    {
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    }
+  ]
+}

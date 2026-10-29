@@ -1,0 +1,20 @@
+TAP version 13
+# Subtest: /tmp/lite2api-usecases-final-b1btdh00/internal/web/app-core.test.js
+ok 1 - /tmp/lite2api-usecases-final-b1btdh00/internal/web/app-core.test.js
+  ---
+  duration_ms: 729.44554
+  ...
+# Subtest: /tmp/lite2api-usecases-final-b1btdh00/internal/web/app-runtime.test.js
+ok 2 - /tmp/lite2api-usecases-final-b1btdh00/internal/web/app-runtime.test.js
+  ---
+  duration_ms: 724.155
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1475.518121

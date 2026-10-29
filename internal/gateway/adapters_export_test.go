@@ -38,6 +38,20 @@ func TestAdapterCatalogDoesNotInferIdentityFromAccountName(t *testing.T) {
 	}
 }
 
+func TestAdapterCatalogUsesConfiguredCLIProxyManagementURL(t *testing.T) {
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", "http://127.0.0.1:45683")
+	catalog := AdapterCatalog([]config.Account{{ID: "oauth", AdapterID: "cli-proxy-api"}})
+	for _, adapter := range catalog {
+		if adapter.ID == "cli-proxy-api" {
+			if adapter.LocalURL != "http://127.0.0.1:45683/v1" {
+				t.Fatalf("CLIProxy catalog URL=%q", adapter.LocalURL)
+			}
+			return
+		}
+	}
+	t.Fatal("CLIProxy adapter is missing")
+}
+
 func TestAdapterProbeClassificationAndOperations(t *testing.T) {
 	item := AdapterDescriptor{ID: "cli-proxy-api", AccountIDs: []string{"oauth"}, trafficConfigured: true}
 	applyAdapterProbe(&item, adapterProbeResult{running: true, authRequired: true, checkedAt: time.Unix(1, 0)})

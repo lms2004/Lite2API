@@ -398,6 +398,11 @@
     return operations.includes('openai.chat') || operations.includes('anthropic.messages');
   }
 
+  function channelVerificationSupported(account) {
+    const operations = uniqueStrings(account?.operations);
+    return !operations.length || operations.some((operation) => ['openai.chat', 'openai.responses', 'anthropic.messages'].includes(operation));
+  }
+
   function channelChatModels(account) {
     const declared = (account?.models || []).filter(model => model && model !== '*');
     const capabilities = account?.capabilities || [];
@@ -441,28 +446,65 @@
     };
   }
 
-  function capabilityResolution(account, model, effort = 'auto') {
+  function scopedCapabilityFact(account, capability, effort, scope) {
+    const operation = String(scope?.operation || '').trim();
+    const feature = String(scope?.feature || 'call').trim();
+    const credential = String(scope?.credential || scope?.credential_id || '').trim();
+    if (!operation || (account?.adapter_id === 'cli-proxy-api' && !credential)) return null;
+    const key = `${operation}:${feature}${effort !== 'auto' ? '#' + effort : ''}${credential ? '@' + credential : ''}`;
+    return capability?.features?.[key] || null;
+  }
+
+  function scopedCapabilityEvidence(account, capability, effort, scope) {
+    const evidence = scopedCapabilityFact(account, capability, effort, scope);
+    const credential = String(scope?.credential || scope?.credential_id || '').trim();
+    return evidence?.status === 'verified' && evidence.last_check_outcome === 'passed' &&
+      evidence.source && evidence.observed_at && evidence.source_identity &&
+      evidence.upstream_model === capability.upstream_model &&
+      (evidence.credential_id || '') === credential &&
+      (evidence.reasoning_effort || 'auto') === effort ? evidence : null;
+  }
+
+  function capabilityResolution(account, model, effort = 'auto', scope = {}) {
     const wantedModel = String(model || '').trim();
     const wantedEffort = String(effort || 'auto').trim().toLowerCase() || 'auto';
-    const capability = (account?.capabilities || []).find(item =>
+    const candidates = (account?.capabilities || []).filter(item =>
       String(item?.model || '').trim() === wantedModel &&
       (item.reasoning_efforts || []).map(value => String(value).toLowerCase()).includes(wantedEffort)
     );
-    if (!capability) return null;
-    return {
-      ok: true,
-      verified: true,
-      upstream_model: String(capability.upstream_model || '').trim(),
-      reasoning_effort: wantedEffort,
-      source: 'capability'
-    };
+    let fallback = null;
+    for (const capability of candidates) {
+      const upstream = String(capability.upstream_model || '').trim();
+      if (capability.evidence?.status === 'unsupported') continue;
+      const fact = scopedCapabilityFact(account, capability, wantedEffort, scope);
+      if (fact?.status === 'unsupported') continue;
+      const evidence = scopedCapabilityEvidence(account, capability, wantedEffort, scope);
+      const resolution = {
+        ok: true,
+        declared: true,
+        verified: !!evidence,
+        evidence,
+        reason: evidence ? '指定来源、模型、接口与特性已经验收' : '模型目录仅为声明；指定接口与特性尚未通过验收',
+        upstream_model: upstream,
+        reasoning_effort: wantedEffort,
+        source: 'capability'
+      };
+      if (evidence) return resolution;
+      if (!fallback) fallback = resolution;
+    }
+    if (fallback) return fallback;
+    if (candidates.length) {
+      const upstream = String(candidates[0].upstream_model || '').trim();
+      return { ok: false, verified: false, unsupported: true, upstream_model: upstream, reasoning_effort: wantedEffort, source: 'capability', reason: '该来源明确声明不支持所选模型、接口或特性' };
+    }
+    return null;
   }
 
-  function directResolution(account, model) {
+  function directResolution(account, model, scope = {}) {
     const wanted = String(model || '').trim();
     if (!wanted) return { ok: false, verified: false, upstream_model: '', reason: '尚未填写实际上游模型' };
     if ((account?.models || []).includes('*')) {
-      return { ok: true, verified: true, upstream_model: wanted, reasoning_effort: '', source: 'wildcard' };
+      return { ok: true, declared: true, verified: false, upstream_model: wanted, reasoning_effort: '', source: 'wildcard', reason: '通配模型声明不等于指定接口已经验收' };
     }
     const declared = directModels(account);
     if (!declared.length) {
@@ -476,24 +518,83 @@
     if (!declared.includes(wanted)) {
       return {
         ok: false,
-        verified: true,
+        verified: false,
         upstream_model: wanted,
         reason: `连接没有声明模型 ${wanted}`
       };
     }
-    return { ok: true, verified: true, upstream_model: wanted, reasoning_effort: '', source: 'direct' };
+    const upstream = account?.model_map?.[wanted] || wanted;
+    const effort = String(scope?.reasoning_effort || 'auto');
+    const candidates = (account?.capabilities || []).filter((item) => item.upstream_model === upstream);
+    let fallback = null;
+    for (const capability of candidates) {
+      if (capability.evidence?.status === 'unsupported') continue;
+      const fact = scopedCapabilityFact(account, capability, effort, scope);
+      if (fact?.status === 'unsupported') continue;
+      const evidence = scopedCapabilityEvidence(account, capability, effort, scope);
+      const resolution = { ok: true, declared: true, verified: !!evidence, evidence, upstream_model: upstream, reasoning_effort: '', source: 'direct', reason: evidence ? '指定接口已经验收' : '模型目录仅为声明；指定接口与特性尚未通过验收' };
+      if (evidence) return resolution;
+      if (!fallback) fallback = resolution;
+    }
+    if (fallback) return fallback;
+    if (candidates.length) return { ok: false, verified: false, unsupported: true, upstream_model: upstream, reasoning_effort: '', source: 'direct', reason: '该来源明确声明不支持所选接口或特性' };
+    return { ok: true, declared: true, verified: false, upstream_model: upstream, reasoning_effort: '', source: 'direct', reason: '模型目录仅为声明；指定接口与特性尚未通过验收' };
   }
 
-  function targetResolution(account, route, target) {
+  function targetResolution(account, route, target, scope = {}) {
     if (!account) return { ok: false, verified: false, upstream_model: '', reason: '连接不存在' };
     const normalized = normalizeRoute(route);
-    if (normalized.model) return capabilityResolution(account, normalized.model, normalized.reasoning_effort) || {
+    const targetScope = { ...scope, credential: target?.credential || scope.credential || '' };
+    if (normalized.model) return capabilityResolution(account, normalized.model, normalized.reasoning_effort, targetScope) || {
       ok: false,
-      verified: true,
+      verified: false,
       upstream_model: '',
       reason: `不支持 ${normalized.model} · ${normalized.reasoning_effort}`
     };
-    return directResolution(account, target?.model);
+    return directResolution(account, target?.model, targetScope);
+  }
+
+  // Check whether the selected interface has a possible source. This does not
+  // certify the client, and missing evidence remains permission to try.
+  function clientModelAvailability(data, model, client) {
+    const operation = client === 'claude' ? 'anthropic.messages' : client === 'curl' ? 'openai.chat' : 'openai.responses';
+    const accounts = data?.config?.accounts;
+    if (!Array.isArray(accounts)) return { possible: true, operation, effort: '' };
+    const raw = data.config.routes?.[model];
+    const route = raw ? normalizeRoute(raw) : null;
+    const candidates = route && !route.legacy
+      ? route.targets.map((target) => ({ target, account: accounts.find((account) => account.id === target.account) }))
+      : accounts.filter((account) => !route || route.all_accounts || route.targets.some((target) => target.account === account.id))
+        .map((account) => ({ account, target: null }));
+    const eligible = [];
+    for (const { account, target } of candidates) {
+      if (!account || account.enabled === false) continue;
+      const operations = account.operations?.length ? account.operations : account.type === 'anthropic'
+        ? ['anthropic.messages'] : ['openai.chat', 'openai.responses', 'openai.embeddings', 'openai.images', 'openai.rerank'];
+      if (!operations.includes(operation)) continue;
+      let upstream, effort = '', credential = target?.credential || '';
+      if (target) {
+        const resolution = targetResolution(account, route, target, { operation });
+        if (!resolution.ok) continue;
+        upstream = resolution.upstream_model;
+        effort = route.model ? route.reasoning_effort : target.reasoning_effort;
+        if (operation === 'anthropic.messages' && effort && effort !== 'auto') continue;
+      } else {
+        const capabilities = account.capabilities || [];
+        if (!route && account.models?.length && !account.models.includes('*') && !account.models.includes(model) && !Object.prototype.hasOwnProperty.call(account.model_map || {}, model) && !capabilities.some((capability) => capability.model === model)) continue;
+        upstream = route?.upstream_model || account.model_map?.[model] || capabilities.find((capability) => capability.model === model)?.upstream_model || model;
+        if (account.models?.length && !account.models.includes('*') && !account.models.includes(upstream) && !Object.values(account.model_map || {}).includes(upstream)) continue;
+      }
+      const factKey = (checkEffort, checkCredential) => `${operation}:call${checkEffort && checkEffort !== 'auto' ? '#' + checkEffort : ''}${checkCredential ? '@' + checkCredential : ''}`;
+      const facts = (account.capabilities || []).filter((capability) => capability.upstream_model === upstream);
+      if (client === 'codex' && effort && effort !== 'auto' && facts.some((capability) => capability.evidence?.status !== 'unknown') && !facts.some((capability) => (capability.reasoning_efforts || []).includes(effort))) continue;
+      const negative = facts.some((capability) => capability.evidence?.status === 'unsupported' ||
+          [factKey('auto', ''), factKey(effort, ''), factKey('auto', credential), factKey(effort, credential)]
+            .some((key) => capability.features?.[key]?.status === 'unsupported'));
+      if (!negative) eligible.push(effort || 'auto');
+    }
+    return { possible: eligible.length > 0, operation,
+      effort: eligible.length && eligible[0] !== 'auto' && eligible.every((effort) => effort === eligible[0]) ? eligible[0] : '' };
   }
 
   function routeValidation(routes, accounts) {
@@ -541,7 +642,7 @@
           errors.push({ alias, targetIndex, message: `第 ${targetIndex + 1} 顺位尚未选择连接` });
           return;
         }
-        const targetIdentity = `${target.account}\u0000${target.credential}`;
+        const targetIdentity = `${target.account}\u0000${target.credential}\u0000${target.model}\u0000${target.reasoning_effort}`;
         if (seenTargets.has(targetIdentity)) errors.push({ alias, targetIndex, message: `${target.account}${target.credential ? ` 的账号 ${target.credential}` : ''} 在同一路由中被重复选择` });
         seenTargets.add(targetIdentity);
         if (!account) {
@@ -644,6 +745,8 @@
     channelChatModels,
     channelChatResponse,
     channelChatSupported,
+    channelVerificationSupported,
+    clientModelAvailability,
     claudeCodePersistentShellConfig,
     claudeCodePowerShellConfig,
     claudeCodeShellConfig,

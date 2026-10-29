@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-10-28T15:17:51.255661+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "case": "responses_stream",
+      "client": "curl",
+      "operation": "responses",
+      "stream": true,
+      "http_status": 200,
+      "transport_exit": 0,
+      "latency_ms": 2417,
+      "complete": true
+    },
+    {
+      "case": "messages_stream",
+      "client": "curl",
+      "operation": "messages",
+      "stream": true,
+      "http_status": 200,
+      "transport_exit": 0,
+      "latency_ms": 2640,
+      "complete": true
+    }
+  ],
+  "binary_sha256": "05049e8f1ed14c50003dbff8893a90c567d28507ea3ff19d7ade1c498779cb99",
+  "logical_calls": [
+    {
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    },
+    {
+      "operation": "anthropic.messages",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "attempt_count": 1
+    }
+  ]
+}

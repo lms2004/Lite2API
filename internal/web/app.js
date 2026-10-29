@@ -86,6 +86,7 @@
   const apiClient = Runtime.createRequestClient({
     base: API,
     csrf: () => state.session.csrf,
+    revision: () => state.resources.data?.config_revision || '',
     unauthorized: () => {
       state.session.csrf = '';
       sessionStorage.removeItem('lite2api_csrf');
@@ -207,7 +208,7 @@
     }
     const snapshot = await stateTask;
     if (!current()) return;
-    routes.receiveSnapshot(snapshot.config?.routes || {});
+    routes.receiveSnapshot(snapshot.config?.routes || {}, snapshot.config_revision || '');
     state.resources.data = snapshot;
     update();
     await Promise.all(tasks);

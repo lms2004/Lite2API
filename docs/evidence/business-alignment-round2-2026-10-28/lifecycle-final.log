@@ -1,0 +1,67 @@
+PYTHONDONTWRITEBYTECODE=1 python3 deploy/restore_lifecycle_test.py
+test_authenticated_unsafe_archive_members_and_empty_manifest_are_rejected (__main__.RestoreLifecycle.test_authenticated_unsafe_archive_members_and_empty_manifest_are_rejected) ... ok
+test_compose_real_crypto_material_restore (__main__.RestoreLifecycle.test_compose_real_crypto_material_restore) ... ok
+test_compose_restored_material_runs_in_a_private_docker_volume (__main__.RestoreLifecycle.test_compose_restored_material_runs_in_a_private_docker_volume) ... ok
+test_existing_destination_and_symlink_ancestors_are_preserved_and_rejected (__main__.RestoreLifecycle.test_existing_destination_and_symlink_ancestors_are_preserved_and_rejected) ... ok
+test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access (__main__.RestoreLifecycle.test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access) ... ok
+test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate (__main__.RestoreLifecycle.test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate) ... ok
+test_source_symlinks_and_checksum_artifact_symlinks_are_rejected (__main__.RestoreLifecycle.test_source_symlinks_and_checksum_artifact_symlinks_are_rejected) ... ok
+test_wrong_identity_and_ciphertext_tamper_fail_without_partial_restore (__main__.RestoreLifecycle.test_wrong_identity_and_ciphertext_tamper_fail_without_partial_restore) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 18.610s
+
+OK
+PYTHONDONTWRITEBYTECODE=1 python3 deploy/upgrade_lifecycle_test.py
+{
+  "cases": [
+    {
+      "name": "missing_profile_rejected_before_mutation",
+      "ok": true
+    },
+    {
+      "name": "committed_upgrade_passed_real_business_and_access_acceptance",
+      "ok": true
+    },
+    {
+      "candidate_mutations_confirmed": true,
+      "incomplete_200_rejected": true,
+      "managed_key_call_and_whitelist": true,
+      "name": "rollback_restored_active_enabled",
+      "ok": true,
+      "restored": [
+        "absolute_client_keys",
+        "binary",
+        "config",
+        "environment",
+        "state_marker",
+        "unit"
+      ]
+    },
+    {
+      "candidate_mutations_confirmed": true,
+      "incomplete_200_rejected": true,
+      "managed_key_call_and_whitelist": true,
+      "name": "rollback_restored_inactive_disabled",
+      "ok": true,
+      "restored": [
+        "absolute_client_keys",
+        "binary",
+        "config",
+        "environment",
+        "state_marker",
+        "unit"
+      ]
+    }
+  ],
+  "elapsed_seconds": 13.35,
+  "host_systemd_used": false,
+  "ok": true,
+  "scope": "private_git_commit_private_chroot_real_go_real_http"
+}
+PYTHONDONTWRITEBYTECODE=1 python3 deploy/compose_snapshot_test.py
+.
+----------------------------------------------------------------------
+Ran 1 test in 6.489s
+
+OK

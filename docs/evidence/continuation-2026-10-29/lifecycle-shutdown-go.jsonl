@@ -1,0 +1,12 @@
+{"Time":"2026-10-29T06:25:39.044021317Z","Action":"start","Package":"github.com/lms2004/lite2api/internal/gateway"}
+{"Time":"2026-10-29T06:25:39.834705263Z","Action":"run","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownDeadlineClosesActiveRequestsAndListener"}
+{"Time":"2026-10-29T06:25:39.834785464Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownDeadlineClosesActiveRequestsAndListener","Output":"=== RUN   TestShutdownDeadlineClosesActiveRequestsAndListener\n"}
+{"Time":"2026-10-29T06:25:39.870765434Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownDeadlineClosesActiveRequestsAndListener","Output":"--- PASS: TestShutdownDeadlineClosesActiveRequestsAndListener (0.03s)\n"}
+{"Time":"2026-10-29T06:25:39.870835264Z","Action":"pass","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownDeadlineClosesActiveRequestsAndListener","Elapsed":0.03}
+{"Time":"2026-10-29T06:25:39.87089687Z","Action":"run","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownGracePeriodCompletesActiveRequest"}
+{"Time":"2026-10-29T06:25:39.870902851Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownGracePeriodCompletesActiveRequest","Output":"=== RUN   TestShutdownGracePeriodCompletesActiveRequest\n"}
+{"Time":"2026-10-29T06:25:39.872438499Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownGracePeriodCompletesActiveRequest","Output":"--- PASS: TestShutdownGracePeriodCompletesActiveRequest (0.00s)\n"}
+{"Time":"2026-10-29T06:25:39.872464499Z","Action":"pass","Package":"github.com/lms2004/lite2api/internal/gateway","Test":"TestShutdownGracePeriodCompletesActiveRequest","Elapsed":0}
+{"Time":"2026-10-29T06:25:39.872471512Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Output":"PASS\n"}
+{"Time":"2026-10-29T06:25:40.880884222Z","Action":"output","Package":"github.com/lms2004/lite2api/internal/gateway","Output":"ok  \tgithub.com/lms2004/lite2api/internal/gateway\t1.835s\n"}
+{"Time":"2026-10-29T06:25:40.880973791Z","Action":"pass","Package":"github.com/lms2004/lite2api/internal/gateway","Elapsed":1.837}

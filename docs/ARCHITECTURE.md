@@ -17,13 +17,13 @@ Client
   -> atomic account concurrency acquire
   -> account-isolated HTTP connection pool
   -> upstream
-  -> streaming copy with idle watchdog
+  -> protocol completion check + delivery with idle watchdog
   -> release account concurrency
 ```
 
 调度和运行配置封装在不可变的 `runtimeState` 中，通过原子指针整体切换。热加载不会让请求看到一半新、一半旧的配置。
 
-请求路径先映射为稳定的操作类型：`openai.chat`、`openai.responses`、`anthropic.messages`、`openai.embeddings`、`openai.images` 或 `openai.rerank`。账号通过 `adapter_id`、`instance_id` 和 `operations` 描述适配器实例及能力；调度器只在支持当前操作的账号中做模型、健康、并发和策略筛选。旧配置没有 `operations` 时按账号协议自动补齐，保持兼容。
+请求路径先映射为稳定的操作类型：`openai.chat`、`openai.responses`、`anthropic.messages`、`openai.embeddings`、`openai.images` 或 `openai.rerank`。账号通过 `adapter_id`、`instance_id` 和 `operations` 描述适配器实例及能力；调度器先满足模型、接口、请求特性及推理约定，再做授权/冷却、并发与策略筛选。能力事实在 `capabilities[].evidence/features`，目录发现只生成 `declared`；按接口标记 `unsupported` 的流式、工具或图片来源连同备用目标一起排除。未知只表示允许尝试。旧配置没有 `operations` 时按账号协议自动补齐，保持兼容。
 
 客户端 Key 同样使用不可变 map 快照。管理端创建、更新或撤销时先以 `0600` 原子落盘，再切换指针；请求线程只做 ID map 查找、SHA-256 常量时间比较和原子计数。流式请求直到响应结束才释放 Key 与账号并发槽。最近请求使用固定环形缓冲区，写入为 O(1)。
 
@@ -42,7 +42,7 @@ CLIProxyAPI 渠道内部还有独立的 OAuth 凭据调度层。该层的账号 
 - `least_loaded`：比较 `active / concurrency / weight`，同负载时按 priority 和 ID。
 - `round_robin`：原子计数轮询候选账号。
 - `priority`：低 priority 优先；满载或失败时自动使用下一个账号。
-- `sticky`：使用请求中的 session、conversation、prompt cache key 等做 Rendezvous Hash，尽量维持提示缓存和多轮会话稳定。
+- `sticky`：使用 session、conversation、prompt cache key 做 Rendezvous Hash，尽量维持提示缓存；这是偏好，不保证上游状态可跨来源续接。非空 `previous_response_id` 仅允许固定模型的单一原生直接来源；其他情况明确拒绝，要求完整输入历史。
 
 每个账号使用 CAS 原子计数获取槽位。热加载时新旧账号对象共享运行计数，因此正在进行的流式请求不会因为配置重载而“消失”。
 
@@ -53,7 +53,8 @@ CLIProxyAPI 渠道内部还有独立的 OAuth 凭据调度层。该层的账号 
 - 429：上游已明确限流，遵守秒数或 HTTP-date 形式的 `Retry-After`（最长 24 小时），立即熔断并换号。
 - 显式目标返回 404（目标模型不存在）：安全尝试下一个目标，不把普通客户端 4xx 扩散到全部渠道。
 - 任意上游 POST 收到 408/409/425 或任意 5xx（含 529），以及请求写入后发生超时、重置等传输错误：即使是 Embeddings、Rerank 也可能已被接收或计费，因此一律不跨账号重放；网关返回 `uncertain_submission` 并记录失败。
-- 已经向客户端发出成功响应头后的流中断：记录错误和账号健康，不尝试换号，避免拼接两个上游流。
+- 普通 JSON 与 SSE 按协议验证结构和结束条件；小响应先保留最多 64 KiB 校验，较大 JSON 增量扫描。不是 HTTP 200 或 EOF 即成功。SSE 单事件/单行最多 1 MiB，JSON 深度最多 128。
+- 已经向客户端发出成功响应头后的流中断或缺失结束事件：记录失败，不尝试换号；SSE 发送脱敏 error 事件，大 JSON 中止连接。下游写失败与上游故障分开，客户端取消不进入账号熔断。
 - 客户端主动取消：立即传递给上游，不惩罚账号。
 
 ## 连接模型
@@ -102,3 +103,5 @@ CLIProxyAPI 渠道内部还有独立的 OAuth 凭据调度层。该层的账号 
 这些边界保证服务维持单二进制和很小的攻击面。
 
 适配器类型、契约、状态机和资源预算见 [Adapter Design](ADAPTER_DESIGN.md)。
+
+运行观察按路由、目标、接口与流模式保存有界事实，逻辑调用内的发送轨迹单独记录。历史观测与近期可用判断分开，口径、时间及保留上限见 [Operations](OPERATIONS.md)。程序与 Agent 的职责及验收依据见 [能力图](BUSINESS_CAPABILITIES.md) 和 [业务对齐记录](BUSINESS_ALIGNMENT_2026-10-28.md)。

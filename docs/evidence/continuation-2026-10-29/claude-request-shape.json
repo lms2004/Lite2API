@@ -1,0 +1,32 @@
+{
+  "scope": "local_synthetic_request_shape_capture_no_external_calls",
+  "client_exit": 1,
+  "requests": [
+    {
+      "path": "/v1/messages?beta=true",
+      "max_tokens": 32000,
+      "thinking": null,
+      "stream": true,
+      "tool_names": [],
+      "tool_count": 0,
+      "system_characters": 3332,
+      "messages_characters": 397,
+      "body_bytes": 4144
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "max_tokens": 32000,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "stream": true,
+      "tool_names": [
+        "Read"
+      ],
+      "tool_count": 1,
+      "system_characters": 361,
+      "messages_characters": 289,
+      "body_bytes": 1861
+    }
+  ]
+}

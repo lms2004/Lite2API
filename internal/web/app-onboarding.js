@@ -123,7 +123,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
       ],
       checks: [
         ['隔离', 'SSO 只交给 Grok2API'],
-        ['质量', '可直接执行三轮测试'],
+        ['验收', '可直接执行三轮完整性测试'],
         ['错误', '保留 401 / 429 / 5xx 类型'],
       ],
     },
@@ -552,6 +552,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
   }
 
   function fillManualForm(preset, existing) {
+    onboardingState.manualConfigRevision = resourcesState.data?.config_revision || '';
     const form = $('manualAccountForm');
     form.reset();
     const source = existing || preset,
@@ -687,6 +688,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
     try {
       const result = await request('/accounts/test', { method: 'POST', body: JSON.stringify({ account }) });
       if (generation !== onboardingState.manualTestGeneration) return;
+      if (result.ok !== true) throw new Error(`目录连接检查未通过：HTTP ${result.status || '未知'}。请核对认证、地址与适配器状态。`);
       const currentFingerprint = accountFingerprint(accountPayloadFromForm());
       if (currentFingerprint !== testedFingerprint) {
         resetConnectionTest('测试期间关键配置发生了变化；本次结果未用于保存，请重新测试。');
@@ -704,7 +706,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
       node.className = 'test-result good';
       setHTML(
         node,
-        `连接成功 · HTTP ${result.status}<br>${number(result.latency_ms)} ms · 发现 ${result.model_count} 个模型<br><small>${escapeHTML(result.endpoint)}</small>`,
+        `连接检查通过 · HTTP ${result.status}<br>${number(result.latency_ms)} ms · 目录声明 ${result.model_count} 个模型<br><small>${escapeHTML(result.endpoint)}<br>尚未验证实际调用与特性</small>`,
       );
       onboardingState.manualTestFingerprint = accountFingerprint(account);
       return true;
@@ -758,7 +760,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
         criticalChanged = fingerprint !== onboardingState.manualOriginalFingerprint;
       }
       button.textContent = '正在保存…';
-      await request('/accounts', { method: 'PUT', body: JSON.stringify(account) });
+      await request('/accounts', { method: 'PUT', body: JSON.stringify(account), headers: { 'If-Match': `"${onboardingState.manualConfigRevision}"` } });
       if (criticalChanged) {
         usageState.quality.delete(account.id);
         saveQuality();
@@ -777,7 +779,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
         toast(editing ? '连接已更新并热加载' : '连接已保存并热加载');
       }
     } catch (error) {
-      toast(error.message, true);
+      toast(error.status === 409 ? '配置已变化，草稿仍保留。请刷新并重新打开编辑，核对后再保存。' : error.message, true);
     } finally {
       button.disabled = false;
       button.textContent = label;
@@ -789,7 +791,8 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
     if (!account) return;
     try {
       const result = await request('/accounts/test', { method: 'POST', body: JSON.stringify({ account }) });
-      toast(`${account.name || id} 可用 · ${result.model_count} 个模型 · ${result.latency_ms} ms`);
+      if (result.ok !== true) throw new Error(`目录连接检查未通过：HTTP ${result.status || '未知'}。请核对认证、地址与适配器状态。`);
+      toast(`${account.name || id} 目录连接通过 · 声明 ${result.model_count} 个模型 · ${result.latency_ms} ms；实际调用与特性待验收`);
     } catch (error) {
       toast(error.message, true);
     }
@@ -802,18 +805,27 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
       toast('请先保存或放弃未保存的路由更改，再删除连接', true);
       return;
     }
-    const routes = resourcesState.data?.config?.routes || {},
-      usage = Core.accountRouteUsage(routes, id),
-      wildcards = usage.filter((alias) => Core.normalizeRoute(routes[alias]).all_accounts),
-      fixed = usage.filter((alias) => !wildcards.includes(alias)),
-      deletedRoutes = fixed.filter((alias) => {
-        const targets = Core.normalizeRoute(routes[alias]).targets;
-        return targets.length > 0 && targets.every((target) => target.account === id);
-      }),
-      details = [];
-    if (fixed.length) details.push(`会从固定路由移除此目标：${fixed.join('、')}`);
-    if (deletedRoutes.length) details.push(`${deletedRoutes.join('、')} 将因没有剩余目标而被删除`);
-    if (wildcards.length) details.push(`通配路由 ${wildcards.join('、')} 会保留，并继续使用其他已启用连接`);
+    let impact;
+    try {
+      impact = await request('/accounts/' + encodeURIComponent(id) + '/impact');
+    } catch (error) {
+      toast(error.message, true);
+      return;
+    }
+    if (!impact.can_apply) {
+      toast(`删除会让 ${impact.implicit_conflicts.join('、')} 转向原范围外的隐式来源。请先设置明确替代目标，或移除同名模型声明。`, true);
+      return;
+    }
+    const details = [];
+    if (impact.unknown_model_scope) details.push('此连接允许尝试未枚举模型，完整影响范围未知；以下列出可能受影响的模型和客户端');
+    if (impact.affected_models?.length) details.push(`影响模型：${impact.affected_models.join('、')}`);
+    if (impact.removed_aliases?.length) details.push(`删除无剩余目标的别名：${impact.removed_aliases.join('、')}`);
+    if (impact.unavailable_models?.length) details.push(`之后目录不再提供：${impact.unavailable_models.join('、')}`);
+    if (impact.wildcard_aliases?.length) details.push(`通配路由仍保留：${impact.wildcard_aliases.join('、')}`);
+    if (impact.client_keys?.length) details.push(`需复核客户端：${impact.client_keys.map((key) => key.name).join('、')}`);
+    if (impact.legacy_credential_count) details.push(`${impact.legacy_credential_count} 个兼容凭据也可使用这些模型`);
+    details.push(`${impact.active_requests || 0} 个已进入该连接的请求按原配置结束；之后的新请求不再选择此连接`);
+    details.push(impact.next_action);
     if (
       !(await UI.confirm({
         title: '删除 API 连接',
@@ -824,7 +836,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
     )
       return;
     try {
-      await request('/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
+      await request('/accounts/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'If-Match': `"${impact.config_revision}"` } });
       usageState.quality.delete(id);
       saveQuality();
       toast('连接及其路由引用已删除');
@@ -842,7 +854,7 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
     }
     showView('accounts', true);
     setAccountTab('auth');
-    toast(`${PROVIDER_LABEL[providerKey(result.provider)] || '认证'}账号已添加并自动进入现有路由`);
+    toast(`${PROVIDER_LABEL[providerKey(result.provider)] || '认证'}账号已登记到隔离认证池；实际调用与特性待验收`);
   }
 
   function showOnboardingResult(result) {
@@ -857,11 +869,11 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
           : [...Core.logicalModels(connection ? [connection] : []), ...Core.directModels(connection)],
       );
     onboardingState.lastOnboardingResult = { ...result, models };
-    $('onboardingResultTitle').textContent = result.title || '上游已就绪';
+    $('onboardingResultTitle').textContent = result.title || '来源已登记';
     $('onboardingResultSubtitle').textContent =
       result.kind === 'credential'
-        ? '凭据已进入隔离认证池，并通过稳定连接供路由使用。'
-        : 'API 连接已保存并热加载。';
+        ? '凭据已进入隔离认证池；实际调用与特性尚待验收。'
+        : 'API 连接已保存并热加载；目录声明不等于实际调用已通过。';
     const rows = [];
     if (result.kind === 'credential') rows.push(['凭据结果', `${provider} 认证账号已加入账号池`]);
     if (connection) rows.push(['稳定连接', `${connection.name || connection.id} · ${connection.id}`]);
@@ -1125,17 +1137,27 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
     applyButton.disabled = true;
     try {
       const data = onboardingState.importData || (await readImportData()),
+        revision = dryRun ? resourcesState.data?.config_revision || '' : onboardingState.importRevision || '',
         result = await request('/accounts/import', {
           method: 'POST',
           body: JSON.stringify({ data, mode: $('importMode').value, dry_run: dryRun }),
+          headers: { 'If-Match': `"${revision}"` },
         });
       onboardingState.importData = data;
       onboardingState.importPreview = result;
       renderImportResult(result, data);
       if (dryRun) {
+        onboardingState.importRevision = revision;
         applyButton.disabled = false;
         toast('预检查完成，尚未写入配置');
       } else {
+        if ((result.errors || []).length || Number(result.account_failed) > 0 || Number(result.proxy_failed) > 0) {
+          onboardingState.importRevision = '';
+          await refreshAll(true, true);
+          renderImportResult(result, data);
+          toast('导入有失败项，请核对逐项结果后重新预检查', true);
+          return;
+        }
         toast('导入完成并已热加载');
         closeDialog('importDialog');
         await refreshAll(true, true);
@@ -1143,6 +1165,10 @@ globalThis.Lite2APIOnboarding = function createOnboarding(context) {
         setAccountTab(result.account_created || result.account_updated ? 'connections' : 'auth');
       }
     } catch (error) {
+      if (error.status === 409) {
+        onboardingState.importPreview = null;
+        onboardingState.importRevision = '';
+      }
       toast(error.message, true);
     } finally {
       previewButton.disabled = false;

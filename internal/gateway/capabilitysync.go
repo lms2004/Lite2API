@@ -98,6 +98,9 @@ func (g *Gateway) syncDiscoveredCapabilities(ctx context.Context) error {
 				updated := current
 				discoveredIDs := discoveredModelIDs(update.Catalog)
 				inferred := config.InferDiscoveredModelCapabilities(updated, update.Catalog)
+				for index := range inferred {
+					inferred[index].Evidence = config.CapabilityEvidence{Status: "declared", Source: "model_catalog", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+				}
 				if strings.EqualFold(strings.TrimSpace(updated.AdapterID), "cli-proxy-api") {
 					var accountMigrations []discoveredCapabilityMigration
 					updated.Capabilities, accountMigrations = reconcileDiscoveredCapabilities(current.Capabilities, inferred)
@@ -180,7 +183,12 @@ func reconcileDiscoveredCapabilities(existing, inferred []config.ChannelCapabili
 			continue
 		}
 		previous := result[index]
+		capability.Features = config.CloneCapabilityFeatures(previous.Features)
+		if previous.Evidence.Status == "verified" || previous.Evidence.Status == "unsupported" {
+			capability.Evidence = previous.Evidence
+		}
 		capability.ReasoningEfforts = mergeOrderedStrings(previous.ReasoningEfforts, capability.ReasoningEfforts)
+		preserveUnchangedCatalogEvidence(previous, &capability)
 		result[index] = capability
 		matched[index] = true
 		if previous.Model != capability.Model && previous.UpstreamModel == capability.UpstreamModel {
@@ -498,11 +506,17 @@ func mergeSyncedCapabilities(existing, inferred []config.ChannelCapability) []co
 		}
 		identity := capability.Model + "\x00" + capability.UpstreamModel
 		if index, exists := byIdentity[identity]; exists {
-			current := result[index]
+			previous := result[index]
+			current := previous
 			current.ReasoningEfforts = mergeOrderedStrings(current.ReasoningEfforts, capability.ReasoningEfforts)
+			if current.Evidence.Status == "" || current.Evidence.Source == "model_catalog" {
+				current.Evidence = capability.Evidence
+			}
+			current.Features = config.CloneCapabilityFeatures(current.Features)
 			if current.UpstreamModel == "" {
 				current.UpstreamModel = capability.UpstreamModel
 			}
+			preserveUnchangedCatalogEvidence(previous, &current)
 			result[index] = current
 			continue
 		}
@@ -511,6 +525,17 @@ func mergeSyncedCapabilities(existing, inferred []config.ChannelCapability) []co
 		result = append(result, capability)
 	}
 	return result
+}
+
+// Catalog evidence timestamps describe the observed declaration version, not
+// the background polling heartbeat. An unchanged declaration must not rewrite
+// configuration, rebuild transports or retire completed-call observations.
+func preserveUnchangedCatalogEvidence(previous config.ChannelCapability, current *config.ChannelCapability) {
+	if previous.Evidence.Source == "model_catalog" && current.Evidence.Source == "model_catalog" &&
+		previous.Evidence.Status == current.Evidence.Status && previous.Model == current.Model &&
+		previous.UpstreamModel == current.UpstreamModel && sameModels(previous.ReasoningEfforts, current.ReasoningEfforts) {
+		current.Evidence = previous.Evidence
+	}
 }
 
 func mergeOrderedStrings(left, right []string) []string {

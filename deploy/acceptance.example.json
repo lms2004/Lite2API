@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "cases": [
+    {"name": "daily_chat", "model": "deepseek-fast", "operation": "openai.chat", "stream": false},
+    {"name": "daily_stream", "model": "deepseek-fast", "operation": "openai.chat", "stream": true}
+  ]
+}

@@ -7,6 +7,12 @@ if [[ $# -ne 1 ]]; then
 fi
 
 backup_dir=$1
+age_identity_args=()
+if [[ -n ${AGE_IDENTITY_FILE:-} ]]; then
+    [[ -f $AGE_IDENTITY_FILE && ! -L $AGE_IDENTITY_FILE ]] || { echo 'unsafe age identity file' >&2; exit 1; }
+    age_identity_args=(--identity "$AGE_IDENTITY_FILE")
+fi
+decrypt() { age --decrypt "${age_identity_args[@]}" "$1"; }
 for command in age grep sha256sum tar; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
@@ -19,7 +25,7 @@ for file in systemd-state.tar.age SHA256SUMS METADATA; do
         exit 1
     }
 done
-grep -Fxq 'format=lite2api-systemd-state-v1' "$backup_dir/METADATA"
+grep -Eq '^format=lite2api-systemd-state-v[12]$' "$backup_dir/METADATA"
 
 (
     cd "$backup_dir"
@@ -27,7 +33,11 @@ grep -Fxq 'format=lite2api-systemd-state-v1' "$backup_dir/METADATA"
     grep -Eq '^[0-9a-f]{64}  systemd-state[.]tar[.]age$' SHA256SUMS
     sha256sum --check SHA256SUMS
 )
-archive_listing=$(age --decrypt "$backup_dir/systemd-state.tar.age" | tar -tf -)
+if grep -Fxq 'format=lite2api-systemd-state-v2' "$backup_dir/METADATA"; then
+    project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+    decrypt "$backup_dir/systemd-state.tar.age" | python3 "$project_dir/deploy/state_archive.py" check --require-manifest
+fi
+archive_listing=$(decrypt "$backup_dir/systemd-state.tar.age" | tar -tf -)
 while IFS= read -r archive_path; do
     [[ $archive_path != /* && $archive_path != .. && $archive_path != ../* && \
         $archive_path != */../* && $archive_path != */.. ]] || {
@@ -35,7 +45,7 @@ while IFS= read -r archive_path; do
         exit 1
     }
 done <<<"$archive_listing"
-archive_verbose=$(age --decrypt "$backup_dir/systemd-state.tar.age" | tar -tvf -)
+archive_verbose=$(decrypt "$backup_dir/systemd-state.tar.age" | tar -tvf -)
 while read -r mode _; do
     case ${mode:0:1} in
         -|d) ;;
@@ -52,7 +62,7 @@ if grep -Eq '^(etc/cliproxyapi|var/lib/cliproxyapi/auths)(/|$)' <<<"$archive_lis
     grep -Fxq 'etc/cliproxyapi/cliproxyapi.env' <<<"$archive_listing"
     grep -Eq '^var/lib/cliproxyapi/auths/?$' <<<"$archive_listing"
 fi
-age --decrypt "$backup_dir/systemd-state.tar.age" |
+decrypt "$backup_dir/systemd-state.tar.age" |
     tar -xOf - etc/lite2api/lite2api.env |
     awk -F= '
         $1 == "LITE2API_API_KEYS" || $1 == "LITE2API_ADMIN_TOKEN" {

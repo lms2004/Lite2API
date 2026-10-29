@@ -1,0 +1,36 @@
+{
+  "reviewer": "protocol_health",
+  "scope": "independent source review and local HTTP fixtures only; no production or upstream calls",
+  "command": [
+    "go",
+    "test",
+    "./internal/gateway",
+    "-run",
+    "^(TestOAuthCredentialRemovalPreservesScopedRoutesAndOtherProviders|TestAccountImportOAuthOnlyChecksRevisionBeforeUpload|TestAccountImportRollsBackNewAndReplacedCredentialsOnCommitFailure|TestOAuthPoolEnsurePreservesProviderScopeAndManualDisable)$",
+    "-count=1",
+    "-timeout=90s",
+    "-json"
+  ],
+  "exit_code": 0,
+  "duration_seconds": 2.597,
+  "source_stable": true,
+  "sha256": {
+    "internal/gateway/oauthadapter.go": "684a6820bfeeaad21d76141bc81b39dbc82dbce94d9e97dfb925711f4e589084",
+    "internal/gateway/accountimport.go": "4f121651940082c4ca82d6b16b7929064055b3759af3d57ee629528eec4d936f",
+    "internal/gateway/admin.go": "44d80ab72f5d3206b29f08e42ef63e086e335bb577d5bf57d2c27cabe4fe4416",
+    "internal/gateway/oauth_boundary_regression_test.go": "b45b322e94732b2116fa6a6376c59d46e2fcded03001d1a88dcea41b9d448809",
+    "internal/config/capability_discovery.go": "d49cc8725c66a44e988d52cfffc40c8276b8eb953f5260efea4bb0de0e04d6d3"
+  },
+  "findings": [
+    {
+      "status": "fixed",
+      "issue": "Removing a routed OAuth model originally made config validation fail after adapter mutation, leaving the old enabled source live.",
+      "resolution": "Preserve reviewed aliases and original declarations when pruning would invalidate them, disable affected source, return an explicit route-repair warning, and preserve unrelated provider scopes.",
+      "regression": "TestOAuthCredentialRemovalPreservesScopedRoutesAndOtherProviders"
+    }
+  ],
+  "limits": [
+    "Remote credential mutation followed by local persistence failure is reported explicitly and still requires operator reconciliation; unlike imports, delete/status does not compensate the remote mutation.",
+    "Automatically disabled connections stay disabled after credentials return; reviewed route repair and explicit re-enable are required."
+  ]
+}

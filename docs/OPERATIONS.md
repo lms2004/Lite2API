@@ -23,7 +23,7 @@ curl -fsS http://127.0.0.1:45679/readyz  # 启用并配置上游后再要求成�
 docker stats --no-stream lite2api
 ```
 
-`/health` 将进程存活（`liveness: ok`）与模型访问状态分开：无近期样本为 `unknown`，最近请求验证通过为 `ready`，部分失败为 `degraded`，路由目标缺失或无可尝试目标为 `unavailable`。只有 `unavailable` 返回 HTTP 503，避免把无流量启动期误判为进程故障。
+`/health` 将进程存活（`liveness: ok`）与模型访问状态分开：无近期样本为 `unknown`，最近请求验证通过为 `ready`，部分失败为 `degraded`，路由目标缺失或无可尝试目标为 `unavailable`。只有 `unavailable` 返回 HTTP 503，避免把无流量启动期误判为进程故障。`ready` 只覆盖列出的近期实际调用，不能推广到所有接口、特性或池内凭据。`operations.routes[].observations` 给出目标、接口、流模式、观测时间、结果与新鲜度；历史证据仍可查看，但超过 5 分钟不再证明近期可用。
 
 systemd 生产主机使用统一检查脚本：
 
@@ -33,13 +33,16 @@ systemctl status lite2api cliproxyapi
 journalctl -u lite2api -u cliproxyapi --since today
 ```
 
+该检查脚本依赖主机提供 `curl`、`grep`、`jq`、`sed`、`ss`（`iproute2`）和
+`systemctl`；在最小发行版上先安装这些工具。
+
 Lite2API 本体使用可重建、自动回滚的安装流程：脚本会创建缺失的用户、目录、环境文件和初始配置，从当前 `HEAD` 的 detached worktree 构建，验证配置后再切换服务：
 
 ```bash
 sudo ./deploy/install-lite2api-systemd.sh
 ```
 
-服务器若有多个 Go 版本，可通过 `GO_BIN=/absolute/path/to/go` 指定工具链；部署严格要求 Go `1.26.5`（与 Docker/CI 相同），升级工具链必须同时修改安装器、容器、CI 和版本证据。dirty/untracked 文件不会进入二进制；失败会恢复旧 binary/unit 和服务启用状态，成功后打印本机 rollback snapshot 路径。
+服务器若有多个 Go 版本，可通过 `GO_BIN=/absolute/path/to/go` 指定工具链；部署严格要求 Go `1.26.5`（与 Docker/CI 相同），升级工具链必须同时修改安装器、容器、CI 和版本证据。dirty/untracked 文件不会进入二进制；失败会恢复旧 binary/unit、完整配置目录、环境、Key、服务状态目录、自定义绝对 Key 文件和服务启用状态，成功后打印本机 rollback snapshot 路径。
 
 CLIProxyAPI 的固定版本安装或升级流程：
 
@@ -48,7 +51,7 @@ git submodule update --init third_party/cliproxyapi
 sudo ./deploy/install-cliproxyapi-systemd.sh
 ```
 
-安装器具有幂等性：已有密钥和 OAuth 凭据不会被轮换或删除；固定上游提交在隔离 worktree 中重放三组补丁，随后执行回环健康检查及两条鉴权检查。失败会恢复二进制、unit、配置、两个环境文件与服务状态。
+安装器具有幂等性：已有密钥和 OAuth 凭据不会被轮换或删除；固定上游提交在隔离 worktree 中重放仓库维护的五组补丁，随后执行回环健康、两条鉴权与已在使用的 OAuth 来源业务验收。验收清单须用 `expect_account` 指认受影响来源，不能由其他备用来源掩盖适配器失败。失败会恢复二进制、unit、配置、两个环境文件与服务状态。
 
 Nginx 与应用的管理来源名单只维护一份。修改 `/etc/lite2api/lite2api.env` 中的 `LITE2API_ADMIN_ALLOWED_CIDRS` 后执行：
 
@@ -70,12 +73,13 @@ docker volume ls --filter label=com.docker.compose.volume=lite2api-data
 # 将上一步显示的精确卷名以只读方式导出到加密/异地备份介质。
 docker compose build
 docker compose up -d
-curl -fsS http://127.0.0.1:45679/health
+python3 deploy/verify_service.py --url http://127.0.0.1:45679 \
+  --cases /安全路径/acceptance.json --env-file .env
 ```
 
 镜像升级失败时无需编辑 YAML：`LITE2API_IMAGE="lite2api:rollback-$release_id" docker compose up -d --no-build`。配置回滚必须恢复命名卷中的 `/app/data/config.json`、`client_keys.json` 和相关日志状态，再重建容器；仓库路径 `data/config.json` 不参与当前 Compose。
 
-systemd 安装器在切换前创建本机短期 rollback snapshot，并在健康失败时自动恢复。成功安装输出 snapshot 路径；它用于快速升级回退，不替代异地备份。Lite2API 的动态配置、Key 元数据和日志仍在 `/etc/lite2api/` 原子更新；目录使用 `root:lite2api 1770` sticky 边界，服务拥有 `config.json`，但不能替换 root 拥有的 `lite2api.env`。
+systemd 安装器在切换前创建本机短期 rollback snapshot，并在健康失败时自动恢复。有启用来源时必须先配置关键调用清单（默认 `/etc/lite2api/acceptance.json`，或 `LITE2API_ACCEPTANCE_CASES`）；可从 `deploy/acceptance.example.json` 按真实模型/接口修改。校验包含完整结果、匿名 401、管理凭据不能调用模型，以及可选的 `expect_account` 关联。程序在构建后、变更前停写并准备完整恢复点；验收失败回退，回退调用检查结果单独保留，无法确认的恢复不宣称成功。成功安装输出 snapshot 路径；它用于快速升级回退，不替代异地备份。Lite2API 的动态配置、Key 元数据和日志仍在 `/etc/lite2api/` 原子更新；目录使用 `root:lite2api 1770` sticky 边界，服务拥有 `config.json`，但不能替换 root 拥有的 `lite2api.env`。
 
 ## 备份
 
@@ -88,30 +92,34 @@ systemd 安装器在切换前创建本机短期 rollback snapshot，并在健康
 - 已创建的 Grok 命名卷 `lite2api-grok-data` 与 `lite2api-grok-quality`
 - systemd 部署的 `/etc/lite2api/`（含 `client_keys.json` 与有界日志）、`/etc/cliproxyapi/` 和 `/var/lib/cliproxyapi/auths/`
 
-备份必须在产生端加密后发送到异地主机或对象存储，设置 retention，并定期恢复到临时目录演练；不要在同一台服务器长期堆放明文 tar。程序没有数据库。运行统计在内存中，重启丢失，不属于需要恢复的业务状态。
+备份必须在产生端加密后发送到异地主机或对象存储，设置 retention，并定期恢复到临时目录演练；不要在同一台服务器长期堆放明文 tar。程序没有数据库。累计计数驻留内存；有界请求摘要可以恢复相同配置/契约下的观测。Key 元数据、配置和适配器凭据属于必要恢复材料。
 
 Compose 提供无明文临时归档的 age 快照与流式验证脚本（`age` 私钥应保存在另一台主机或硬件介质）：
 
 ```bash
 LITE2API_DATA_VOLUME=精确命名卷 \
   ./deploy/snapshot-compose-state.sh /mnt/offsite/lite2api-$(date -u +%Y%m%d) age1...
-./deploy/verify-compose-snapshot.sh /mnt/offsite/lite2api-YYYYMMDD
+AGE_IDENTITY_FILE=/安全路径/age-identity \
+  ./deploy/verify-compose-snapshot.sh /mnt/offsite/lite2api-YYYYMMDD
 ```
 
-快照脚本以只读卷、无网络、固定 Alpine digest 和仅 `DAC_READ_SEARCH` 能力导出，分别加密 Lite2API 卷、存在的 Grok 卷、存在的 `channels/runtime/` 与 `.env`；目标已存在时拒绝覆盖，状态树中出现符号链接也会失败。多 Compose 项目产生同名标签时，脚本拒绝猜测，需用 `LITE2API_DATA_VOLUME`、`GROK2API_DATA_VOLUME`、`GROK2API_QUALITY_VOLUME` 指定精确卷名。验证脚本对白名单内的密文清单做摘要校验，流式解密每个 tar，并确认必需环境密钥满足强度且不是示例占位符，不把密钥值打印到终端。为得到跨文件一致的灾备点，应先停写或停容器再快照；生产恢复仍需在停流后由管理员显式执行，避免自动脚本误覆盖活跃卷。
+快照脚本以只读卷、无网络、固定 Alpine digest 和仅 `DAC_READ_SEARCH` 能力导出，分别加密 Lite2API 卷、存在的 Grok 卷、存在的 `channels/runtime/` 与 `.env`；目标已存在时拒绝覆盖，状态树中出现符号链接也会失败。多 Compose 项目产生同名标签时，脚本拒绝猜测，需用 `LITE2API_DATA_VOLUME`、`GROK2API_DATA_VOLUME`、`GROK2API_QUALITY_VOLUME` 指定精确卷名。验证脚本对白名单内的密文清单做摘要校验，流式解密每个 tar，并确认必需环境密钥满足强度且不是示例占位符，不把密钥值打印到终端。脚本只暂停所选卷和 runtime bind 的运行中生产者，完成或失败后恢复原未暂停容器；跨文件导出期间检查主机侧环境/runtime 文件未变化。可选 Grok 卷只在主卷同一 Compose project 中自动寻找，无所属项目时要求显式卷名；不猜测其他项目。容器外写入者需先停写，检测到变化则不发布快照。自定义 Key 若在 `/app/data` 卷外会拒绝，避免遗漏现有客户端凭据。
 
 systemd 状态使用同样的流式 age 边界：
 
 ```bash
 sudo ./deploy/server-ops/backup-configs.sh /mnt/offsite/lite2api-systemd-$(date -u +%Y%m%d) age1...
-./deploy/server-ops/verify-systemd-backup.sh /mnt/offsite/lite2api-systemd-YYYYMMDD
+AGE_IDENTITY_FILE=/安全路径/age-identity \
+  ./deploy/server-ops/verify-systemd-backup.sh /mnt/offsite/lite2api-systemd-YYYYMMDD
 ```
 
 旧的同机 `/root/server-backups/*.tar.gz` 明文归档方式已移除；新脚本拒绝符号链接、从不创建明文 tar、拒绝覆盖既有目标。
 
 ## 故障判断
 
-- `503 no healthy account...`：路由没有健康账号，或账号并发槽全部占满并超过等待时间。
+- 删除或停用 OAuth 凭据会按 provider 重新核对共享连接的模型目录。最后一个可用凭据消失，或原路由仍引用已退出的模型时，受影响连接会停用；保留原路由供审阅，其他 provider 不会被扩入该连接。重新授权或启用凭据后，需审阅提示并显式启用连接，再完成原接口调用；`pool_ready=false` 不能视为恢复成功。
+- OAuth 删除/停用与本地配置提交失败时，程序会有界恢复原凭据、原停用状态和配置。`oauth_credential_change_rolled_back` 表示本次变更失败且原状态已恢复；`oauth_credential_rollback_incomplete` 表示恢复未能确认，需要先恢复适配器连通性及配置写入权限，再核对两端状态后重试。凭据快照仅在内存中保留，不写入请求日志。
+- `503`：根据错误 `code` 区分 `no_eligible_source`（模型/接口/特性无候选）、`source_unavailable`（已知故障或冷却）、`capacity_exhausted`（并发满载）与 `queue_timeout`（等待超时）；`upstream_unavailable` 也可能来自受信适配器的空认证池。
 - `429 gateway concurrency limit reached`：入口总并发保护生效。
 - 账号显示 `circuit_open_until`：连续失败、鉴权错误或上游限流触发熔断。
 - `upstream stream idle`：响应头成功，但上游在配置时间内没有继续产生数据。
@@ -151,3 +159,34 @@ CLIProxyAPI 模板把 `max-retry-credentials` 设为 `0`，含义是一次执行
 OAuth 账号卡片中的 Prompt usage 只来自 CLIProxyAPI 对真实 provider `usage.Detail` 的最新观测：输入字段标为“注入后输入 / 上游 input tokens”，不能解读为纯 system prompt 或纯注入长度。快照仅驻留进程内，账号禁用或删除时清理；原始 prompt、响应正文和凭据不会写入 auth 持久化 JSON。无真实观测时管理台显示“暂无真实 usage”，不会按请求字符串估算 token。
 
 安装器创建的 rollback snapshot 只保留升级前文件并留在本机；应按运维周期清理，不能替代加密异地备份。额度快照只在内存中存在，不属于备份或恢复范围。
+
+## 调用完成、诊断与恢复验收
+
+普通成功响应按接口确认完成，流式必须有协议结束事件。HTTP 200 的截断流记为失败；已经交付的流返回脱敏错误事件，大 JSON 无法改写状态码时中止连接。管理台统计以 `outcome` 为准。`stats.recent[].attempt_count/attempts` 把必要发送（含一次 OAuth 刷新后重试）关联到同一逻辑调用，最多保存前 64 条发送事实，逻辑结果与最终来源独立记录；不保留原始请求、响应或凭据。
+
+网关在交付含终止事件的数据块前，检查该块中已读取的完整与残缺尾部；合法终止事件通过后即关闭上游，不等待传输 EOF，也不检查尚未读取的未来数据。Messages 已知文本、思考、签名及工具增量必须匹配内容块类型，并包含相应的非 null 字符串字段。发布验收器独立要求 SSE 事件以空行派发，且解析响应或来源证据出现异常时，该用例必须失败并返回非零退出码。
+
+`/readyz` 是配置与近期证据检查：无可尝试目标、近期失败或整条路由观测过期时返回 503；完全未观测的冷启动保持 HTTP 200 且 `unknown`，避免流量调度死锁。按目标、真实凭据、上游模型、推理强度、接口、流模式、必要特性与请求契约摘要分别保留观测，某个接口的新成功不会覆盖另一个接口的近期失败；历史低频接口不单独造成永久失败。证据内存上限为 16384 个组合，模型、来源、能力状态或完成契约身份改变时旧证据失效，重启仅恢复匹配身份的事实；纯证据来源/时间更新不改变身份。同一目录声明版本保留原 `observed_at`，不会因轮询重复写盘、热加载或清空调用证据，该时间不是轮询心跳。
+
+Messages 不接受 OpenAI 的 `reasoning_effort`；使用客户端原生 `thinking`。路由强制 OpenAI 推理强度时不能拿该路由调用 Messages。HTTP Responses 的非空 `previous_response_id` 只允许模型映射固定的单一原生直接来源；多来源、CLIProxy 和其他适配器返回 400 `unsupported_parameter`，应发送完整 `input` 历史。此边界不承诺跨配置变更或重启的网关会话状态恢复。CLIProxy 当前 Codex HTTP 路径会删除该字段，不能把软粘性当作续接保障。
+
+升级或备份恢复后，先验证配置/权限/模型目录，再用实际客户端完成所需模型、接口与特性组合，并确认调用结果、发送次数与资源槽释放。进程启动、目录可读和 OAuth 刷新成功只证明对应步骤，不能作为服务能力恢复完成。永久失效的 refresh grant 必须重新登录。已有部署的恢复记录属于对应版本证据，不能代替新构建验收。
+
+## 还原到隔离目录并验收
+
+```bash
+python3 deploy/state_archive.py restore systemd \
+  --snapshot /mnt/offsite/lite2api-systemd-YYYYMMDD \
+  --identity /安全路径/age-identity --output /安全路径/新恢复目录
+# Compose 使用 restore compose，输出独立的各卷目录与 environment。
+```
+
+还原拒绝覆盖既有目标，拒绝目标祖先符号链接、危险 tar 路径、重复项及软/硬链接成员；普通硬链接来源在备份时保存为独立普通文件。解密状态仅写入新建 `0700` 目录和 `0600` 文件，错误/取消会清理未完成输出及解密子进程。每次状态操作有 300 秒上限、2 GiB/20000 项预算。
+
+systemd v2 备份把配置实际使用的自定义绝对 `client_keys_path` 一起归档，记录全部文件摘要与 Key 元数据是否存在，检测归档前后变动；忙碌状态树需停写后重试。老 v1 可按结构恢复，但没有 v2 状态清单证明，缺失 Key 不能声称原客户端访问已恢复。`RESTORE.json` 给出备份时间与待核对项，只报告备份时点材料还原；备份之后的权限撤销、渠道变化需要重新核对和应用。必须再按目标环境恢复所需版本/依赖、核对权限，并运行 `verify_service.py` 及实际客户端。工具不自动覆盖正在运行的服务或卷。
+
+升级的配置与状态快照在停服务后取得；失败时恢复 Lite2API 原活动/启用状态。在途调用依停机窗口处理，不承诺零中断；提交结果不确定的调用不自动重放。`LITE2API_INSTALL_ROOT` 和 `LITE2API_BACKUP_ROOT` 供离线树/隔离演练使用，不切换生产文件。新实现仍在工作区时，应先提交选定版本，安装器不会把未提交代码混入旧提交的发布产物。
+
+管理台的来源验收与变更：`POST /admin/api/accounts/verify` 只对指定来源/模型/接口及 `call/stream/tools/image_input` 固定预设验收；结果 `ok`、`completed` 和 `evidence_saved` 分别核对，不能只看 HTTP 200。工具验收执行两次请求，中间实际回传无害工具结果；共享池第二跳固定原凭据。图片验收发送内置 PNG 的原生多模态请求，图片与流式工具组合不能由单项验收推定。`GET /admin/api/accounts/:id/impact` 和 `If-Match` 用于审阅后的变更，返回 409 时刷新并重新审阅。
+
+调用响应的 `X-Lite2API-Request-Id` 对应摘要记录的 `request_id`，不接受客户端或上游伪造。维护者可核对失败范围、已进行的发送和最终结果；一次普通成功不能覆盖另一个凭据、模型或工具契约的失败。原失败范围恢复后才清除相应近期失败，升级完成契约 v2 时旧 v1 观测不充当新规则的验证。浏览器管理会话写入需要 CSRF；显式管理 Token Header 受同一网络与管理权限边界保护，是不依赖 Cookie 的保留接口。

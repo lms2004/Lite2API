@@ -137,7 +137,7 @@ globalThis.Lite2APIShared = function createShared(context) {
   }
 
   function requestOK(record) {
-    return Number(record.status) >= 200 && Number(record.status) < 400;
+    return globalThis.Lite2APIMetrics.requestSucceeded(record);
   }
 
   function quotaWindows(account) {

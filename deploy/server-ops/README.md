@@ -1,6 +1,8 @@
 # Server Operations Guide
 
-Last verified: 2026-08-30 UTC
+Last reviewed: 2026-10-29 UTC. Run the isolated lifecycle suites before treating
+upgrade or restore behavior as verified; this guide does not claim a production
+drill.
 
 This directory contains host-neutral production checks. Public hostnames, IP
 addresses, certificate paths and VPN policy belong in the host's protected
@@ -20,6 +22,9 @@ Lite2API and CLIProxyAPI are independent, unprivileged systemd services. The
 reverse proxy is the only public listener. The application repeats the admin
 CIDR check, so a reverse-proxy mistake does not silently expose the admin API.
 
+The host check requires `curl`, `grep`, `jq`, `sed`, `ss` (from `iproute2`) and
+`systemctl`; install those packages before running `check-services.sh`.
+
 ## Rebuildable installation
 
 ```bash
@@ -36,16 +41,28 @@ sudo ./deploy/server-ops/check-services.sh
 The Lite2API installer provisions a missing service user, `/etc/lite2api`, a
 private environment file and an initial configuration. Both installers build
 from detached worktrees at selected commits; dirty and untracked checkout files
-cannot enter a labeled release. CLIProxyAPI additionally reapplies the three
-maintained patches to its fixed upstream revision. Each installer snapshots the
-files it will replace and automatically restores them if health validation
-fails. Successful installs print the local rollback snapshot path.
+cannot enter a labeled release. CLIProxyAPI additionally reapplies the five
+maintained patches to its fixed upstream revision. With enabled sources, prepare
+`/etc/lite2api/acceptance.json` (or set `LITE2API_ACCEPTANCE_CASES`) for the actual
+models and interfaces before installing. Complete business responses and access
+boundaries must pass; upgrading an active OAuth adapter also requires
+`expect_account` to identify the affected connection so fallback cannot hide its
+failure. An initial installation without enabled sources reports bootstrap
+liveness only.
+
+Each installer captures a recovery point before mutation. Lite2API rollback
+restores its binary, unit, configuration/environment, service state, custom
+absolute client-key file, and original active/enabled state. Failed business
+acceptance triggers rollback even if the candidate is live and returns HTTP
+200. Successful installs print the local rollback snapshot path; rollback
+acceptance results are retained separately.
 
 Sensitive state remains outside Git:
 
 - `/etc/lite2api/`: `root:lite2api 1770`; sticky ownership permits atomic service-owned config/key/log updates while protecting the root-owned environment entry.
 - `/etc/lite2api/lite2api.env`: gateway, admin and upstream keys.
 - `/etc/lite2api/config.json`: desired routing configuration.
+- The configured `server.client_keys_path`: managed-key hashes, model permissions, expiry and revocation state. It defaults to `client_keys.json` beside the configuration; an absolute custom path must also be preserved.
 - `/etc/cliproxyapi/cliproxyapi.env`: adapter management credential.
 - `/var/lib/cliproxyapi/auths/`: OAuth account credentials.
 - `/var/lib/lite2api-rollbacks/` and `/var/lib/cliproxyapi-rollbacks/`: root-only, short-lived local upgrade snapshots kept outside service-writable state.
@@ -53,10 +70,25 @@ Sensitive state remains outside Git:
 Local rollback snapshots are not backups. Use encrypted off-host storage and
 regular restore drills as described in `docs/OPERATIONS.md`.
 
-For systemd state, `backup-configs.sh OUTPUT_DIRECTORY AGE_RECIPIENT` streams
-the selected files directly into age encryption; `verify-systemd-backup.sh`
-checks the encrypted archive without writing a plaintext tar. Copy the snapshot
-off-host and apply retention in the destination system.
+For systemd state, v2 backups include the actual configured absolute client-key
+file and a file-digest/key-presence manifest. The backup detects changes while
+collecting files; quiesce busy or external writers before retrying. Losing key
+metadata prevents claiming that existing client access has been restored.
+
+```bash
+sudo ./deploy/server-ops/backup-configs.sh /mnt/offsite/lite2api-systemd-YYYYMMDD age1...
+sudo env AGE_IDENTITY_FILE=/secure/path/age-identity \
+  ./deploy/server-ops/verify-systemd-backup.sh /mnt/offsite/lite2api-systemd-YYYYMMDD
+```
+
+Encryption and verification stream without a plaintext tar. Verification needs
+an explicit readable age identity; do not rely on an implicit default key.
+Keep that identity separate from the backup, copy the snapshot off-host and
+apply retention there. Restore into a new private directory with
+`deploy/state_archive.py restore systemd --snapshot SNAPSHOT --identity IDENTITY
+--output NEW_DIRECTORY`, then reconcile post-backup revocations and complete
+real client/source acceptance. Old v1 archives lack the v2 state-manifest proof.
+See [Operations](../../docs/OPERATIONS.md) for restore commands and boundaries.
 
 ## One-source admin allowlist
 

@@ -1,0 +1,18 @@
+{
+  "scope": "local_request_shape_no_external_calls",
+  "client_exit": 1,
+  "requests": [
+    {
+      "max_tokens": 1024,
+      "thinking": null,
+      "stream": true,
+      "tool_count": 0
+    },
+    {
+      "max_tokens": 1024,
+      "thinking": null,
+      "stream": true,
+      "tool_count": 1
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "observed_at": "2026-10-29T21:51:48.179418+08:00",
+  "status": "source_closeout_verified_with_external_acceptance_limits",
+  "git_base": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "branch": "main",
+  "scope": "Current source and isolated fixtures; real external-client acceptance belongs to the older production snapshot only.",
+  "candidate_version": "closeout-20261029-c9069a6cd858",
+  "candidate_binary_sha256": "3a718077b80a6e3553983d74ce40d4b5b2e10a80ffa163af50646f892beb1015",
+  "runtime_source_unchanged_after_build": true,
+  "subsequent_checker_changes": [
+    "deploy/lifecycle_review_test.py",
+    "deploy/verify_service.py"
+  ],
+  "source_manifest": "accepted-source-manifest.json",
+  "runtime_validation": "final-results.json",
+  "checker_validation": "accepted-checker-results.json",
+  "independent_review": "independent-review.json",
+  "web_validation": {
+    "command": "make test-web",
+    "exit_code": 0,
+    "test_files_passed": 4,
+    "subsequent_web_changes": false,
+    "log": "web.log"
+  },
+  "tests": {
+    "go_pass_events_each_normal_and_race": 617,
+    "go_fail_events": 0,
+    "go_skip_events": 0,
+    "oauth_race_repetitions": 10,
+    "oauth_race_pass_events": 70,
+    "python_contracts": 10,
+    "python_business_runtime": 9,
+    "python_null_compatibility": 5,
+    "python_failure_gate": 3,
+    "real_age_restore": 8,
+    "isolated_upgrade": 4,
+    "docker_snapshot": 1,
+    "real_isolated_systemd": 5
+  },
+  "historical_release_files_changed": [
+    "Makefile",
+    "deploy/lifecycle_review_test.py",
+    "deploy/verify_service.py",
+    "internal/gateway/accountimport.go",
+    "internal/gateway/completion_stream_contract.go",
+    "internal/gateway/gateway.go",
+    "internal/gateway/oauth_boundary_regression_test.go",
+    "internal/gateway/response_completion.go"
+  ],
+  "production_deployment_performed": false,
+  "external_provider_calls_in_this_closeout": 0,
+  "external_limits": [
+    "Previous actual Claude Code tool roundtrip failed with upstream 429; quota/permission recovery and new acceptance are required.",
+    "Two permanently invalid OAuth grants require reauthorization, and the Anthropic fallback credential requires restored provider permission.",
+    "Latest runtime fixes have not been deployed or exercised with real external clients; other untested model/feature combinations remain unknown.",
+    "Browser visual acceptance and production disaster recovery were not performed."
+  ],
+  "archive": {
+    "historical_failures_preserved": true,
+    "prior_continuation_evidence_hashes_unchanged": true,
+    "round2_index_reconstructed_with_missing_original_material_explicit": true,
+    "sanitized_test_logs_included": true
+  }
+}

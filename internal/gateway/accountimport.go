@@ -2,10 +2,13 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,9 +72,10 @@ type AccountImportItem struct {
 }
 
 type AccountImportRequest struct {
-	Data   AccountImportData `json:"data"`
-	Mode   string            `json:"mode,omitempty"`
-	DryRun bool              `json:"dry_run,omitempty"`
+	Data             AccountImportData `json:"data"`
+	Mode             string            `json:"mode,omitempty"`
+	DryRun           bool              `json:"dry_run,omitempty"`
+	ExpectedRevision string            `json:"-"`
 }
 
 type AccountImportResult struct {
@@ -106,6 +110,9 @@ type indexedAccountImportItem struct {
 
 func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportRequest) (AccountImportResult, error) {
 	result := AccountImportResult{SourceFormat: normalizedImportType(request.Data.Type)}
+	if request.ExpectedRevision != "" && request.ExpectedRevision != runtimeConfigRevision(g.state.Load()) {
+		return result, ErrConfigRevisionConflict
+	}
 	if err := validateAccountImportHeader(request.Data); err != nil {
 		return result, err
 	}
@@ -118,50 +125,78 @@ func (g *Gateway) ImportAccounts(ctx context.Context, request AccountImportReque
 	}
 
 	proxyURLs := validateImportProxies(request.Data.Proxies, &result)
-	oauthProviders := make(map[string]struct{})
 	accountItems := make([]indexedAccountImportItem, 0, len(request.Data.Accounts))
+	oauthItems := make([]indexedAccountImportItem, 0, len(request.Data.Accounts))
 	for index, item := range request.Data.Accounts {
-		// OAuth/cookie exports never become upstream API-key channels; their raw
-		// token bundle goes to the isolated CLIProxy pool instead.
+		indexed := indexedAccountImportItem{Index: index, Item: item}
 		if item.isOAuthImportItem() {
-			g.importOAuthItem(ctx, index, item, request.DryRun, &result, oauthProviders)
-			continue
+			oauthItems = append(oauthItems, indexed)
+		} else {
+			accountItems = append(accountItems, indexed)
 		}
-		accountItems = append(accountItems, indexedAccountImportItem{Index: index, Item: item})
 	}
 	if request.DryRun {
 		candidate := cloneConfig(g.state.Load().cfg)
 		applyImportedAccounts(&candidate, accountItems, proxyURLs, mode, &result)
+		for _, indexed := range oauthItems {
+			g.importOAuthItem(ctx, indexed.Index, indexed.Item, true, &result, nil, nil)
+		}
 		return result, nil
 	}
-	if len(accountItems) > 0 {
-		if err := g.updateConfig(func(candidate *config.Config) (bool, error) {
-			return applyImportedAccounts(candidate, accountItems, proxyURLs, mode, &result), nil
-		}); err != nil {
-			return result, fmt.Errorf("apply account import: %w", err)
-		}
+
+	// Uploads and the final configuration commit share the revision lock. This
+	// includes OAuth-only imports, and prevents a stale preview from writing
+	// adapter credentials before discovering its configuration conflict.
+	g.reloadMu.Lock()
+	defer g.reloadMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	transaction := &oauthImportTransaction{}
+	err := g.updateConfigAtRevisionLocked(request.ExpectedRevision, func(candidate *config.Config) (bool, error) {
+		changed := applyImportedAccounts(candidate, accountItems, proxyURLs, mode, &result)
 		result.Applied = result.AccountCreated+result.AccountUpdated > 0
-	}
-	// Guarantee the shared CLIProxy OAuth pool account exists for every provider
-	// whose credentials were just uploaded. This is best-effort: the auth-files
-	// are already stored, so a pool-account error is surfaced without failing the
-	// whole import. Sorted for deterministic behaviour across runs.
-	if len(oauthProviders) > 0 {
-		providers := make([]string, 0, len(oauthProviders))
-		for provider := range oauthProviders {
-			providers = append(providers, provider)
-		}
-		sort.Strings(providers)
-		for _, provider := range providers {
-			if err := ensureOAuthCredentialPrefixes(ctx, provider); err != nil {
-				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: err.Error()})
+		providers := make(map[string]struct{})
+		for _, indexed := range oauthItems {
+			if err := g.importOAuthItem(ctx, indexed.Index, indexed.Item, false, &result, providers, transaction); err != nil {
+				return false, err
 			}
-			if _, err := g.ensureOAuthPoolAccount(ctx, provider); err != nil {
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		ordered := make([]string, 0, len(providers))
+		for provider := range providers {
+			ordered = append(ordered, provider)
+		}
+		sort.Strings(ordered)
+		for _, provider := range ordered {
+			// Imported bundles already carry the required provider prefix. Do not
+			// rewrite unrelated existing credentials as part of this transaction.
+			ready, poolChanged, err := ensureOAuthPoolConfig(ctx, candidate, provider)
+			if contextErr := ctx.Err(); contextErr != nil {
+				return false, contextErr
+			}
+			changed = changed || poolChanged
+			if err != nil {
 				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: err.Error()})
+				continue
+			}
+			if !ready {
+				result.OAuthSkipped++
+				result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Message: "OAuth credentials were uploaded, but the shared pool account is disabled or unavailable"})
 				continue
 			}
 			result.Applied = true
 		}
+		return changed, ctx.Err()
+	})
+	if err != nil {
+		result.Applied = false
+		result.AccountCreated = 0
+		result.AccountUpdated = 0
+		rollbackErr := transaction.rollback(ctx)
+		result.OAuthImported = 0
+		return result, errors.Join(fmt.Errorf("apply account import: %w", err), rollbackErr)
 	}
 	return result, nil
 }
@@ -185,6 +220,10 @@ func applyImportedAccounts(candidate *config.Config, items []indexedAccountImpor
 		existing := accountIndex(candidate.Accounts, account.ID)
 		if existing >= 0 && mode == "skip" {
 			result.AccountSkipped++
+			continue
+		}
+		if err := restoreAccountDisplaySecrets(&account, configuredAccountByID(candidate.Accounts, account.ID)); err != nil {
+			result.addError(index, account.ID, account.Name, err)
 			continue
 		}
 		trial := cloneConfig(*candidate)
@@ -216,7 +255,7 @@ func applyImportedAccounts(candidate *config.Config, items []indexedAccountImpor
 // importOAuthItem maps a Sub2API OAuth account to a CLIProxy auth-file and, on a
 // live run, uploads it over the loopback management channel. Successful uploads
 // record their provider so the shared pool account can be ensured afterwards.
-func (g *Gateway) importOAuthItem(ctx context.Context, index int, item AccountImportItem, dryRun bool, result *AccountImportResult, providers map[string]struct{}) {
+func (g *Gateway) importOAuthItem(ctx context.Context, index int, item AccountImportItem, dryRun bool, result *AccountImportResult, providers map[string]struct{}, transaction *oauthImportTransaction) error {
 	provider, name, bundle, err := item.buildOAuthAuthFile(index)
 	if err != nil {
 		if errors.Is(err, errOAuthPlatformNotPooled) {
@@ -225,19 +264,99 @@ func (g *Gateway) importOAuthItem(ctx context.Context, index int, item AccountIm
 			result.OAuthFailed++
 		}
 		result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Index: index, ID: item.ID, Name: item.Name, Message: err.Error()})
-		return
+		return nil
 	}
 	if dryRun {
 		result.OAuthImported++
-		return
+		return nil
 	}
-	if err := uploadOAuthAuthFile(ctx, name, bundle); err != nil {
+	if err := transaction.upload(ctx, name, bundle); err != nil {
 		result.OAuthFailed++
 		result.Errors = append(result.Errors, AccountImportError{Kind: "oauth", Index: index, ID: item.ID, Name: item.Name, Message: err.Error()})
-		return
+		if len(transaction.order) > 0 {
+			return err
+		}
+		return nil
 	}
 	result.OAuthImported++
 	providers[provider] = struct{}{}
+	return nil
+}
+
+// Credential snapshots live only in memory. If the config commit fails, new
+// files are removed and replaced files are restored, never blindly deleted.
+type oauthImportTransaction struct {
+	existing map[string]bool
+	disabled map[string]bool
+	before   map[string]json.RawMessage
+	order    []string
+}
+
+func (tx *oauthImportTransaction) upload(ctx context.Context, name string, bundle any) error {
+	if tx.existing == nil {
+		var listing oauthAuthFilesResponse
+		if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files", nil, nil, &listing); err != nil {
+			return fmt.Errorf("inspect OAuth credentials before import: %w", err)
+		}
+		tx.existing = make(map[string]bool, len(listing.Files))
+		tx.disabled = make(map[string]bool, len(listing.Files))
+		tx.before = make(map[string]json.RawMessage)
+		for _, file := range listing.Files {
+			name := firstNonEmpty(file.Name, file.ID)
+			tx.existing[name] = true
+			tx.disabled[name] = file.Disabled || strings.EqualFold(strings.TrimSpace(file.Status), "disabled")
+			if file.RuntimeOnly && file.Path != "" {
+				parentName := filepath.Base(file.Path)
+				if !tx.existing[parentName] {
+					tx.existing[parentName] = true
+					tx.disabled[parentName] = tx.disabled[name]
+				}
+			}
+		}
+	}
+	if _, captured := tx.before[name]; !captured {
+		var previous json.RawMessage
+		if tx.existing[name] {
+			if err := callOAuthAdapter(ctx, http.MethodGet, "auth-files/download", url.Values{"name": []string{name}}, nil, &previous); err != nil {
+				return fmt.Errorf("snapshot existing OAuth credential before replacement: %w", err)
+			}
+			if len(previous) == 0 || !json.Valid(previous) {
+				return errors.New("OAuth adapter returned an invalid credential snapshot")
+			}
+		}
+		tx.before[name] = previous
+		tx.order = append(tx.order, name)
+	}
+	return uploadOAuthAuthFile(ctx, name, bundle)
+}
+
+func (tx *oauthImportTransaction) rollback(ctx context.Context) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	var failures []error
+	for index := len(tx.order) - 1; index >= 0; index-- {
+		name := tx.order[index]
+		var err error
+		if previous := tx.before[name]; len(previous) > 0 {
+			err = uploadOAuthAuthFile(cleanup, name, previous)
+			if err == nil {
+				err = callOAuthAdapter(cleanup, http.MethodPatch, "auth-files/status", nil, map[string]any{"name": name, "disabled": tx.disabled[name]}, nil)
+			}
+			if err == nil {
+				_, disabled, verifyErr := oauthCredentialMutationTarget(cleanup, name)
+				err = verifyErr
+				if verifyErr == nil && disabled != tx.disabled[name] {
+					err = errors.New("OAuth credential status restoration could not be confirmed")
+				}
+			}
+		} else {
+			err = callOAuthAdapter(cleanup, http.MethodDelete, "auth-files", url.Values{"name": []string{name}}, nil, nil)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("OAuth credential rollback incomplete for import item %d; inspect adapter state before retrying: %w", index+1, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func (r *AccountImportResult) addError(index int, id, name string, err error) {

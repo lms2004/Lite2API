@@ -10,19 +10,37 @@ import (
 type HealthState string
 
 const (
-	HealthUnknown     HealthState = "unknown"
-	HealthReady       HealthState = "ready"
-	HealthDegraded    HealthState = "degraded"
-	HealthUnavailable HealthState = "unavailable"
+	HealthUnknown        HealthState = "unknown"
+	HealthReady          HealthState = "ready"
+	HealthDegraded       HealthState = "degraded"
+	HealthUnavailable    HealthState = "unavailable"
+	observationFreshness             = 5 * time.Minute
 )
 
 type WindowSnapshot struct {
+	Scope           string   `json:"scope"`
 	DurationSeconds int64    `json:"duration_seconds"`
 	Samples         int      `json:"samples"`
 	Successful      int      `json:"successful"`
 	SuccessRate     *float64 `json:"success_rate"`
 	P95LatencyMS    *int64   `json:"p95_latency_ms"`
 	ObservedAt      string   `json:"observed_at,omitempty"`
+}
+
+type RouteObservationSnapshot struct {
+	AccountID        string `json:"account_id"`
+	Operation        string `json:"operation,omitempty"`
+	Stream           bool   `json:"stream"`
+	ObservedAt       string `json:"observed_at"`
+	Outcome          string `json:"outcome"`
+	Fresh            bool   `json:"fresh"`
+	CredentialID     string `json:"credential_id,omitempty"`
+	UpstreamModel    string `json:"upstream_model,omitempty"`
+	ReasoningEffort  string `json:"reasoning_effort,omitempty"`
+	RequiredFeatures string `json:"required_features,omitempty"`
+	RequestContract  string `json:"request_contract,omitempty"`
+	ExpectedChoices  int    `json:"expected_choices,omitempty"`
+	ToolMode         string `json:"tool_mode,omitempty"`
 }
 
 type CapacitySnapshot struct {
@@ -33,24 +51,26 @@ type CapacitySnapshot struct {
 }
 
 type RouteHealthSnapshot struct {
-	Alias           string         `json:"alias"`
-	State           HealthState    `json:"state"`
-	Reason          string         `json:"reason"`
-	Targets         int            `json:"targets"`
-	ReadyTargets    int            `json:"ready_targets"`
-	DegradedTargets int            `json:"degraded_targets"`
-	UnknownTargets  int            `json:"unknown_targets"`
-	MissingTargets  []string       `json:"missing_targets,omitempty"`
-	Window          WindowSnapshot `json:"window"`
+	Alias           string                     `json:"alias"`
+	State           HealthState                `json:"state"`
+	Reason          string                     `json:"reason"`
+	Targets         int                        `json:"targets"`
+	ReadyTargets    int                        `json:"ready_targets"`
+	DegradedTargets int                        `json:"degraded_targets"`
+	UnknownTargets  int                        `json:"unknown_targets"`
+	MissingTargets  []string                   `json:"missing_targets,omitempty"`
+	Window          WindowSnapshot             `json:"window"`
+	Observations    []RouteObservationSnapshot `json:"observations"`
 }
 
 type OperationsSnapshot struct {
-	GeneratedAt string                `json:"generated_at"`
-	State       HealthState           `json:"state"`
-	Reason      string                `json:"reason"`
-	Window      WindowSnapshot        `json:"window"`
-	Capacity    CapacitySnapshot      `json:"capacity"`
-	Routes      []RouteHealthSnapshot `json:"routes"`
+	GeneratedAt              string                `json:"generated_at"`
+	State                    HealthState           `json:"state"`
+	Reason                   string                `json:"reason"`
+	Window                   WindowSnapshot        `json:"window"`
+	Capacity                 CapacitySnapshot      `json:"capacity"`
+	Routes                   []RouteHealthSnapshot `json:"routes"`
+	ObservationMaxAgeSeconds int64                 `json:"observation_max_age_seconds"`
 }
 
 func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []AccountSnapshot, stats StatsSnapshot) OperationsSnapshot {
@@ -59,9 +79,8 @@ func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []Accoun
 		accountByID[account.ID] = account
 	}
 
-	// Health metrics intentionally use the latest real request retained by the
-	// gateway, regardless of its age. A quiet installation should not become
-	// unknown merely because the last verified request was days ago.
+	// Historical metrics retain their observation time. Availability uses only
+	// recent observations and never treats an old success as present proof.
 	requestRows := validOperationRecords(stats.Recent, now)
 	// Route health uses only fingerprint-gated, health-relevant observations.
 	// Falling back to the general recent ring would reintroduce old-generation
@@ -69,15 +88,16 @@ func buildOperationsSnapshot(now time.Time, cfg config.Config, accounts []Accoun
 	routeRows := validOperationRecords(stats.RouteLatest, now)
 	routes := make([]RouteHealthSnapshot, 0, len(cfg.Routes))
 	for alias, route := range cfg.Routes {
-		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, routeRows))
+		routes = append(routes, routeHealthSnapshot(alias, route, cfg.Accounts, accountByID, routeRows, now))
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Alias < routes[j].Alias })
 
 	result := OperationsSnapshot{
-		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
-		Window:      summarizeLatest(requestRows),
-		Capacity:    summarizeCapacity(accounts, stats.Active),
-		Routes:      routes,
+		GeneratedAt:              now.UTC().Format(time.RFC3339Nano),
+		Window:                   summarizeLatest(requestRows),
+		Capacity:                 summarizeCapacity(accounts, stats.Active),
+		Routes:                   routes,
+		ObservationMaxAgeSeconds: int64(observationFreshness / time.Second),
 	}
 	result.State, result.Reason = overallHealth(routes)
 	return result
@@ -116,7 +136,7 @@ func latestOperationRecords(records []RequestRecord) []RequestRecord {
 
 func summarizeLatest(records []RequestRecord) WindowSnapshot {
 	records = latestOperationRecords(records)
-	result := WindowSnapshot{Samples: len(records)}
+	result := WindowSnapshot{Samples: len(records), Scope: "latest_logical_request"}
 	if len(records) == 0 {
 		return result
 	}
@@ -159,33 +179,57 @@ func summarizeCapacity(accounts []AccountSnapshot, active int64) CapacitySnapsho
 	return result
 }
 
-func routeHealthSnapshot(alias string, route config.Route, configured []config.Account, runtime map[string]AccountSnapshot, records []RequestRecord) RouteHealthSnapshot {
+func routeHealthSnapshot(alias string, route config.Route, configured []config.Account, runtime map[string]AccountSnapshot, records []RequestRecord, now time.Time) RouteHealthSnapshot {
 	configuredByID := make(map[string]config.Account, len(configured))
 	for _, account := range configured {
 		configuredByID[account.ID] = account
 	}
-	targetIDs := routeTargetIDs(route, configured)
-	result := RouteHealthSnapshot{Alias: alias, Targets: len(targetIDs)}
-	for _, id := range targetIDs {
-		account, exists := runtime[id]
-		configuredAccount, configuredExists := configuredByID[id]
+	targets := routeHealthTargets(alias, route, configured)
+	result := RouteHealthSnapshot{Alias: alias, Targets: len(targets), Observations: make([]RouteObservationSnapshot, 0)}
+	freshRecords := make([]RequestRecord, 0)
+	for _, record := range filterRecords(records, alias, "") {
+		observed, err := time.Parse(time.RFC3339Nano, record.Time)
+		fresh := err == nil && now.Sub(observed) <= observationFreshness && !observed.After(now.Add(time.Minute))
+		result.Observations = append(result.Observations, RouteObservationSnapshot{AccountID: record.AccountID, Operation: record.Operation, Stream: record.Stream, ObservedAt: record.Time, Outcome: record.Outcome, Fresh: fresh, CredentialID: record.CredentialID, UpstreamModel: record.UpstreamModel, ReasoningEffort: record.ReasoningEffort, RequiredFeatures: record.RequiredFeatures, RequestContract: record.RequestContract, ExpectedChoices: record.ExpectedChoices, ToolMode: record.ToolMode})
+		if fresh {
+			freshRecords = append(freshRecords, record)
+		}
+	}
+	for _, target := range targets {
+		account, exists := runtime[target.accountID]
+		configuredAccount, configuredExists := configuredByID[target.accountID]
 		if !exists || !configuredExists {
-			result.MissingTargets = append(result.MissingTargets, id)
+			result.MissingTargets = append(result.MissingTargets, target.accountID)
 			continue
 		}
-		if !routeTargetCompatible(route, configuredAccount, id) || !account.Enabled || account.CircuitOpenUntil != "" {
+		scopedAvailable := func(operation, model, credential string) bool {
+			canonicalModel := (&AccountRuntime{Config: configuredAccount}).breakerModelKey(model)
+			return account.circuitUntilByScope[breakerKey(operation, canonicalModel, credential)] <= now.UnixNano()
+		}
+		if !account.Enabled || !target.available(configuredAccount, scopedAvailable) {
 			continue
 		}
-		accountRows := latestOperationRecords(filterRecords(records, alias, id))
+		accountRows := make([]RequestRecord, 0)
+		for _, record := range freshRecords {
+			if target.matches(record) {
+				accountRows = append(accountRows, record)
+			}
+		}
 		if len(accountRows) == 0 {
 			result.UnknownTargets++
 			continue
 		}
-		accountWindow := summarizeLatest(accountRows)
-		if accountWindow.Successful == accountWindow.Samples {
-			result.ReadyTargets++
-		} else {
+		failed := false
+		for _, record := range accountRows {
+			// Another interface being structurally available does not renew an
+			// old success on an interface that is now cooling down. Unpinned
+			// pools use the empty credential breaker, just as scheduling does.
+			failed = failed || !recordSucceeded(record) || (record.Operation != "" && !scopedAvailable(record.Operation, target.model, target.credential))
+		}
+		if failed {
 			result.DegradedTargets++
+		} else {
+			result.ReadyTargets++
 		}
 	}
 	result.Window = summarizeLatest(filterRecords(records, alias, ""))
@@ -204,50 +248,104 @@ func routeHealthSnapshot(alias string, route config.Route, configured []config.A
 	case result.ReadyTargets > 0 && result.Window.Samples > 0 && result.Window.Successful < result.Window.Samples:
 		result.State, result.Reason = HealthDegraded, "最近真实请求失败"
 	case result.ReadyTargets > 0:
-		result.State, result.Reason = HealthReady, "最近真实请求已验证"
+		result.State, result.Reason = HealthReady, "近期调用已完成；验证范围见观测记录"
 	case unavailableTargets > 0:
 		result.State, result.Reason = HealthDegraded, "可用性未知且部分目标不可用"
 	default:
-		result.State, result.Reason = HealthUnknown, "尚无真实请求样本"
+		result.State, result.Reason = HealthUnknown, "尚无近期调用证据；历史记录不证明当前可用"
 	}
 	return result
 }
 
-func routeTargetIDs(route config.Route, accounts []config.Account) []string {
-	if len(route.Targets) > 0 {
-		ids := make([]string, 0, len(route.Targets))
-		for _, target := range route.Targets {
-			ids = append(ids, target.Account)
+type routeHealthTarget struct {
+	accountID, credential, model, effort string
+	route                                config.Route
+	target                               config.RouteTarget
+}
+
+func (target routeHealthTarget) compatible(account config.Account) bool {
+	if len(target.route.Targets) == 0 {
+		return config.AccountSupportsTargetModel(account, target.model)
+	}
+	_, _, ok := config.ResolveRouteTarget(account, target.route, target.target)
+	return ok
+}
+
+// A target is structurally available when at least one declared interface can
+// select it. Use the same model, feature and credential boundary as scheduling,
+// never the account's worst-case aggregate breaker.
+func (target routeHealthTarget) available(account config.Account, available func(operation, model, credential string) bool) bool {
+	if !account.Enabled || !target.compatible(account) {
+		return false
+	}
+	operations := account.Operations
+	if len(operations) == 0 {
+		operations = config.DefaultOperations(account.Type)
+	}
+	for _, operation := range operations {
+		if operation == config.OperationAnthropic && target.effort != "" && target.effort != "auto" {
+			continue
 		}
-		return ids
+		if requirementsCompatible(account, target.model, operation, RequestRequirements{}, target.credential, target.effort) &&
+			available(operation, target.model, target.credential) {
+			return true
+		}
+	}
+	return false
+}
+
+func (target routeHealthTarget) matches(record RequestRecord) bool {
+	if record.AccountID != target.accountID {
+		return false
+	}
+	if target.credential != "" && record.CredentialID != target.credential {
+		return false
+	}
+	if record.UpstreamModel != target.model {
+		return false
+	}
+	if target.effort != "" && target.effort != "auto" && record.ReasoningEffort != target.effort {
+		return false
+	}
+	return true
+}
+
+func routeHealthTargets(alias string, route config.Route, accounts []config.Account) []routeHealthTarget {
+	if len(route.Targets) > 0 {
+		targets := make([]routeHealthTarget, 0, len(route.Targets))
+		for _, target := range route.Targets {
+			model, effort := target.Model, target.ReasoningEffort
+			if account := configuredAccountByID(accounts, target.Account); account != nil && route.Model != "" {
+				if resolved, resolvedEffort, compatible := config.ResolveRouteTarget(*account, route, target); compatible {
+					model, effort = resolved, resolvedEffort
+				}
+			}
+			targets = append(targets, routeHealthTarget{accountID: target.Account, credential: target.Credential, model: model, effort: effort, route: route, target: target})
+		}
+		return targets
 	}
 	if len(route.Accounts) > 0 {
-		return append([]string(nil), route.Accounts...)
+		targets := make([]routeHealthTarget, 0, len(route.Accounts))
+		for _, id := range route.Accounts {
+			model := route.UpstreamModel
+			if account := configuredAccountByID(accounts, id); account != nil {
+				model = (&AccountRuntime{Config: *account}).upstreamModel(alias, route.UpstreamModel)
+			}
+			targets = append(targets, routeHealthTarget{accountID: id, model: model, route: route})
+		}
+		return targets
 	}
 	if !route.AllAccounts {
 		return nil
 	}
-	ids := make([]string, 0, len(accounts))
+	targets := make([]routeHealthTarget, 0, len(accounts))
 	for _, account := range accounts {
 		if account.Enabled {
-			ids = append(ids, account.ID)
+			model := (&AccountRuntime{Config: account}).upstreamModel(alias, route.UpstreamModel)
+			targets = append(targets, routeHealthTarget{accountID: account.ID, model: model, route: route})
 		}
 	}
-	return ids
-}
-
-func routeTargetCompatible(route config.Route, account config.Account, id string) bool {
-	if len(route.Targets) == 0 {
-		return true
-	}
-	for _, target := range route.Targets {
-		if target.Account != id {
-			continue
-		}
-		_, _, compatible := config.ResolveRouteTarget(account, route, target)
-		return compatible
-	}
-	return false
+	return targets
 }
 
 func filterRecords(records []RequestRecord, alias, accountID string) []RequestRecord {
@@ -281,5 +379,5 @@ func overallHealth(routes []RouteHealthSnapshot) (HealthState, string) {
 	if unknown {
 		return HealthUnknown, "路由已配置，等待最近真实请求验证"
 	}
-	return HealthReady, "所有模型路由均已由最近真实请求验证"
+	return HealthReady, "所有路由均有近期完成调用；不代表所有接口与特性已验证"
 }

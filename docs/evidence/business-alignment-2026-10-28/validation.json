@@ -1,0 +1,143 @@
+{
+  "goal": "docs/BUSINESS_CAPABILITIES.md",
+  "base_commit": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "production_deployed": false,
+  "production_start_pid": 209943,
+  "go_full": {
+    "command": "GOTOOLCHAIN=local go test -race -json -timeout=180s ./...",
+    "passed_test_entries": 380,
+    "failed_test_entries": 0,
+    "packages": [
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "action": "pass",
+        "elapsed": 0.001
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "action": "pass",
+        "elapsed": 3.262
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "action": "pass",
+        "elapsed": 13.681000000000001
+      }
+    ]
+  },
+  "go_incremental": {
+    "scope": "After removing duplicate detailed attempts from health observation storage",
+    "passed_test_entries": 7,
+    "failed_entries": 0
+  },
+  "web": {
+    "command": "make test-web",
+    "passed": true,
+    "scope": "Node business tests and syntax of every internal/web/*.js"
+  },
+  "deployment": {
+    "command": "make test-deploy",
+    "passed": true
+  },
+  "other_checks": {
+    "go_vet": true,
+    "example_configuration": true,
+    "diff_check": true,
+    "python_ast": true
+  },
+  "actual_acceptance": {
+    "route": "Shadow",
+    "clients": [
+      "curl",
+      "Claude Code",
+      "Codex CLI"
+    ],
+    "initial_result": "5/6 curl combinations complete; Responses SSE failure retained; Claude Code invocation completed (including an initial rejected logical request retained in evidence)",
+    "delta_fix_result": "Responses SSE and Messages SSE complete",
+    "codex_result": "Responses CLI invocation complete",
+    "reuse": "Unchanged Chat/non-stream/Claude behavior reuses initial scoped evidence; model/stream delta fix revalidated only affected paths",
+    "limitations": [
+      "No real tool execution roundtrip or real image input",
+      "No live Embeddings/Images/Rerank",
+      "Other routes and credentials not accepted",
+      "No production rollback or disaster recovery drill",
+      "Actual calls use private temporary gateway config, keys, logs and port; production gateway process is unchanged"
+    ],
+    "final_backend_recheck": "After health-storage memory change, one Responses SSE call completed; runtime-final-backend.json. Later changes affect observation identity/lifecycle, queued cancellation, and UI labels; covered by sealed full race and web suite, reusing unchanged positive-delivery/client acceptance.",
+    "sample_policy": "All logical calls retained, including initial Responses incomplete_response and Claude Code upstream_rejected; client invocation success is not a 100% logical-call success claim."
+  },
+  "preserved_existing_untracked": [
+    "docs/LITE2API_PROJECT_NARRATIVE_2026-10-28.md",
+    "docs/LITE2API_PROJECT_OVERVIEW_2026-10-28.md",
+    "docs/PROJECT_CASE_STUDY.md",
+    "docs/evidence/* outside this new evidence directory"
+  ],
+  "evidence_files": {
+    "web.tap": "0150f889fdf818f7bd1a33fd88a10de1babefd5e87800e59a496654faf9e1ba2",
+    "permissions-review.md": "128c2988708fd70ecd591c4a54f8d7178c59f52a202d3aa7eed91d935d572b8d",
+    "deploy.log": "ea65d4a33ac94a6e60f5c503828a4a776972afc30395f0001e9e6f9ab6eed752",
+    "completion-review.md": "8761b13e1229e31dcfa84f1e9c8c68d32616e39da9397619c9e35ca324f550a4",
+    "routing-review.md": "382822adc889d6bbbef8f9c2dd167325870bafd06991042bedf63ea80b875b09",
+    "go-incremental.jsonl": "218236fefb7a36a05276ce4c562ad56dab0aaab0220a9b2e1b75b8e8f511a1c5",
+    "runtime-codex.json": "de6ca35070af9ba0a4013bb1a582169bf2cd108b58af414aca6744f5e49bc73f",
+    "runtime-final-backend.json": "bdd2aebbb53944d258076f8cb9310d8beadac9f869521138f5c31109ef492034",
+    "go-full.jsonl": "793f2fc84dd69bddda40af2995d72f48bd9dfbd99c5ca4d3ae8232cb89854864",
+    "runtime-delta-fix.json": "dd4c13bbef6a50485b714be19decd8e91199e51de7bbc70a0cf759e6bbb59cd9",
+    "runtime-before-delta-fix.json": "d1c4e3af29a63ffb83db6ca2f6b28a4645e22274ea8550c50e4361277a109622",
+    "go-cancellation.jsonl": "f50438a8b99aae7746b3be7e6cd9f564c13eb4efa679c36d6ea4e6d14aae1245"
+  },
+  "changed_runtime_source_sha256": {
+    "internal/config/capabilities.go": "1c3649e67143b102863e17691c7c69b0db28db720ddaabcd20d38a94cebbaa26",
+    "internal/config/operations.go": "3cb223b5fdedb8572990f80cecc72f8c9aa93d4cb041daa5aca0dbc9c9bd434e",
+    "internal/config/config.go": "a5a7d87b4e6b441552c491ea6b46a0f6784d6e773bc95f0cc2d0c3421cd3740e",
+    "internal/config/capability_sources.go": "a0dd5573b6415b2a3a05b43d4cb274bb35acbc6bb8b937e020f1209efa2c1e8e",
+    "internal/config/capability_evidence.go": "614874e4ae76cab146afd163915597a06cf2659697ea2da453548b2a5ea4a95a",
+    "internal/config/route_profiles.go": "9e05a5835161fcb1237fc4d33b0008947c489145a670d6031e8bb39f624cdff0",
+    "internal/config/capability_discovery.go": "3ed4f3f1bf01e7dfe3eb66dcf29251ad9f4e8accb595f585782de103e1fffcb7",
+    "internal/gateway/admin.go": "cfdc92972dfd66c27f95030d2921654919d2c8c4b7fc06349f1b37eb966d4cf5",
+    "internal/gateway/oauthrecovery.go": "19888ca75effeaaed0db56e197b9d893f6c237e17a727cc6c1a438458dd6c54a",
+    "internal/gateway/stats.go": "5905d5c62424deb9d203d05330e083f5f2de2f658dd9b78ecaefdf2d430d66f2",
+    "internal/gateway/response_completion.go": "843c8e0b0d3132439b503e28f5dd9e8adea40b2ebe1d9a572bc9f2496937249e",
+    "internal/gateway/prompttest.go": "50728c93f21d8821509e8ed2f262422476e13c34e79763b571ee4c3ab639708b",
+    "internal/gateway/information.go": "ce4113f6eddf92df29b333487d1e41eab6767bf11a697906fa212f5add1eeca0",
+    "internal/gateway/request_requirements.go": "1d3b356a0ecb901107644eeee74493c059325a25ac5024d7d02f0b6a4572534a",
+    "internal/gateway/operations.go": "aceefd1fe04acbbb793c94664e9f44acd8357767db3d4b77c1fe0bdc1f281542",
+    "internal/gateway/errors.go": "7be6714bb8be923e12c52309bae1d6c3e7bded43e6433da553185e1516515fa7",
+    "internal/gateway/accounttest.go": "742109a5150492194bb57a313f4a657fbe94fd4b9443cdb6aeab766fa39f4240",
+    "internal/gateway/requestlog.go": "338dc25957d7f1b98d74feafcbda24a76fdfc1767186283e0ddadb4519975428",
+    "internal/gateway/accountimport.go": "98d7cbe653de18eb47e9c0462731fbdc23021bcad8f3f1cb6ca82f5f0029ddf8",
+    "internal/gateway/adapters.go": "369391eeabe4fa3bfb30b751c36cfcdf1c55683544f31706b02bdf5797904253",
+    "internal/gateway/routeprofiles.go": "6ed576a6a461ec41695b36ae310e0bcfbb9f6794e976132d96c75a3e6584abd7",
+    "internal/gateway/continuation.go": "94253213c39ad563ef1616a2e9e9560db2b003432ed7eb9eea01d2227c2052a3",
+    "internal/gateway/accountexport.go": "62db2d6ce9d6675f71ce3a32e3af3f5981386b213329edb69f92e6cefeee0a7c",
+    "internal/gateway/request_rewrite_operation.go": "950ae620efcc059f7672912adc2fd9289338f73616019a5cfb62adc31a07d204",
+    "internal/gateway/capabilitysync.go": "f92f3e210ba34629d0e03105e594163904b83cd81fcf3c2f4896b6849d0d7032",
+    "internal/gateway/runtime.go": "4864dd17040d49bef291b56d6c6bb2932ef566713fc1c5ea6a81fefaf7b596e0",
+    "internal/gateway/clientkeys.go": "1d6bebf5a5eaf0bfd23b7000cc3b265f67888b8c135623d7c0baff806b23e9b1",
+    "internal/gateway/clientkeys_preflight.go": "3b6b7683ca446b6bfdca81ee564b94ae41320a4561f197417f8b433740f376c5",
+    "internal/gateway/server.go": "cfa102cb3a1cd6b854340bf0e47d627230f69a9d073c9e50bfc4dae544d7905c",
+    "internal/gateway/adminauth.go": "b5b1002a3c0d6c52bc7707eeffa78c212bba7cd5745d4bb0d9ad87503a6bd9d5",
+    "internal/gateway/request_inspector.go": "bdcedd2097250a960fc129bbbc005d768978addc4bfdd09361e005e439dbc184",
+    "internal/gateway/oauthimport.go": "b1abb988a015fbecf2ef1ab56aaa362e04efdb4108b4ca40e5560051f61ce307",
+    "internal/gateway/gateway.go": "719f98a734eb6b97a5da5a14c376ffc2c4f2d12b800d76e2cf2314f1a17d67d2",
+    "internal/gateway/oauthadapter.go": "d5b9f7fd4828c2955c86b3a5a6c015e657e4c8264dcc519255aad0f34f1cd685",
+    "internal/web/app-core.js": "4c270eb6589412eb7ea87015e9f4f9f71de906604b6ab34da9fc142fb7501f73",
+    "internal/web/app-usage.js": "f12c2d10f65ab77a69dc3b3e13fd2eef028a70ee1025e1e5d3bb24db369e464e",
+    "internal/web/app-clients.js": "c0945b4902c4468719aef42e7ac2185be490a6f0354f0d2fc42d56b5a9297100",
+    "internal/web/app-onboarding.js": "da6ec7b6dfebc3a6782e7b499e177b21ad439d6582c67acff210f323c8d17d5b",
+    "internal/web/embed.go": "97f4d245a6d55a688b351ea8238853cc33b44fa5b712e2a8863a55a9c206884a",
+    "internal/web/app-runtime.js": "3b2d45e9aa470d5d35f266160e222e0a79f710091004f343bbaf8cdbf6963608",
+    "internal/web/app-chat.js": "672a2d269d4213e7e580273b27b6dde7b42c4edf2880374f095bf79b739c7a04",
+    "internal/web/app.html": "c8d334d0945839d7a0e900a2d62f6d97ecfcb4b8bf269f323857e72d00f3d077",
+    "internal/web/app.css": "488aff74a470dcf470acc8c3b27588124491b52a0cf381f824fca0aa35c04791",
+    "internal/web/app-accounts.js": "d2f4fe9b164ec951fd998a63a5c04d5e374d428456164b5cf1a1d29bab5aecde",
+    "internal/web/app.js": "bbc5d11a8a2238b000718564e471d5f053912573dae76ea58d9786271357fb3b",
+    "internal/web/app-shared.js": "0c3592c3654a48840fe57c959ee04ce02fdada72f54b58c5518101a09c26fb05",
+    "internal/web/app-routes.js": "9f6f555c390249a3acc36ff68136faf8ae5cb71e06e955e27a9eee18405c6140",
+    "internal/web/app-metrics.js": "6aa16db264bf15c0cd0df27c13ffb75f9c85dd2d44783906f51a2e77529a1e2a",
+    "internal/web/app-ui.js": "30e9221bcfa10be80980f3dcc7bb2c213d978c959ac4e289a65d17f126ed639a"
+  },
+  "production_end_pid": 209943,
+  "production_end_state": "active/running",
+  "final_build_sha256": "f63acc715b76e8848dd48ad1190298f232bf7025419aa0985f6207b7846dfcb9"
+}

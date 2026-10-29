@@ -38,7 +38,7 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 		case "/v0/management/get-auth-status":
 			status := "wait"
 			if callbackReceived.Load() {
-				status = "ok"
+				status = "OK"
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": status})
 		case "/v0/management/auth-files/status":
@@ -156,6 +156,9 @@ func TestAdminOAuthAuthorizationFlowAddsPool(t *testing.T) {
 				}
 			}
 			found = account.Enabled && len(account.Models) == 5 && account.APIKeyEnv == "CLIPROXYAPI_KEY" && hasSolCapability
+			if found && account.BaseURL != adapter.URL+"/v1" {
+				t.Fatalf("OAuth pool used a hard-coded URL: %q", account.BaseURL)
+			}
 		}
 	}
 	if !found {
@@ -273,6 +276,10 @@ func TestAdminOAuthAccountDeleteRemovesAuthFile(t *testing.T) {
 	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+managementKey {
 			t.Errorf("missing management authorization")
+		}
+		if r.URL.Path == "/v0/management/auth-files/download" {
+			writeJSON(w, http.StatusOK, map[string]any{"type": "codex", "access_token": "fixture-delete-token"})
+			return
 		}
 		if r.URL.Path != "/v0/management/auth-files" {
 			http.NotFound(w, r)
@@ -405,6 +412,19 @@ func TestOAuthAdapterRejectsUnsupportedProviderAndNonLoopbackURL(t *testing.T) {
 	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", "http://192.0.2.10:45682")
 	if _, err := oauthAdapterBaseURL(); err == nil {
 		t.Fatal("non-loopback OAuth adapter URL was accepted")
+	}
+}
+
+func TestOAuthAdapterRejectsHTTP200BusinessFailure(t *testing.T) {
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "error": "refresh rejected"})
+	}))
+	defer adapter.Close()
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", adapter.URL)
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_KEY", "management-business-error")
+	var result oauthAdapterResponse
+	if err := callOAuthAdapter(context.Background(), http.MethodGet, "get-auth-status", nil, nil, &result); err == nil || !strings.Contains(err.Error(), "business failure") {
+		t.Fatalf("HTTP 200 business failure was accepted: %v", err)
 	}
 }
 

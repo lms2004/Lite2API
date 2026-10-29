@@ -1,0 +1,1418 @@
+{
+  "title": "Lite2API 项目说明本次验证证据",
+  "generated_at": "2026-10-28T21:53:14.854474+08:00",
+  "source": {
+    "directory": "/root/Lite2API",
+    "commit": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+    "commit_subject": "fix: recover OAuth accounts and harden gateway errors",
+    "tracked_diff_files_before_document": [],
+    "preexisting_untracked": [
+      "docs/PROJECT_CASE_STUDY.md",
+      "docs/evidence/ (earlier case-study evidence)"
+    ],
+    "scope": "Tracked Lite2API core code at this commit; existing untracked case study was preserved and not used as current-code validation."
+  },
+  "environment": {
+    "go": "go1.26.5 linux/amd64",
+    "node": "v18.19.1",
+    "user_facing_timezone": "Asia/Shanghai"
+  },
+  "go_race": {
+    "command": "GOTOOLCHAIN=local go test -race ./... -count=1 -json",
+    "cwd": "/root/Lite2API",
+    "exit_code": 0,
+    "cache_disabled": true,
+    "first_event": "2026-10-28T13:50:59.893300798Z",
+    "last_event": "2026-10-28T13:51:16.169572092Z",
+    "passed_test_events_including_subtests": 257,
+    "failed_test_events": 0,
+    "package_results": [
+      {
+        "Time": "2026-10-28T13:50:59.893497648Z",
+        "Action": "skip",
+        "Package": "github.com/lms2004/lite2api/cmd/lite2api",
+        "Elapsed": 0
+      },
+      {
+        "Time": "2026-10-28T13:51:02.470639257Z",
+        "Action": "pass",
+        "Package": "github.com/lms2004/lite2api/internal/config",
+        "Elapsed": 1.23
+      },
+      {
+        "Time": "2026-10-28T13:51:06.200933655Z",
+        "Action": "pass",
+        "Package": "github.com/lms2004/lite2api/internal/web",
+        "Elapsed": 2.782
+      },
+      {
+        "Time": "2026-10-28T13:51:16.169572092Z",
+        "Action": "pass",
+        "Package": "github.com/lms2004/lite2api/internal/gateway",
+        "Elapsed": 14.218
+      }
+    ],
+    "passed_tests": [
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestFilterDiscoveredModelsScopesSharedCLIProxy",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestInferDiscoveredCapabilitiesUnifiesProviderSpecificModels",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestInferAntigravityReasoningSuffixesAsLogicalModelProfiles",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestInferRichCodexCatalogCreatesFastProfile",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestOfficialOpenAIFastFallbackIsConservative",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLegacyFastSlugIsNotExposedAsConcreteModel",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestInferCodexCapabilitiesPrefersCanonicalModelID",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestDiscoveredCapabilitiesPreserveEffortToUpstreamMapping",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestFilterDiscoveredCatalogAppliesRoutingBudgets",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnsafeHTTP",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestStoreUsesPrivatePermissions",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestAdminAutoLoginEnvironmentIsExplicit",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestNormalizeCanonicalizesRouteStrategy",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestEnvironmentSecretsWin",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateOrderedRouteTargets",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateCredentialPinRequiresCLIProxyAccount",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateLogicalRouteAgainstRealChannelCapabilities",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestInferCodexCapabilitiesSeparatesModelAndReasoningEffort",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestNormalizeBackfillsCLIProxyCapabilities",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLoadRejectsUnknownTrailingAndNumericDuration/unknown_field",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLoadRejectsUnknownTrailingAndNumericDuration/trailing_value",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLoadRejectsUnknownTrailingAndNumericDuration/numeric_duration",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLoadRejectsUnknownTrailingAndNumericDuration",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestStoreEffectiveDoesNotPersistEnvironmentOverlay",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestNormalizeDeepCopiesMutableConfiguration",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRequiresUnambiguousRouteSchema",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestStoreRejectsConfigurationDataPathCollision",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestLoadRejectsConfigurationDataPathCollision",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnboundedResourceConfiguration/body",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnboundedResourceConfiguration/inflight",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnboundedResourceConfiguration/stream_timeout",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnboundedResourceConfiguration/failover",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnboundedResourceConfiguration",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateEnforcesRoutingIdentifierBudgets/account_id",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateEnforcesRoutingIdentifierBudgets/account_model",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateEnforcesRoutingIdentifierBudgets/route_alias",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateEnforcesRoutingIdentifierBudgets",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestNormalizeOperationsAndEmptyAccounts",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidateRejectsUnknownOperation",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestValidReasoningEffortAcceptsUltra",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/config",
+        "test": "TestRichCatalogPreservesUltraReasoning",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDeleteAccountRemovesRouteReferences",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDeleteLastRouteAccountRemovesRouteInsteadOfCreatingWildcard",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportPreviewAndApply",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportUpsertPreservesCredential",
+        "elapsed_seconds": 0.11
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportPartialSuccess",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSub2APIDataSubsetMapsAPIKeyAndProxy",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportRejectsUnsupportedHeader",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportOAuthUnknownPlatformIsSkipped",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAccountImportLimit",
+        "elapsed_seconds": 0.07
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestParseModelIDs",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestProbeAccountModelsUsesConfiguredAuthentication",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestProbeAccountModelsReportsUpstreamStatusWithoutSecrets",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterCatalogAssociatesConfiguredAccounts",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterCatalogDoesNotInferIdentityFromAccountName",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeClassificationAndOperations",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestExportAccountsSelectedAndProxyRoundTrip",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestExportAccountsOmitsProxyUnlessRequested",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestImportRejectsMissingProxyReference",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestImportReportsInvalidProxyAndRoutesOAuthToPool",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeSingleflightCoalescesConcurrentCallers",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeSlowFailureDoesNotBlockOtherAdapter",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeRequiresSuccessfulReadinessStatus/success",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeRequiresSuccessfulReadinessStatus/not_found",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeRequiresSuccessfulReadinessStatus/unauthorized",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeRequiresSuccessfulReadinessStatus/server_error",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeRequiresSuccessfulReadinessStatus",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestInstalledAdapterReadinessRequiresAuthenticatedModelCatalog",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeCacheInvalidatesWhenCredentialRotates",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdapterProbeAllUsesBoundedParallelism",
+        "elapsed_seconds": 0.12
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestCanonicalAdminDocument",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestCanonicalUITrustAndAccessibility",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestOfficialModelIconsAreEmbeddedUnchanged",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestBuildAppReplacesOnlyCanonicalSlots",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestBuildAppRejectsAmbiguousSlots",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestCanonicalScriptCSPHashMatchesDocument",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestScriptCSPHashIncludesTemplateWhitespace",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestConcurrentControlPlaneUpdatesDoNotLoseAccounts",
+        "elapsed_seconds": 0.6
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCapabilityDiscoveryRebasesOntoLatestAccount",
+        "elapsed_seconds": 0.07
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeAdminJSONRejectsTrailingValue",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestControlPlaneRejectsUnreloadedExternalEdit",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestControlPlaneRejectsUnreloadedEnvironmentChange",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/web",
+        "test": "TestCanonicalGzipMatchesHTML",
+        "elapsed_seconds": 0.3
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestControlPlaneRejectsUnreloadedSecretEnvironmentChange",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestControlPlaneCommitUsesRuntimeLifecycleHooks",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestControlPlaneCommitRejectsRestartRequiredFieldsBeforePersist",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminNetworkRejectsSpoofedForwardedIP",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminCookieSessionRequiresCSRF",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminAutoLoginRequiresExplicitConfigAndAllowedNetwork",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminTokenRotationRevokesExistingCookieSessions",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminLoginStartedBeforeTokenRotationCannotIssueNewSession",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAggregateCLIProxyKeepsFullCatalogAndAddsRichCodexMetadata",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelIDsAcceptsCommonShapes/openai",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelIDsAcceptsCommonShapes/models",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelIDsAcceptsCommonShapes/direct",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelIDsAcceptsCommonShapes/codex-rich",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelIDsAcceptsCommonShapes",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDecodeDiscoveredModelsReadsCodexCapabilityMetadata",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDiscoverModelsForAccountUsesAccountAuthentication",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDiscoverCLIProxyRequestsRichCatalog",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestMergeSyncedCapabilitiesEnrichesExistingReasoning",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestMergeSyncedCapabilitiesKeepsDistinctUpstreamEffortMappings",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDiscoverySourceMatchAllowsMetadataEditButRejectsRoutingEdit",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReconcileDiscoveredCapabilitiesMigratesStaleLogicalName",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestApplyDiscoveredCapabilityMigrationsKeepsRouteAlias",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAnthropicMessagesDiscardReasoningEffort",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAnthropicCountTokensIsForwarded",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestManagedClientKeyLifecycle",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestManagedClientKeyCreateUsesDefaultName",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLegacyKeyUsesDigestLookup",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildUpstreamURLCompatibilityRoots/OpenAI_v1_root",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildUpstreamURLCompatibilityRoots/Gemini_OpenAI_root",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildUpstreamURLCompatibilityRoots/custom_prefix_keeps_v1",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildUpstreamURLCompatibilityRoots",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildUpstreamURLPreservesConfiguredQuery",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayRejectsMalformedQueryBeforeSelectingUpstream",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayRewritesModelAndAuthenticates",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayRecordsUsageAndModalities",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayFailsOverAfterDefinitiveRejection",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayDoesNotReplayGenerativePostAfterAmbiguousStatus",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayFailsOverGenerativePostOnDefinitivePaymentRejection",
+        "elapsed_seconds": 0.07
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRetryableStatusIncludesProviderOverloadAndRejectsClientErrors",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRetryableStatusPolicyProtectsGenerativeOperations",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTransportRetryRequiresProofRequestWasNotWritten",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamErrorMessageRedactsConfiguredQueryAndUserInfo",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayPreservesActionableResponseWhenFinalFailoverTransportFails",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayDoesNotReplayEarlierStatusAfterUncertainSubmission",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCooldownForSupportsRetryAfterDateAndCapsExtremeValues",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayDoesNotReplayUpstreamErrorAcrossRequests",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdmissionRejectsManagedKeyConcurrencyBeforeReadingBody",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBodyMemoryBudgetRejectsBeforeReadingBody",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTinyChunkedBodyLeaseIsReleasedBeforeLongStream",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestQueuedLargeBodyRemainsChargedUntilUpstreamSubmission",
+        "elapsed_seconds": 1.11
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLegalFortyMiBRequestIsNotRejectedByAmplificationAccounting",
+        "elapsed_seconds": 5.45
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestNearLimitFastAliasCoversBothInternalRewrites",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRewrittenAttemptBodyIsIncludedInMemoryLease",
+        "elapsed_seconds": 0.24
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamRequestWriteIsBoundedAndReleasesBodyLease",
+        "elapsed_seconds": 0.09
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTransportErrorRetainsAttemptLeaseUntilAsynchronousBodyClose",
+        "elapsed_seconds": 0.17
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayAppliesFastProfileAfterAdmission",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayRejectsOversizedModelBeforeObservation",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTopLevelEnvelopeBudgetIsEnforcedBeforeMapAllocation",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOversizedSessionKeyIsRejectedWithoutDecodedCopy",
+        "elapsed_seconds": 0.14
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStreamIdleWatchdogDoesNotTreatSlowDownstreamAsUpstreamIdle",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestDownstreamWriteFailureDoesNotTripUpstreamBreaker",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRouteObservationFromOldRuntimeCannotPolluteReplacementRoute",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamClientRejectionIsNeutralForRouteReadiness",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRetryableErrorBodyHasIdleBoundaryAndReleasesLease",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBufferedFinalResponseHasWriteDeadlineAndReleasesBodyLeaseFirst",
+        "elapsed_seconds": 0.62
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAnthropicGatewayErrorsUseAnthropicEnvelope",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestConnectionNamedHeadersAreNotForwarded",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCredentialPinIsTrustedAndSelectedCredentialIsRecorded",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCredentialRetrySafeHeaderAllowsTrustedFailover/credential=",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCredentialRetrySafeHeaderAllowsTrustedFailover/credential=0123456789abcdef",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCredentialRetrySafeHeaderAllowsTrustedFailover",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReloadReusesUnchangedRequestLogWriter",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReloadReconfiguresLongLivedRequestLogWriter",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayCloseDrainsAndClosesRequestLog",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReloadRejectsRestartRequiredServerFields",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRewriteRequestAppliesTargetReasoning",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRewriteRequestBodyReusesOriginalWhenNoRewriteNeeded",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayUsesOrderedTargetsAndFallsBackOnMissingModel",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminPageUsesPrecompressedHTMLWhenAccepted",
+        "elapsed_seconds": 0.2
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAuthenticationFailureTripsCircuit",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStreamingHoldsConcurrencySlot",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStreamIdleTimeoutReleasesSlot",
+        "elapsed_seconds": 0.05
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestModelsListsAliases",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminAuthenticationAndRouteUpdate",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminAPIUsesGzipWhenAccepted",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminPromptTestTargetsSelectedAccount",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminPromptTestRejectsUnsupportedAccount",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminPromptTestSupportsAnthropicMessages",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminAccountUpdatePreservesRedactedSecrets",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCloneConfigDeepCopiesMutableFields",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayConfigReturnsDeepCopy",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRequestBodyLimit",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestInvalidUpdateDoesNotReplaceRunningConfig",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminOAuthAuthorizationFlowAddsPool",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestEnsureOAuthCredentialPrefixesIsolatesOverlappingProviders",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestAdminOAuthAccountDeleteRemovesAuthFile",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestMaskCredentialIdentity",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestNormalizeOAuthProvider",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestNormalizeOAuthRoutingStrategy",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestShortCredentialIDIsStableAndRedacted",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthCredentialPriorityOrderingAndRuntimeParentResolution",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthAdapterRejectsUnsupportedProviderAndNonLoopbackURL",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestIsOAuthImportItem",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildOAuthAuthFileCodex",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildOAuthAuthFilePlatforms",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildOAuthAuthFileGemini",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestBuildOAuthAuthFileUnpooledPlatform",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestNormalizeOAuthExpiry",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSafeOAuthName",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuth401RefreshesSelectedCredentialAndRetriesOnce",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthRecoveryCoalescesConcurrentRefreshAndHonorsCancellation",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthRecoveryNeverRefreshesOrReplaysAmbiguousFailures/Unauthorized",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthRecoveryNeverRefreshesOrReplaysAmbiguousFailures/Service_Unavailable",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthRecoveryNeverRefreshesOrReplaysAmbiguousFailures",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamAuthFailureUsesProviderProtocolAndPreservesClient401//v1/chat/completions",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamAuthFailureUsesProviderProtocolAndPreservesClient401//v1/messages",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUpstreamAuthFailureUsesProviderProtocolAndPreservesClient401",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthAccountHealthReasonsAndRefreshRedaction",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOAuthRefreshRequiresExplicitTarget",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestUnavailableOAuthPoolHasExplicitProtocolError",
+        "elapsed_seconds": 0.04
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestFailedOAuthRecoveryIsThrottled",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsNoSamplesRemainUnknown",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsUsesLatestRealDataRegardlessOfAge",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsMetricsUseOnlyLatestRecord",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsMissingRouteTargetIsUnavailable",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsUnlimitedConcurrencyHasNoUtilization",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsChecksEveryConfiguredRoute",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOperationsRecentFailureIsDegraded",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestHealthEndpointUsesRouteCoverage",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLivenessAndReadinessAreSeparate",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReadinessRetainsLowVolumeRouteObservationBeyondRecentRing",
+        "elapsed_seconds": 0.03
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestReadinessUsesLatestRouteObservationAcrossOperations",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestInspectRequestDetectsTextAndImage",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestParseResponseUsageAndCacheRate",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestParseStreamingUsage",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRequestLogRotatesWithinBound",
+        "elapsed_seconds": 0.06
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLoadLatestRequestRecordAcrossBackups",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestRequestLogRecoveryKeepsBoundedNewestSetAndPerRouteLatest",
+        "elapsed_seconds": 0.01
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestGatewayRecoversFullCurrentLogBeforeZeroBackupRotation",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestApplyExecutionProfileToBodyInjectsFastTier",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestApplyExecutionProfileToBodySupportsDirectFastModel",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestApplyExecutionProfilePreservesClientTierForStandardRoute",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerUsesAvailableAccount",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestEmptyRouteFailsClosedAndExplicitAllAccountsRoutes",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerWaitsForRelease",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerBroadcastWakesAllWaitersForReleasedCapacity",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerReleaseBeforeReloadWakesNewGeneration",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerCapacitySurvivesRemoveAndReaddAcrossGenerations",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSelectionReleaseIsIdempotent",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerResetsHealthWhenAccountIdentityChanges",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLateOlderSuccessDoesNotCloseNewerCircuit",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestConcurrentFailuresCountWhenNewestCompletesFirst",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCircuitIsScopedByOperationAndUpstreamModel",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestCircuitIsScopedByExplicitCredential",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestWildcardModelRuntimeStateHasBoundedCardinality",
+        "elapsed_seconds": 0.25
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestLegacyRoundRobinStartsWithFirstAccount",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStickySelectionIsStable",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerFiltersByOperation",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerRejectsUnsupportedOperationWithoutQueueWait",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOrderedTargetChainPreservesModelReasoningAndFallbackOrder",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestOrderedTargetChainDoesNotMoveBackAfterSkippingBusyTarget",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTargetRoutePriorityStrategyUsesAccountPriorityAndFailsOver",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTargetRouteRoundRobinRotatesAuthoredTargets",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTargetRouteStickyStrategyIsStable",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerResolvesLogicalModelPerRealChannel",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSchedulerAdvertisesAndResolvesUnroutedLogicalCapability",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestModelsHideDisabledAccounts",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestSecurityHeadersPinCanonicalAdminScript",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStatsRecentRingNewestFirst",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStatsBoundsClientControlledObservationFields",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTrendLatencyMemoryIsBounded",
+        "elapsed_seconds": 0.02
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestTrendUsesOutcomeInsteadOfSuccessfulHeaders",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestStatsTrendUsesMinutePointsAndCircularRetention",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/lms2004/lite2api/internal/gateway",
+        "test": "TestParseTrendRange",
+        "elapsed_seconds": 0
+      }
+    ],
+    "stderr": "",
+    "initial_restricted_attempt": {
+      "exit_code": 1,
+      "reason": "The sandbox disallowed a temporary IPv6 loopback socket required by httptest; the test process panicked before the gateway suite completed. This is an execution-environment restriction, not a demonstrated product failure.",
+      "error_lines": [
+        "panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted [recovered, repanicked]"
+      ]
+    },
+    "rerun": "Automatic approval allowed running the existing isolated loopback tests outside the socket restriction. The complete suite then passed."
+  },
+  "node": {
+    "command": "node --test internal/web/app-core.test.js internal/web/app-runtime.test.js",
+    "exit_code": 0,
+    "passed_files": 2,
+    "failed_files": 0
+  },
+  "build": {
+    "command": "GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -o /tmp/lite2api-overview-20261028 ./cmd/lite2api",
+    "exit_code": 0
+  },
+  "example_config": {
+    "command": "/tmp/lite2api-overview-20261028 -check-config -config config.example.json",
+    "exit_code": 0,
+    "stdout": "configuration ok: 4 accounts, 3 routes\n",
+    "boundary": "Validates the repository example, not production configuration or upstream credentials."
+  },
+  "dependencies": {
+    "command": "GOTOOLCHAIN=local go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./cmd/lite2api",
+    "exit_code": 0,
+    "nonstandard_packages": [
+      "github.com/lms2004/lite2api/internal/config",
+      "github.com/lms2004/lite2api/internal/web",
+      "github.com/lms2004/lite2api/internal/gateway",
+      "github.com/lms2004/lite2api/cmd/lite2api"
+    ]
+  },
+  "raw_artifacts": [
+    {
+      "path": "docs/evidence/lite2api-overview-2026-10-28-go.jsonl",
+      "bytes": 221334,
+      "sha256": "2aa4708bfb85aa44c3408e212807c9475de1e91435f1487ec1d3cbddb029ef34"
+    },
+    {
+      "path": "docs/evidence/lite2api-overview-2026-10-28-node.tap",
+      "bytes": 420,
+      "sha256": "fe4e975a5a6d929716b9282e5753ef72f3cfe1f331de1d8b8f53eea2ca0d8bfe"
+    }
+  ],
+  "not_performed": [
+    "Production model requests",
+    "Production configuration reads or writes",
+    "Deployment or service restart",
+    "Browser end-to-end tests",
+    "External adapter dependency builds and race suites",
+    "Load tests or disaster-recovery drills"
+  ],
+  "historical_evidence": "docs/OAUTH_RECOVERY_2026-10-28.md and docs/INTERFACE_AUDIT_2026-08-14.md are repository records, not rerun results from this task.",
+  "document_self_check": {
+    "checked_at": "2026-10-28T21:58:35.389824+08:00",
+    "path": "docs/LITE2API_PROJECT_OVERVIEW_2026-10-28.md",
+    "sha256": "8eab7645abe4ae6e276fadeb6d2b9c7b557158ba0225e001506a5aadc9537f33",
+    "parts": [
+      "目标、使用者与典型场景",
+      "项目范围与非目标",
+      "核心功能和对外接口",
+      "业务流程与成功判据",
+      "技术依赖与约束",
+      "已知限制、风险和待核实问题",
+      "证据"
+    ],
+    "lines": 230,
+    "local_file_links_checked": 102,
+    "format_checks": "Seven required parts; only ## headings; four-space * indentation; two blank lines between Parts; no trailing whitespace.",
+    "tracked_files_changed": [],
+    "result": "PASS"
+  }
+}

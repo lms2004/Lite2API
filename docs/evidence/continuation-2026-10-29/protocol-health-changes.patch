@@ -1,0 +1,570 @@
+--- before/internal/gateway/operations.go
++++ after/internal/gateway/operations.go
+@@ -184,7 +184,7 @@
+ 	for _, account := range configured {
+ 		configuredByID[account.ID] = account
+ 	}
+-	targets := routeHealthTargets(route, configured)
++	targets := routeHealthTargets(alias, route, configured)
+ 	result := RouteHealthSnapshot{Alias: alias, Targets: len(targets), Observations: make([]RouteObservationSnapshot, 0)}
+ 	freshRecords := make([]RequestRecord, 0)
+ 	for _, record := range filterRecords(records, alias, "") {
+@@ -202,7 +202,10 @@
+ 			result.MissingTargets = append(result.MissingTargets, target.accountID)
+ 			continue
+ 		}
+-		if !target.compatible(configuredAccount) || !account.Enabled || account.CircuitOpenUntil != "" {
++		if !account.Enabled || !target.available(configuredAccount, func(operation, model, credential string) bool {
++			canonicalModel := (&AccountRuntime{Config: configuredAccount}).breakerModelKey(model)
++			return account.circuitUntilByScope[breakerKey(operation, canonicalModel, credential)] <= now.UnixNano()
++		}) {
+ 			continue
+ 		}
+ 		accountRows := make([]RequestRecord, 0)
+@@ -258,12 +261,35 @@
+ 
+ func (target routeHealthTarget) compatible(account config.Account) bool {
+ 	if len(target.route.Targets) == 0 {
+-		return true
++		return config.AccountSupportsTargetModel(account, target.model)
+ 	}
+ 	_, _, ok := config.ResolveRouteTarget(account, target.route, target.target)
+ 	return ok
+ }
+ 
++// A target is structurally available when at least one declared interface can
++// select it. Use the same model, feature and credential boundary as scheduling,
++// never the account's worst-case aggregate breaker.
++func (target routeHealthTarget) available(account config.Account, available func(operation, model, credential string) bool) bool {
++	if !account.Enabled || !target.compatible(account) {
++		return false
++	}
++	operations := account.Operations
++	if len(operations) == 0 {
++		operations = config.DefaultOperations(account.Type)
++	}
++	for _, operation := range operations {
++		if operation == config.OperationAnthropic && target.effort != "" && target.effort != "auto" {
++			continue
++		}
++		if requirementsCompatible(account, target.model, operation, RequestRequirements{}, target.credential, target.effort) &&
++			available(operation, target.model, target.credential) {
++			return true
++		}
++	}
++	return false
++}
++
+ func (target routeHealthTarget) matches(record RequestRecord) bool {
+ 	if record.AccountID != target.accountID {
+ 		return false
+@@ -271,7 +297,7 @@
+ 	if target.credential != "" && record.CredentialID != target.credential {
+ 		return false
+ 	}
+-	if target.model != "" && record.UpstreamModel != target.model {
++	if record.UpstreamModel != target.model {
+ 		return false
+ 	}
+ 	if target.effort != "" && target.effort != "auto" && record.ReasoningEffort != target.effort {
+@@ -280,7 +306,7 @@
+ 	return true
+ }
+ 
+-func routeHealthTargets(route config.Route, accounts []config.Account) []routeHealthTarget {
++func routeHealthTargets(alias string, route config.Route, accounts []config.Account) []routeHealthTarget {
+ 	if len(route.Targets) > 0 {
+ 		targets := make([]routeHealthTarget, 0, len(route.Targets))
+ 		for _, target := range route.Targets {
+@@ -297,7 +323,11 @@
+ 	if len(route.Accounts) > 0 {
+ 		targets := make([]routeHealthTarget, 0, len(route.Accounts))
+ 		for _, id := range route.Accounts {
+-			targets = append(targets, routeHealthTarget{accountID: id, model: route.UpstreamModel, route: route})
++			model := route.UpstreamModel
++			if account := configuredAccountByID(accounts, id); account != nil {
++				model = (&AccountRuntime{Config: *account}).upstreamModel(alias, route.UpstreamModel)
++			}
++			targets = append(targets, routeHealthTarget{accountID: id, model: model, route: route})
+ 		}
+ 		return targets
+ 	}
+@@ -307,7 +337,8 @@
+ 	targets := make([]routeHealthTarget, 0, len(accounts))
+ 	for _, account := range accounts {
+ 		if account.Enabled {
+-			targets = append(targets, routeHealthTarget{accountID: account.ID, model: route.UpstreamModel, route: route})
++			model := (&AccountRuntime{Config: account}).upstreamModel(alias, route.UpstreamModel)
++			targets = append(targets, routeHealthTarget{accountID: account.ID, model: model, route: route})
+ 		}
+ 	}
+ 	return targets
+--- before/internal/gateway/operations_test.go
++++ after/internal/gateway/operations_test.go
+@@ -24,7 +24,7 @@
+ 
+ func TestOperationsRetainsHistoryWithoutClaimingCurrentAvailability(t *testing.T) {
+ 	now := time.Now().UTC()
+-	record := RequestRecord{Time: now.Add(-72 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
++	record := RequestRecord{Time: now.Add(-72 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, LatencyMS: 12}
+ 	cfg := config.Defaults()
+ 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
+ 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
+@@ -43,8 +43,8 @@
+ 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
+ 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
+ 	records := []RequestRecord{
+-		{Time: now.Add(-48 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 503, LatencyMS: 9000},
+-		{Time: now.Add(-24 * time.Hour).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, LatencyMS: 42},
++		{Time: now.Add(-48 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 503, LatencyMS: 9000},
++		{Time: now.Add(-24 * time.Hour).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, LatencyMS: 42},
+ 	}
+ 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: records, RouteLatest: []RequestRecord{records[1]}})
+ 	if snapshot.Window.Samples != 1 || snapshot.Window.Successful != 1 || snapshot.Window.P95LatencyMS == nil || *snapshot.Window.P95LatencyMS != 42 || snapshot.State != HealthUnknown || snapshot.Window.Scope != "latest_logical_request" {
+@@ -77,7 +77,7 @@
+ 		"ready":  {Accounts: []string{"upstream"}},
+ 		"broken": {Targets: []config.RouteTarget{{Account: "missing"}}},
+ 	}
+-	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "ready", AccountID: "upstream", Status: 200, LatencyMS: 25}
++	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "ready", UpstreamModel: "ready", AccountID: "upstream", Status: 200, LatencyMS: 25}
+ 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}, RouteLatest: []RequestRecord{record}})
+ 	if snapshot.State != HealthUnavailable || len(snapshot.Routes) != 2 {
+ 		t.Fatalf("global health must include broken route coverage: %+v", snapshot)
+@@ -89,7 +89,7 @@
+ 	cfg := config.Defaults()
+ 	cfg.Accounts = []config.Account{{ID: "upstream", Enabled: true, Concurrency: 4}}
+ 	cfg.Routes = map[string]config.Route{"chat": {Accounts: []string{"upstream"}}}
+-	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 503, LatencyMS: 25}
++	record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 503, LatencyMS: 25}
+ 	snapshot := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "upstream", Enabled: true, Concurrency: 4}}, StatsSnapshot{Recent: []RequestRecord{record}, RouteLatest: []RequestRecord{record}})
+ 	if snapshot.State != HealthDegraded || snapshot.Routes[0].State != HealthDegraded || snapshot.Routes[0].DegradedTargets != 1 {
+ 		t.Fatalf("an eligible target with recent failures must be degraded: %+v", snapshot)
+@@ -147,7 +147,7 @@
+ 	}
+ 
+ 	fingerprint := g.state.Load().routeFingerprints["chat"]
+-	success := RequestRecord{Time: time.Now().UTC().Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 200, Outcome: "success", RouteFingerprint: fingerprint}
++	success := RequestRecord{Time: time.Now().UTC().Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 200, Outcome: "success", RouteFingerprint: fingerprint}
+ 	g.stats.Record(success)
+ 	g.stats.RecordRouteObservation(success)
+ 	ready = httptest.NewRecorder()
+@@ -156,7 +156,7 @@
+ 		t.Fatalf("fresh route readiness=%d body=%s", ready.Code, ready.Body.String())
+ 	}
+ 
+-	failure := RequestRecord{Time: time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream", Status: 500, Outcome: "uncertain_submission", RouteFingerprint: fingerprint}
++	failure := RequestRecord{Time: time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream", Status: 500, Outcome: "uncertain_submission", RouteFingerprint: fingerprint}
+ 	g.stats.Record(failure)
+ 	g.stats.RecordRouteObservation(failure)
+ 	ready = httptest.NewRecorder()
+@@ -210,11 +210,11 @@
+ 	fingerprint := g.state.Load().routeFingerprints["chat"]
+ 	now := time.Now().UTC()
+ 	g.stats.RecordRouteObservation(RequestRecord{
+-		Time: now.Add(-10 * time.Minute).Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream",
++		Time: now.Add(-10 * time.Minute).Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream",
+ 		Operation: config.OperationEmbeddings, Status: http.StatusOK, Outcome: "success", RouteFingerprint: fingerprint,
+ 	})
+ 	g.stats.RecordRouteObservation(RequestRecord{
+-		Time: now.Format(time.RFC3339Nano), Model: "chat", AccountID: "upstream",
++		Time: now.Format(time.RFC3339Nano), Model: "chat", UpstreamModel: "chat", AccountID: "upstream",
+ 		Operation: config.OperationOpenAIChat, Status: http.StatusOK, Outcome: "success", RouteFingerprint: fingerprint,
+ 	})
+ 	ready := httptest.NewRecorder()
+--- before/internal/gateway/prompttest.go
++++ after/internal/gateway/prompttest.go
+@@ -95,6 +95,12 @@
+ 		writeAPIErrorCode(w, http.StatusBadRequest, "selected account does not support a chat operation", "invalid_request_error", "prompt_test_operation_unsupported")
+ 		return
+ 	}
++	upstreamModel := account.upstreamModel(input.Model, "")
++	if upstreamModel == "*" || (!account.supports(input.Model) && !config.AccountSupportsTargetModel(account.Config, input.Model)) ||
++		!config.AccountSupportsTargetModel(account.Config, upstreamModel) {
++		writeAPIErrorCode(w, http.StatusBadRequest, "selected account does not declare this model", "invalid_request_error", "prompt_test_model_unsupported")
++		return
++	}
+ 	releaseAdmission, admitted := g.admitMaintenanceCall(w, state)
+ 	if !admitted {
+ 		return
+@@ -107,7 +113,6 @@
+ 	}
+ 	defer state.scheduler.releaseAccount(account)
+ 
+-	upstreamModel := account.upstreamModel(input.Model, "")
+ 	path := "/v1/chat/completions"
+ 	payload := map[string]any{"model": upstreamModel, "messages": input.Messages, "stream": false}
+ 	if operation == config.OperationAnthropic {
+--- before/internal/gateway/runtime.go
++++ after/internal/gateway/runtime.go
+@@ -210,6 +210,9 @@
+ 	AverageLatencyMS *int64   `json:"average_latency_ms"`
+ 	CircuitOpenUntil string   `json:"circuit_open_until,omitempty"`
+ 	LastError        string   `json:"last_error,omitempty"`
++	// Keep availability scoped internally; the public aggregate remains a
++	// diagnostic summary and must not make unrelated routes unavailable.
++	circuitUntilByScope map[string]int64
+ }
+ 
+ func (a *AccountRuntime) tryAcquire() bool {
+@@ -374,8 +377,10 @@
+ 	var lastError string
+ 	var circuit string
+ 	var circuitUntil int64
+-	a.state.breakers.Range(func(_, value any) bool {
++	circuitUntilByScope := make(map[string]int64)
++	a.state.breakers.Range(func(key, value any) bool {
+ 		breaker := value.(*breakerRuntime)
++		circuitUntilByScope[key.(string)] = breaker.circuitUntil.Load()
+ 		if current := breaker.failures.Load(); current > failures {
+ 			failures = current
+ 			if value := breaker.lastError.Load(); value != nil {
+@@ -400,6 +405,7 @@
+ 		Concurrency: a.Config.Concurrency, Active: a.state.capacity.active.Load(), Enabled: a.Config.Enabled,
+ 		Failures: failures, Total: total, Success: success, AverageLatencyMS: avg,
+ 		CircuitOpenUntil: circuit, LastError: lastError,
++		circuitUntilByScope: circuitUntilByScope,
+ 	}
+ }
+ 
+@@ -623,45 +629,15 @@
+ 	if !exists {
+ 		return false
+ 	}
+-	availableForAnyOperation := func(account *AccountRuntime, upstreamModel, credential string) bool {
+-		if account == nil || !account.Config.Enabled {
+-			return false
+-		}
+-		operations := account.Config.Operations
+-		if len(operations) == 0 {
+-			operations = config.DefaultOperations(account.Config.Type)
+-		}
+-		for _, operation := range operations {
+-			if account.available(now, operation, upstreamModel, credential) {
+-				return true
+-			}
+-		}
+-		return false
+-	}
+-	if len(route.Targets) > 0 {
+-		for _, target := range route.Targets {
+-			account := s.accounts[target.Account]
+-			if account == nil {
+-				continue
+-			}
+-			upstreamModel, _, compatible := config.ResolveRouteTarget(account.Config, route, target)
+-			if compatible && availableForAnyOperation(account, upstreamModel, target.Credential) {
+-				return true
+-			}
+-		}
+-		return false
+-	}
+-	allowed := make(map[string]struct{}, len(route.Accounts))
+-	for _, id := range route.Accounts {
+-		allowed[id] = struct{}{}
+-	}
+-	for id, account := range s.accounts {
+-		if !route.AllAccounts {
+-			if _, ok := allowed[id]; !ok {
+-				continue
+-			}
+-		}
+-		if availableForAnyOperation(account, account.upstreamModel(alias, route.UpstreamModel), "") {
++	accounts := make([]config.Account, 0, len(s.accounts))
++	for _, account := range s.accounts {
++		accounts = append(accounts, account.Config)
++	}
++	for _, target := range routeHealthTargets(alias, route, accounts) {
++		account := s.accounts[target.accountID]
++		if account != nil && target.available(account.Config, func(operation, model, credential string) bool {
++			return account.available(now, operation, model, credential)
++		}) {
+ 			return true
+ 		}
+ 	}
+--- /dev/null
++++ after/internal/gateway/operations_scope_test.go
+@@ -0,0 +1,108 @@
++package gateway
++
++import (
++	"context"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++	"time"
++
++	"github.com/lms2004/lite2api/internal/config"
++)
++
++func TestOperationsAvailabilityUsesSchedulingBreakerScope(t *testing.T) {
++	for _, tc := range []struct {
++		name, operation, model, credential string
++		available                          bool
++	}{
++		{"other model", config.OperationOpenAIChat, "other", "0123456789abcdef", true},
++		{"other operation", config.OperationOpenAIResponses, "selected", "0123456789abcdef", true},
++		{"other credential", config.OperationOpenAIChat, "selected", "fedcba9876543210", true},
++		{"same scope", config.OperationOpenAIChat, "selected", "0123456789abcdef", false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			cfg := config.Defaults()
++			cfg.Accounts = []config.Account{{ID: "source", Type: "openai", APIKey: "fixture-secret", BaseURL: "https://example.invalid", Models: []string{"selected", "other"}, Operations: []string{config.OperationOpenAIChat}, Enabled: true, Concurrency: 1}}
++			cfg.Routes = map[string]config.Route{"alias": {Targets: []config.RouteTarget{{Account: "source", Model: "selected", Credential: "0123456789abcdef"}}}}
++			s := NewScheduler(cfg)
++			account := s.Get("source")
++			attempt := account.beginAttempt(tc.operation, tc.model, tc.credential)
++			account.reportFailure(attempt, "fixture failure", 1, time.Minute, true)
++			now := time.Now()
++			accounts := s.Snapshot()
++			if accounts[0].CircuitOpenUntil == "" {
++				t.Fatal("fixture did not open the aggregate breaker")
++			}
++			operations := buildOperationsSnapshot(now, cfg, accounts, StatsSnapshot{})
++			if got := operations.Routes[0].UnknownTargets == 1; got != tc.available || s.RouteAvailable("alias", now) != tc.available {
++				t.Fatalf("health diverged from scoped availability: want=%v snapshot=%+v scheduler=%v", tc.available, operations, s.RouteAvailable("alias", now))
++			}
++			selection, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", nil, 0)
++			if selection != nil {
++				selection.Release()
++			}
++			if (err == nil) != tc.available {
++				t.Fatalf("selection disagreed with health: available=%v err=%v", tc.available, err)
++			}
++		})
++	}
++}
++
++func TestOperationsLegacyTargetsResolveModelBeforeMatchingObservation(t *testing.T) {
++	now := time.Now()
++	cfg := config.Defaults()
++	cfg.Accounts = []config.Account{{ID: "source", Type: "openai", APIKey: "fixture-secret", Enabled: true, Models: []string{"correct", "wrong"}, ModelMap: map[string]string{"alias": "correct"}, Operations: []string{config.OperationOpenAIChat}}}
++	for _, allAccounts := range []bool{false, true} {
++		route := config.Route{AllAccounts: allAccounts}
++		if !allAccounts {
++			route.Accounts = []string{"source"}
++		}
++		cfg.Routes = map[string]config.Route{"alias": route}
++		for _, model := range []string{"", "wrong", "correct"} {
++			record := RequestRecord{Time: now.Format(time.RFC3339Nano), Model: "alias", UpstreamModel: model, AccountID: "source", Operation: config.OperationOpenAIChat, Status: 200, Outcome: "success"}
++			result := buildOperationsSnapshot(now, cfg, []AccountSnapshot{{ID: "source", Enabled: true}}, StatsSnapshot{RouteLatest: []RequestRecord{record}})
++			if got := result.Routes[0].ReadyTargets == 1; got != (model == "correct") {
++				t.Fatalf("legacy target accepted another model: all_accounts=%v observed=%q result=%+v", allAccounts, model, result)
++			}
++		}
++	}
++}
++
++func TestReadinessRejectsLegacySourceThatCannotSelectModel(t *testing.T) {
++	for _, allAccounts := range []bool{false, true} {
++		account := config.Account{ID: "source", Type: "openai", APIKey: "fixture-secret", BaseURL: "https://example.invalid", Models: []string{"other"}, Operations: []string{config.OperationOpenAIChat}, Enabled: true}
++		route := config.Route{AllAccounts: allAccounts}
++		if !allAccounts {
++			route.Accounts = []string{"source"}
++		}
++		g := newTestGateway(t, []config.Account{account}, map[string]config.Route{"missing": route})
++		w := httptest.NewRecorder()
++		g.serveReadiness(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
++		if w.Code != http.StatusServiceUnavailable {
++			t.Fatalf("unselectable legacy model reported available: all_accounts=%v status=%d body=%s", allAccounts, w.Code, w.Body.String())
++		}
++	}
++}
++
++func TestOperationsReadinessHonorsDeclaredInterfaceExclusions(t *testing.T) {
++	for _, explicit := range []bool{false, true} {
++		cfg := config.Defaults()
++		cfg.Accounts = []config.Account{{ID: "source", Type: "openai", Enabled: true, Models: []string{"m"}, Operations: []string{config.OperationOpenAIChat}, Capabilities: []config.ChannelCapability{{Model: "m", UpstreamModel: "m", Features: map[string]config.CapabilityEvidence{"openai.chat:call": {Status: "unsupported"}}}}}}
++		route := config.Route{Accounts: []string{"source"}, UpstreamModel: "m"}
++		if explicit {
++			route = config.Route{Targets: []config.RouteTarget{{Account: "source", Model: "m"}}}
++		}
++		cfg.Routes = map[string]config.Route{"alias": route}
++		s := NewScheduler(cfg)
++		now := time.Now()
++		if result := buildOperationsSnapshot(now, cfg, s.Snapshot(), StatsSnapshot{}); result.State != HealthUnavailable || s.RouteAvailable("alias", now) {
++			t.Fatalf("excluded interface reported available: explicit=%v snapshot=%+v", explicit, result)
++		}
++		if selection, err := s.Select(context.Background(), "alias", config.OperationOpenAIChat, "", nil, 0); selection != nil || err != ErrNoEligibleAccount {
++			if selection != nil {
++				selection.Release()
++			}
++			t.Fatalf("selection disagreed with availability: selection=%v err=%v", selection, err)
++		}
++	}
++}
+--- /dev/null
++++ after/internal/gateway/prompt_scope_test.go
+@@ -0,0 +1,64 @@
++package gateway
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++
++	"github.com/lms2004/lite2api/internal/config"
++)
++
++func TestPromptTestEnforcesDeclaredModelBeforeAdmission(t *testing.T) {
++	for _, tc := range []struct {
++		name, model, upstream string
++		models                []string
++		modelMap              map[string]string
++		allowed               bool
++	}{
++		{name: "undeclared", model: "not-declared", models: []string{"known"}},
++		{name: "literal wildcard", model: "*", models: []string{"*"}},
++		{name: "declared", model: "known", upstream: "known", models: []string{"known"}, allowed: true},
++		{name: "model map alias", model: "alias", upstream: "real", models: []string{"known"}, modelMap: map[string]string{"alias": "real"}, allowed: true},
++		{name: "model map target", model: "real", upstream: "real", models: []string{"known"}, modelMap: map[string]string{"alias": "real"}, allowed: true},
++		{name: "wildcard scope", model: "concrete", upstream: "concrete", models: []string{"*"}, allowed: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			var calls atomic.Int32
++			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				calls.Add(1)
++				var body struct{ Model string }
++				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model != tc.upstream {
++					t.Errorf("unexpected upstream model=%q err=%v", body.Model, err)
++				}
++				w.Header().Set("Content-Type", "application/json")
++				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
++			}))
++			defer upstream.Close()
++			g := newTestGateway(t, []config.Account{{ID: "source", Type: "openai", APIKey: "fixture-secret", BaseURL: upstream.URL, Models: tc.models, ModelMap: tc.modelMap, Operations: []string{config.OperationOpenAIChat}, Enabled: true, Concurrency: 1}}, nil)
++			account := g.state.Load().scheduler.Get("source")
++			if !tc.allowed {
++				// Model rejection precedes admission even when the source is full.
++				if !account.tryAcquire() {
++					t.Fatal("could not hold source capacity")
++				}
++				defer account.release()
++			}
++			body, _ := json.Marshal(promptTestRequest{AccountID: "source", Model: tc.model, Messages: []promptTestMessage{{Role: "user", Content: "test"}}})
++			req := httptest.NewRequest(http.MethodPost, "/admin/api/prompt-test", strings.NewReader(string(body)))
++			req.RemoteAddr = "127.0.0.1:12345"
++			req.Header.Set("Authorization", "Bearer admin-secret")
++			w := httptest.NewRecorder()
++			g.ServeAdminAPI(w, req)
++			if tc.allowed {
++				if w.Code != http.StatusOK || calls.Load() != 1 || account.state.capacity.active.Load() != 0 {
++					t.Fatalf("allowed model: status=%d calls=%d active=%d body=%s", w.Code, calls.Load(), account.state.capacity.active.Load(), w.Body.String())
++				}
++			} else if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "prompt_test_model_unsupported") || calls.Load() != 0 || account.state.capacity.active.Load() != 1 {
++				t.Fatalf("undeclared model reached admission or upstream: status=%d calls=%d active=%d body=%s", w.Code, calls.Load(), account.state.capacity.active.Load(), w.Body.String())
++			}
++		})
++	}
++}
+--- /dev/null
++++ after/internal/gateway/cancellation_release_test.go
+@@ -0,0 +1,106 @@
++package gateway
++
++import (
++	"bufio"
++	"context"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/lms2004/lite2api/internal/config"
++)
++
++// This uses real loopback HTTP connections on both sides of the gateway. A
++// canceled handler alone would not prove that the upstream transport observes
++// cancellation or that the same managed key can immediately call again.
++func TestHTTPClientCancellationAndTimeoutReleaseAllLeases(t *testing.T) {
++	for _, mode := range []string{"cancel", "timeout"} {
++		t.Run(mode, func(t *testing.T) {
++			upstreamCanceled, cleanup := make(chan struct{}), make(chan struct{})
++			var upstreamCalls atomic.Int32
++			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if upstreamCalls.Add(1) != 1 {
++					w.Header().Set("Content-Type", "application/json")
++					_, _ = w.Write([]byte(completedChat))
++					return
++				}
++				w.Header().Set("Content-Type", "text/event-stream")
++				_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"started\"}}]}\n\n")
++				w.(http.Flusher).Flush()
++				select {
++				case <-r.Context().Done():
++					close(upstreamCanceled)
++				case <-cleanup:
++				}
++			}))
++			defer upstream.Close()
++			defer close(cleanup)
++			g := newTestGateway(t, []config.Account{{ID: "source", Type: "openai", BaseURL: upstream.URL, APIKey: "fixture-upstream", Models: []string{"m"}, Operations: []string{config.OperationOpenAIChat}, Enabled: true, Concurrency: 1}}, nil)
++			_, secret, err := g.clientKeys.Create(ClientKeyCreate{Name: "cancellation fixture", Models: []string{"m"}, Concurrency: 1})
++			if err != nil {
++				t.Fatal(err)
++			}
++			firstFinished := make(chan struct{})
++			var gatewayCalls atomic.Int32
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				first := gatewayCalls.Add(1) == 1
++				g.ServeGateway(w, r)
++				if first {
++					close(firstFinished)
++				}
++			}))
++			defer server.Close()
++			ctx, cancel := context.WithCancel(context.Background())
++			if mode == "timeout" {
++				cancel()
++				ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
++			}
++			defer cancel()
++			request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"fixture"}]}`))
++			request.Header.Set("Authorization", "Bearer "+secret)
++			response, err := server.Client().Do(request)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer response.Body.Close()
++			reader := bufio.NewReader(response.Body)
++			if line, err := reader.ReadString('\n'); err != nil || !strings.Contains(line, "started") {
++				t.Fatalf("stream did not start: line=%q err=%v", line, err)
++			}
++			if mode == "cancel" {
++				cancel()
++			}
++			if _, err := io.ReadAll(reader); err == nil {
++				t.Fatal("incomplete canceled stream ended successfully")
++			}
++			for name, done := range map[string]<-chan struct{}{"upstream context": upstreamCanceled, "gateway handler": firstFinished} {
++				select {
++				case <-done:
++				case <-time.After(2 * time.Second):
++					t.Fatalf("%s did not finish after client %s", name, mode)
++				}
++			}
++			if g.globalActive.Load() != 0 || g.bodyBytes.Load() != 0 || g.Accounts()[0].Active != 0 || g.clientKeys.List()[0].Active != 0 || g.Stats().Active != 0 {
++				t.Fatalf("leases not released: global=%d body_bytes=%d account=%d key=%d stats=%d", g.globalActive.Load(), g.bodyBytes.Load(), g.Accounts()[0].Active, g.clientKeys.List()[0].Active, g.Stats().Active)
++			}
++			if recent := g.Stats().Recent; len(recent) != 1 || recent[0].Outcome != "client_cancelled" || recent[0].AttemptCount != 1 {
++				t.Fatalf("cancellation outcome/attempts=%+v", recent)
++			}
++			followup, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"fixture"}]}`))
++			followup.Header.Set("Authorization", "Bearer "+secret)
++			response, err = server.Client().Do(followup)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer response.Body.Close()
++			body, err := io.ReadAll(response.Body)
++			if err != nil || response.StatusCode != http.StatusOK || validateBufferedCompletion(config.OperationOpenAIChat, "/v1/chat/completions", body) != nil || upstreamCalls.Load() != 2 {
++				t.Fatalf("same key could not complete after cancellation: status=%d calls=%d err=%v", response.StatusCode, upstreamCalls.Load(), err)
++			}
++		})
++	}
++}

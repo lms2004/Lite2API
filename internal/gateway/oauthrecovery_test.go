@@ -26,7 +26,7 @@ func TestOAuth401RefreshesSelectedCredentialAndRetriesOnce(t *testing.T) {
 				http.Error(w, "access token expired: sensitive-detail", 401)
 				return
 			}
-			writeJSON(w, 200, map[string]any{"choices": []any{map[string]string{"text": "ok"}}})
+			writeJSON(w, 200, map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}}})
 		case "/v0/management/auth-files":
 			if r.Header.Get("Authorization") != "Bearer management-secret" {
 				t.Error("missing management authentication")
@@ -58,6 +58,10 @@ func TestOAuth401RefreshesSelectedCredentialAndRetriesOnce(t *testing.T) {
 	}
 	if g.Stats().Active != 0 || g.bodyBytes.Load() != 0 {
 		t.Fatal("recovery leaked admission/body leases")
+	}
+	record := g.Stats().Recent[0]
+	if record.AttemptCount != 2 || len(record.Attempts) != 2 || record.Attempts[0].Status != 401 || record.Attempts[1].Status != 200 || record.Outcome != "success" {
+		t.Fatalf("OAuth refresh must remain one logical call with two transport attempts: %+v", record)
 	}
 }
 
@@ -220,5 +224,24 @@ func TestFailedOAuthRecoveryIsThrottled(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("failed refresh called %d times within backoff", calls)
+	}
+}
+
+func TestSelectedCredentialEvidenceRequiresTrustedAdapterAndPublicIndex(t *testing.T) {
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", "http://127.0.0.1:12345")
+	response := &http.Response{Header: make(http.Header)}
+	response.Header.Set(credentialSelectedHeader, "0123456789abcdef")
+	trusted := config.Account{AdapterID: "cli-proxy-api", BaseURL: "http://127.0.0.1:12345/v1"}
+	if got := selectedOAuthCredential(trusted, response, ""); got != "0123456789abcdef" {
+		t.Fatalf("trusted index lost: %q", got)
+	}
+	for _, account := range []config.Account{{AdapterID: "generic-openai", BaseURL: trusted.BaseURL}, {AdapterID: "cli-proxy-api", BaseURL: "http://127.0.0.1:23456/v1"}} {
+		if got := selectedOAuthCredential(account, response, ""); got != "" {
+			t.Fatal("untrusted upstream injected credential identity")
+		}
+	}
+	response.Header.Set(credentialSelectedHeader, "private@example.com")
+	if got := selectedOAuthCredential(trusted, response, "configured"); got != "configured" {
+		t.Fatal("non-public selected identity accepted")
 	}
 }

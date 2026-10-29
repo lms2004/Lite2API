@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="description" content="Lite2API 使用、额度、速度、渠道质量与账号管理控制台" />
+    <meta name="description" content="Lite2API 使用、额度、速度、渠道调用观测与账号管理控制台" />
     <meta name="theme-color" content="#111d32" />
     <link
       rel="icon"
@@ -238,8 +238,8 @@
           <section class="section-block quality-section">
             <div class="section-head">
               <div>
-                <h2>渠道质量</h2>
-                <p>连续直测 3 轮，检查连接是否稳定。</p>
+                <h2>渠道调用观测</h2>
+                <p>连续直测 3 轮，查看本轮完成情况与耗时；不评估模型回答质量。</p>
               </div>
               <div class="heading-actions">
                 <button id="openChannelChatButton" class="primary" type="button">渠道聊天测试</button
@@ -249,7 +249,7 @@
             <div class="table-scroll">
               <table class="clean-table responsive-table">
                 <caption class="sr-only">
-                  渠道质量与三轮直测结果
+                  渠道调用观测与三轮直测结果
                 </caption>
                 <thead>
                   <tr>
@@ -258,7 +258,7 @@
                     <th scope="col">成功率</th>
                     <th scope="col">平均 / P95</th>
                     <th scope="col">三轮直测</th>
-                    <th scope="col">质量结论</th>
+                    <th scope="col">本轮观测</th>
                     <th scope="col">操作</th>
                   </tr>
                 </thead>
@@ -669,7 +669,7 @@
               <summary>高级设置 <span>模型、协议、ID、并发、代理与请求头</span></summary>
               <div class="form-grid three">
                 <label class="span-three"
-                  >已验证模型<input name="models" placeholder="自动发现；仅在上游不提供模型目录时手动填写"
+                  >模型声明<input name="models" placeholder="目录发现或手动填写；实际调用需另行验证"
                 /></label>
                 <div id="manualModelHints" class="model-hints span-three"></div>
                 <p class="field-help span-three">模型留空表示能力未知，不会被视为支持全部模型。</p>
@@ -705,8 +705,8 @@
             </details>
           </section>
           <aside class="test-aside">
-            <h3>自动验证</h3>
-            <p>点击主按钮后会自动测试并保存，不需要先单独执行测试。</p>
+            <h3>连接检查</h3>
+            <p>保存时检查认证与模型目录。实际模型调用及流式、工具、图片等特性需分别验证。</p>
             <ol id="connectionTestSteps" class="test-steps">
               <li>地址与代理</li>
               <li>身份认证</li>
@@ -773,6 +773,12 @@
             </div>
           </details>
         </div>
+        <div class="form-grid two">
+          <label>验收接口<select id="channelVerifyOperation"><option value="">连接默认接口</option><option value="openai.chat">Chat Completions</option><option value="openai.responses">Responses</option><option value="anthropic.messages">Messages</option></select></label>
+          <label>验收特性<select id="channelVerifyFeature"><option value="call">普通调用</option><option value="stream">完整流式</option><option value="tools">工具往返</option><option value="image_input">图片输入</option></select></label>
+          <label>推理强度<select id="channelVerifyEffort"><option value="auto">上游默认</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option><option value="ultra">ultra</option></select></label>
+          <label id="channelVerifyCredentialField" hidden>认证账号<select id="channelVerifyCredential"><option value="">自动选择，记录实际账号</option></select></label>
+        </div>
         <div id="channelChatTarget" class="channel-chat-target">
           选择渠道和模型后即可发送消息。测试会产生真实上游调用并消耗额度。
         </div>
@@ -800,6 +806,7 @@
             <span>将携带当前窗口中的成功对话作为上下文</span>
             <div>
               <button id="clearChannelChat" class="secondary" type="button">清空对话</button
+              ><button id="verifyChannelCapability" class="secondary" type="button">验收所选组合</button
               ><button id="stopChannelChat" class="secondary danger" type="button" hidden>停止</button
               ><button id="sendChannelChat" class="primary" type="submit">发送测试</button>
             </div>
@@ -851,7 +858,7 @@
       <div class="dialog-shell">
         <header class="dialog-head">
           <div>
-            <h2 id="onboardingResultTitle">上游已就绪</h2>
+            <h2 id="onboardingResultTitle">来源已登记</h2>
             <p id="onboardingResultSubtitle">已明确记录本次创建的对象。</p>
           </div>
           <button

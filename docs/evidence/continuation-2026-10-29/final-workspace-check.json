@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-10-29T17:08:16.511616+08:00",
+  "frozen_source_match": true,
+  "git_diff_check_exit_code": 0,
+  "git_commits_created": 0,
+  "modified_from_handoff_existing_files": [
+    "Makefile",
+    "deploy/verify_service.py",
+    "docs/OPERATIONS.md",
+    "docs/TEMP_EXECUTION_STATE_2026-10-29.md",
+    "internal/config/capability_discovery.go",
+    "internal/gateway/accountimport.go",
+    "internal/gateway/accountimport_test.go",
+    "internal/gateway/admin.go",
+    "internal/gateway/oauthadapter.go",
+    "internal/gateway/oauthadapter_test.go",
+    "internal/gateway/operations.go",
+    "internal/gateway/operations_test.go",
+    "internal/gateway/prompttest.go",
+    "internal/gateway/runtime.go",
+    "internal/gateway/server.go",
+    "tools/verify-business-runtime.py"
+  ],
+  "python_bytecode_caches_present": [
+    [
+      "/root/Lite2API/deploy/__pycache__",
+      false
+    ],
+    [
+      "/root/Lite2API/tools/__pycache__",
+      false
+    ]
+  ],
+  "approval_channel_recovery": "One final regression command was not executed because automatic approval token refresh was revoked. Human reauthenticated; subsequent same-scope execution succeeded. No bypass was used."
+}

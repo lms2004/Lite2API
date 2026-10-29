@@ -181,13 +181,15 @@ globalThis.Lite2APIAccounts = function createAccounts(context) {
             direct = Core.directModels(item.config),
             logical = Core.logicalModels([item.config]),
             models = Core.uniqueStrings([...logical, ...direct]),
+            checks = (item.config.capabilities || []).flatMap((capability) => Object.entries(capability.features || {})
+              .map(([scope, evidence]) => `${capability.model} · ${scope} · ${evidence.last_check_outcome === 'failed' ? '最近验收失败' : evidence.status === 'verified' && evidence.last_check_outcome === 'passed' ? '已验证此组合' : evidence.status === 'unsupported' ? '不支持' : '未验证'} · ${evidence.last_checked_at || evidence.observed_at || '时间未知'}`)),
             usage = accountRouteUsage(item.id),
-            chatAvailable = item.config.enabled !== false && Core.channelChatSupported(item.config),
+            chatAvailable = item.config.enabled !== false && Core.channelVerificationSupported(item.config),
             preview = models.slice(0, 6),
             catalog = preview.length
               ? `<div class="model-chip-list">${preview.map((model) => modelLabelHTML(model)).join('')}${models.length > preview.length ? `<span class="model-chip-more">+${models.length - preview.length}</span>` : ''}</div>`
               : '<span class="model-list">能力未知</span>';
-          return `<tr data-ui-key="connection-${escapeHTML(item.id)}"><td data-label="连接"><div class="quota-identity">${providerIconHTML(key)}<div><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.id)}</span></div></div></td><td data-label="地址 / 协议"><div class="cell-main"><strong>${escapeHTML(item.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容')}</strong><span class="base-url" title="${escapeHTML(item.config.base_url)}">${escapeHTML(item.config.base_url)}</span></div></td><td data-label="模型能力" title="${escapeHTML(models.join(', '))}">${catalog}<small class="model-catalog-meta">${logical.length ? `${logical.length} 个能力映射 · ` : ''}${direct.length ? `${direct.length} 个直连模型` : '直连目录未知'}</small></td><td data-label="路由使用"><div class="route-usage">${
+          return `<tr data-ui-key="connection-${escapeHTML(item.id)}"><td data-label="连接"><div class="quota-identity">${providerIconHTML(key)}<div><strong>${escapeHTML(item.name)}</strong><span>${escapeHTML(item.id)}</span></div></div></td><td data-label="地址 / 协议"><div class="cell-main"><strong>${escapeHTML(item.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容')}</strong><span class="base-url" title="${escapeHTML(item.config.base_url)}">${escapeHTML(item.config.base_url)}</span></div></td><td data-label="模型能力" title="${escapeHTML(models.join(', '))}">${catalog}<small class="model-catalog-meta">${logical.length ? `${logical.length} 个能力映射 · ` : ''}${direct.length ? `${direct.length} 个直连模型` : '直连目录未知'} · 目录仅为声明</small>${checks.length ? `<details><summary>${checks.length} 项接口验收记录</summary><small>${checks.map(escapeHTML).join('<br>')}</small></details>` : ''}</td><td data-label="路由使用"><div class="route-usage">${
             usage.length
               ? usage
                   .slice(0, 4)

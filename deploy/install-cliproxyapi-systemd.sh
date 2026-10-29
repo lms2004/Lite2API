@@ -14,6 +14,10 @@ unit_target=/etc/systemd/system/cliproxyapi.service
 config_target=/etc/cliproxyapi/config.yaml
 adapter_env=/etc/cliproxyapi/cliproxyapi.env
 rollback_root=/var/lib/cliproxyapi-rollbacks
+acceptance_cases=${LITE2API_ACCEPTANCE_CASES:-/etc/lite2api/acceptance.json}
+acceptance_tool=$project_dir/deploy/verify_service.py
+lite_config=/etc/lite2api/config.json
+acceptance_required=0
 maintained_patch_paths=(
     deploy/patches/cliproxyapi-quota-snapshot.patch
     deploy/patches/cliproxyapi-routing-reliability.patch
@@ -35,7 +39,7 @@ if [[ $(id -u) -ne 0 ]]; then
 fi
 
 for command in git openssl curl install systemctl getent groupadd useradd \
-    sed awk sha256sum mktemp mv flock chown chmod; do
+    sed awk sha256sum mktemp mv flock chown chmod python3; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
         exit 1
@@ -65,6 +69,18 @@ assert_safe_directory_target() {
         exit 1
     }
 }
+
+# The preflight reads the existing configuration to decide whether an OAuth
+# acceptance gate is required. Reject symlinked targets before that read.
+assert_safe_directory_target /etc/lite2api
+assert_safe_file_target "$lite_config"
+if [[ -f $lite_config ]]; then
+    acceptance_required=$(python3 -c 'import json,sys; print(int(any(a.get("enabled") and a.get("adapter_id")=="cli-proxy-api" for a in json.load(open(sys.argv[1]))["accounts"])))' "$lite_config")
+fi
+if (( acceptance_required == 1 )); then
+    [[ -f $acceptance_cases && ! -L $acceptance_cases && -f $acceptance_tool ]] || { echo 'active OAuth routes require configured business acceptance cases' >&2; exit 1; }
+    python3 -c 'import json,sys; cfg=json.load(open("/etc/lite2api/config.json")); ids={a["id"] for a in cfg["accounts"] if a.get("enabled") and a.get("adapter_id")=="cli-proxy-api"}; cases=json.load(open(sys.argv[1]))["cases"]; sys.exit(0 if any(c.get("expect_account") in ids and c.get("expect_status",200)==200 for c in cases) else 1)' "$acceptance_cases" || { echo 'acceptance must identify an affected OAuth connection, so fallback cannot mask failure' >&2; exit 1; }
+fi
 
 assert_safe_directory_target /etc/cliproxyapi
 assert_safe_directory_target /var/lib/cliproxyapi
@@ -340,11 +356,16 @@ curl -fsS --max-time 5 -o /dev/null -H "@$management_header_tmp" \
 curl -fsS --max-time 5 -o /dev/null -H "@$api_header_tmp" \
     http://127.0.0.1:45682/v1/models
 systemctl is-active --quiet cliproxyapi.service
+if (( acceptance_required == 1 )); then
+    acceptance_url=${LITE2API_ACCEPTANCE_URL:-http://127.0.0.1:45679}
+    python3 "$acceptance_tool" --url "$acceptance_url" --cases "$acceptance_cases" --env-file "$lite_env" --timeout 90 --output "$rollback_dir/release-acceptance.json"
+fi
 deployment_started=0
 
 printf 'CLIProxyAPI %s installed from exact revision %s\n' "$version" "$commit"
 printf 'Binary SHA-256: '
 sha256sum "$binary_target" | awk '{print $1}'
 printf 'OAuth adapter health and both authentication paths passed.\n'
-printf 'Maintained quota, routing, and auth-refresh reliability patches: applied\n'
+if (( acceptance_required == 1 )); then printf 'Affected gateway source and business calls passed.\n'; else printf 'Business acceptance pending: no active gateway OAuth route was declared.\n'; fi
+printf 'All five maintained CLIProxyAPI reliability patches: applied\n'
 printf 'Rollback snapshot: %s\n' "$rollback_dir"

@@ -9,46 +9,66 @@ import (
 )
 
 const (
-	trendBucketDuration = time.Minute
-	trendRetention      = 7 * 24 * time.Hour
-	maxTrendSamples     = 2048
+	trendBucketDuration  = time.Minute
+	trendRetention       = 7 * 24 * time.Hour
+	maxTrendSamples      = 2048
+	maxObservedAttempts  = 64
+	maxRouteObservations = 16384
 )
 
+// UpstreamAttempt records transport facts within one logical request. A 2xx
+// response here only means headers arrived; RequestRecord.Outcome describes
+// whether the protocol result was completely delivered.
+type UpstreamAttempt struct {
+	AccountID     string `json:"account_id"`
+	CredentialID  string `json:"credential_id,omitempty"`
+	UpstreamModel string `json:"upstream_model"`
+	Status        int    `json:"status,omitempty"`
+	LatencyMS     int64  `json:"latency_ms"`
+	Outcome       string `json:"outcome"`
+}
+
 type RequestRecord struct {
-	Time             string  `json:"time"`
-	RequestID        string  `json:"request_id"`
-	Model            string  `json:"model"`
-	UpstreamModel    string  `json:"upstream_model"`
-	AccountID        string  `json:"account_id"`
-	CredentialID     string  `json:"credential_id,omitempty"`
-	Operation        string  `json:"operation,omitempty"`
-	ReasoningEffort  string  `json:"reasoning_effort,omitempty"`
-	ClientKeyID      string  `json:"client_key_id"`
-	ClientKeyName    string  `json:"client_key_name,omitempty"`
-	Path             string  `json:"path"`
-	Status           int     `json:"status"`
-	LatencyMS        int64   `json:"latency_ms"`
-	InputType        string  `json:"input_type,omitempty"`
-	OutputType       string  `json:"output_type,omitempty"`
-	InputParts       int     `json:"input_parts,omitempty"`
-	TextParts        int     `json:"text_parts,omitempty"`
-	ImageParts       int     `json:"image_parts,omitempty"`
-	AudioParts       int     `json:"audio_parts,omitempty"`
-	VideoParts       int     `json:"video_parts,omitempty"`
-	FileParts        int     `json:"file_parts,omitempty"`
-	RequestBytes     int64   `json:"request_bytes,omitempty"`
-	ResponseBytes    int64   `json:"response_bytes,omitempty"`
-	Stream           bool    `json:"stream,omitempty"`
-	UsageAvailable   bool    `json:"usage_available,omitempty"`
-	InputTokens      int64   `json:"input_tokens,omitempty"`
-	OutputTokens     int64   `json:"output_tokens,omitempty"`
-	TotalTokens      int64   `json:"total_tokens,omitempty"`
-	CachedTokens     int64   `json:"cached_tokens,omitempty"`
-	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
-	CacheRate        float64 `json:"cache_rate,omitempty"`
-	CacheRateKnown   bool    `json:"cache_rate_known,omitempty"`
-	Error            string  `json:"error,omitempty"`
-	Outcome          string  `json:"outcome,omitempty"`
+	Time             string            `json:"time"`
+	RequestID        string            `json:"request_id"`
+	Model            string            `json:"model"`
+	UpstreamModel    string            `json:"upstream_model"`
+	AccountID        string            `json:"account_id"`
+	CredentialID     string            `json:"credential_id,omitempty"`
+	Operation        string            `json:"operation,omitempty"`
+	ReasoningEffort  string            `json:"reasoning_effort,omitempty"`
+	RequiredFeatures string            `json:"required_features,omitempty"`
+	RequestContract  string            `json:"request_contract,omitempty"`
+	ExpectedChoices  int               `json:"expected_choices,omitempty"`
+	ToolMode         string            `json:"tool_mode,omitempty"`
+	ClientKeyID      string            `json:"client_key_id"`
+	ClientKeyName    string            `json:"client_key_name,omitempty"`
+	Path             string            `json:"path"`
+	Status           int               `json:"status"`
+	LatencyMS        int64             `json:"latency_ms"`
+	InputType        string            `json:"input_type,omitempty"`
+	OutputType       string            `json:"output_type,omitempty"`
+	InputParts       int               `json:"input_parts,omitempty"`
+	TextParts        int               `json:"text_parts,omitempty"`
+	ImageParts       int               `json:"image_parts,omitempty"`
+	AudioParts       int               `json:"audio_parts,omitempty"`
+	VideoParts       int               `json:"video_parts,omitempty"`
+	FileParts        int               `json:"file_parts,omitempty"`
+	RequestBytes     int64             `json:"request_bytes,omitempty"`
+	ResponseBytes    int64             `json:"response_bytes,omitempty"`
+	Stream           bool              `json:"stream,omitempty"`
+	UsageAvailable   bool              `json:"usage_available,omitempty"`
+	InputTokens      int64             `json:"input_tokens,omitempty"`
+	OutputTokens     int64             `json:"output_tokens,omitempty"`
+	TotalTokens      int64             `json:"total_tokens,omitempty"`
+	CachedTokens     int64             `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int64             `json:"cache_write_tokens,omitempty"`
+	CacheRate        float64           `json:"cache_rate,omitempty"`
+	CacheRateKnown   bool              `json:"cache_rate_known,omitempty"`
+	Error            string            `json:"error,omitempty"`
+	Outcome          string            `json:"outcome,omitempty"`
+	AttemptCount     int               `json:"attempt_count,omitempty"`
+	Attempts         []UpstreamAttempt `json:"attempts,omitempty"`
 	// RouteFingerprint is a one-way identity of the complete configured route
 	// and its resolved upstreams. It prevents observations from an older reload
 	// (or an old request log) from validating a replacement route with the same
@@ -153,16 +173,19 @@ func (s *Stats) Record(r RequestRecord) {
 	s.mu.Unlock()
 }
 
-// RecordRouteObservation retains one bounded fact per configured route. It is
+// RecordRouteObservation retains bounded facts per route, target and operation. It is
 // separate from the global recent ring so high-volume routes cannot evict the
 // only readiness evidence for a low-volume route.
 func (s *Stats) RecordRouteObservation(r RequestRecord) {
+	// Detailed attempts belong to the recent ring/durable log. Replicating
+	// them into every retained health scope would multiply the memory budget.
+	r.Attempts = nil
 	r = sanitizeRequestRecord(r)
 	if r.Model == "" || r.RouteFingerprint == "" || !routeHealthObservation(r) {
 		return
 	}
 	observed := recordTime(r.Time)
-	key := routeObservationKey(r.Model, r.Operation)
+	key := routeObservationKey(r)
 	s.mu.Lock()
 	if s.routeFingerprints[r.Model] != r.RouteFingerprint {
 		s.mu.Unlock()
@@ -170,7 +193,7 @@ func (s *Stats) RecordRouteObservation(r RequestRecord) {
 	}
 	current, exists := s.routeLatest[key]
 	if !exists || !recordTime(current.Time).After(observed) {
-		s.routeLatest[key] = r
+		retainRouteObservation(s.routeLatest, key, r)
 	}
 	s.mu.Unlock()
 }
@@ -185,8 +208,8 @@ func (s *Stats) ConfigureRouteFingerprints(fingerprints map[string]string) {
 		s.routeFingerprints[alias] = fingerprint
 	}
 	for key := range s.routeLatest {
-		alias := key
 		record := s.routeLatest[key]
+		alias := record.Model
 		if fingerprints[alias] == "" || record.RouteFingerprint != fingerprints[alias] {
 			delete(s.routeLatest, key)
 		}
@@ -194,10 +217,33 @@ func (s *Stats) ConfigureRouteFingerprints(fingerprints map[string]string) {
 	s.mu.Unlock()
 }
 
-// Readiness is route-scoped: the latest real upstream observation supersedes
-// older operations. Otherwise one historical low-volume operation becomes a
-// permanent freshness obligation while normal traffic remains healthy.
-func routeObservationKey(model, _ string) string { return model }
+// A successful chat must not erase a failure for Responses, another target,
+// or streaming. Old observations remain history, not current availability.
+func routeObservationKey(record RequestRecord) string {
+	stream := "json"
+	if record.Stream {
+		stream = "stream"
+	}
+	return record.Model + "\x00" + record.AccountID + "\x00" + record.CredentialID + "\x00" + record.UpstreamModel + "\x00" + record.ReasoningEffort + "\x00" + record.Operation + "\x00" + stream + "\x00" + record.RequiredFeatures + "\x00" + record.RequestContract
+}
+
+func retainRouteObservation(records map[string]RequestRecord, key string, record RequestRecord) {
+	record.Attempts = nil
+	if _, exists := records[key]; !exists && len(records) >= maxRouteObservations {
+		oldestKey := ""
+		oldestAt := recordTime(record.Time)
+		for candidate, current := range records {
+			if observed := recordTime(current.Time); observed.Before(oldestAt) {
+				oldestKey, oldestAt = candidate, observed
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(records, oldestKey)
+	}
+	records[key] = record
+}
 
 func routeHealthObservation(record RequestRecord) bool {
 	if record.AccountID == "" {
@@ -217,13 +263,15 @@ func (s *Stats) Snapshot() StatsSnapshot {
 	for i := range recent {
 		index := (s.next - 1 - i + len(s.recent)) % len(s.recent)
 		recent[i] = s.recent[index]
+		recent[i].Attempts = append([]UpstreamAttempt(nil), recent[i].Attempts...)
 	}
 	routeLatest := make([]RequestRecord, 0, len(s.routeLatest))
 	for _, record := range s.routeLatest {
+		record.Attempts = append([]UpstreamAttempt(nil), record.Attempts...)
 		routeLatest = append(routeLatest, record)
 	}
 	s.mu.RUnlock()
-	sort.Slice(routeLatest, func(i, j int) bool { return routeLatest[i].Model < routeLatest[j].Model })
+	sort.Slice(routeLatest, func(i, j int) bool { return routeObservationKey(routeLatest[i]) < routeObservationKey(routeLatest[j]) })
 	return StatsSnapshot{StartedAt: s.started.UTC().Format(time.RFC3339), Requests: s.requests.Load(), Successful: s.success.Load(), Failed: s.failed.Load(), Failovers: s.failovers.Load(), Active: s.active.Load(), RecentLimit: s.limit, Recent: recent, RouteLatest: routeLatest}
 }
 
@@ -372,6 +420,9 @@ func sanitizeRequestRecord(r RequestRecord) RequestRecord {
 	r.CredentialID = truncate(r.CredentialID, 128)
 	r.Operation = truncate(r.Operation, 64)
 	r.ReasoningEffort = truncate(r.ReasoningEffort, 32)
+	r.RequiredFeatures = truncate(r.RequiredFeatures, 128)
+	r.RequestContract = truncate(r.RequestContract, 64)
+	r.ToolMode = truncate(r.ToolMode, 16)
 	r.ClientKeyID = truncate(r.ClientKeyID, 128)
 	r.ClientKeyName = truncate(r.ClientKeyName, 128)
 	r.Path = truncate(r.Path, 256)
@@ -379,6 +430,20 @@ func sanitizeRequestRecord(r RequestRecord) RequestRecord {
 	r.OutputType = truncate(r.OutputType, 64)
 	r.Error = truncate(r.Error, 1024)
 	r.Outcome = truncate(r.Outcome, 64)
+	if len(r.Attempts) > maxObservedAttempts {
+		r.Attempts = r.Attempts[:maxObservedAttempts]
+	}
+	if len(r.Attempts) > 0 {
+		attempts := make([]UpstreamAttempt, len(r.Attempts))
+		for i, attempt := range r.Attempts {
+			attempt.AccountID = truncate(attempt.AccountID, 128)
+			attempt.CredentialID = truncate(attempt.CredentialID, 128)
+			attempt.UpstreamModel = truncate(attempt.UpstreamModel, maxGatewayModelBytes)
+			attempt.Outcome = truncate(attempt.Outcome, 64)
+			attempts[i] = attempt
+		}
+		r.Attempts = attempts
+	}
 	r.RouteFingerprint = truncate(r.RouteFingerprint, 64)
 	return r
 }

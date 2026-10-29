@@ -107,6 +107,8 @@ func accountIdentity(account config.Account) [sha256.Size]byte {
 // buildRouteFingerprints creates a credential-safe identity for readiness
 // evidence. The hash covers authored routing plus every selectable account's
 // resolved endpoint/credential identity and model/operation resolution data.
+// Evidence source/time annotate a fact and do not change routing semantics;
+// evidence statuses and scoped feature statuses remain part of the identity.
 // Only the hash is written to request logs.
 func buildRouteFingerprints(cfg config.Config) map[string]string {
 	type routeAccountIdentity struct {
@@ -154,18 +156,38 @@ func buildRouteFingerprints(cfg config.Config) map[string]string {
 			routeAccounts = append(routeAccounts, routeAccountIdentity{
 				ID: id, Identity: accountIdentity(account), Enabled: account.Enabled,
 				Models: account.Models, ModelMap: account.ModelMap,
-				Capabilities: account.Capabilities, Operations: account.Operations,
+				Capabilities: routingCapabilityIdentities(account.Capabilities), Operations: account.Operations,
 			})
 		}
 		encoded, _ := json.Marshal(struct {
-			Alias    string
-			Route    config.Route
-			Accounts []routeAccountIdentity
-		}{Alias: alias, Route: route, Accounts: routeAccounts})
+			CompletionContract string
+			Alias              string
+			Route              config.Route
+			Accounts           []routeAccountIdentity
+		}{CompletionContract: "protocol-completion-v2", Alias: alias, Route: route, Accounts: routeAccounts})
 		fingerprint := sha256.Sum256(encoded)
 		fingerprints[alias] = fmt.Sprintf("%x", fingerprint[:])
 	}
 	return fingerprints
+}
+
+func routingCapabilityIdentities(capabilities []config.ChannelCapability) []config.ChannelCapability {
+	if capabilities == nil {
+		return nil
+	}
+	result := make([]config.ChannelCapability, len(capabilities))
+	for index, capability := range capabilities {
+		capability.Evidence = config.CapabilityEvidence{Status: capability.Evidence.Status}
+		if capability.Features != nil {
+			features := make(map[string]config.CapabilityEvidence, len(capability.Features))
+			for key, evidence := range capability.Features {
+				features[key] = config.CapabilityEvidence{Status: evidence.Status}
+			}
+			capability.Features = features
+		}
+		result[index] = capability
+	}
+	return result
 }
 
 type AccountSnapshot struct {
@@ -188,6 +210,9 @@ type AccountSnapshot struct {
 	AverageLatencyMS *int64   `json:"average_latency_ms"`
 	CircuitOpenUntil string   `json:"circuit_open_until,omitempty"`
 	LastError        string   `json:"last_error,omitempty"`
+	// Keep availability scoped internally; the public aggregate remains a
+	// diagnostic summary and must not make unrelated routes unavailable.
+	circuitUntilByScope map[string]int64
 }
 
 func (a *AccountRuntime) tryAcquire() bool {
@@ -262,6 +287,9 @@ func (a *AccountRuntime) supports(model string) bool {
 			return true
 		}
 	}
+	if _, mapped := a.Config.ModelMap[model]; mapped {
+		return true
+	}
 	for _, capability := range a.Config.Capabilities {
 		if capability.Model == model {
 			return true
@@ -278,7 +306,7 @@ func (a *AccountRuntime) upstreamModel(requested, routeModel string) string {
 		return mapped
 	}
 	for _, capability := range a.Config.Capabilities {
-		if capability.Model == requested {
+		if capability.Model == requested && capability.Evidence.Status != "unsupported" {
 			return capability.UpstreamModel
 		}
 	}
@@ -349,8 +377,10 @@ func (a *AccountRuntime) Snapshot() AccountSnapshot {
 	var lastError string
 	var circuit string
 	var circuitUntil int64
-	a.state.breakers.Range(func(_, value any) bool {
+	circuitUntilByScope := make(map[string]int64)
+	a.state.breakers.Range(func(key, value any) bool {
 		breaker := value.(*breakerRuntime)
+		circuitUntilByScope[key.(string)] = breaker.circuitUntil.Load()
 		if current := breaker.failures.Load(); current > failures {
 			failures = current
 			if value := breaker.lastError.Load(); value != nil {
@@ -370,11 +400,12 @@ func (a *AccountRuntime) Snapshot() AccountSnapshot {
 	}
 	return AccountSnapshot{
 		ID: a.Config.ID, Name: a.Config.Name, Type: a.Config.Type,
-		AdapterID: a.Config.AdapterID, InstanceID: a.Config.InstanceID, BaseURL: a.Config.BaseURL,
+		AdapterID: a.Config.AdapterID, InstanceID: a.Config.InstanceID, BaseURL: redactedAccountURL(a.Config.BaseURL),
 		Models: append([]string(nil), a.Config.Models...), Operations: append([]string(nil), a.Config.Operations...), Priority: a.Config.Priority, Weight: a.Config.Weight,
 		Concurrency: a.Config.Concurrency, Active: a.state.capacity.active.Load(), Enabled: a.Config.Enabled,
 		Failures: failures, Total: total, Success: success, AverageLatencyMS: avg,
 		CircuitOpenUntil: circuit, LastError: lastError,
+		circuitUntilByScope: circuitUntilByScope,
 	}
 }
 
@@ -507,7 +538,12 @@ func (s *Scheduler) Models() []string {
 		// instead of the concrete channel model.
 		if len(account.Config.Capabilities) > 0 {
 			coveredUpstreamModels := make(map[string]struct{}, len(account.Config.Capabilities))
+			unsupportedUpstreamModels := make(map[string]struct{})
 			for _, capability := range account.Config.Capabilities {
+				if capability.Evidence.Status == "unsupported" {
+					unsupportedUpstreamModels[capability.UpstreamModel] = struct{}{}
+					continue
+				}
 				coveredUpstreamModels[capability.UpstreamModel] = struct{}{}
 				if capability.Model == "" {
 					continue
@@ -518,9 +554,20 @@ func (s *Scheduler) Models() []string {
 			}
 			for _, model := range account.Config.Models {
 				if model != "*" {
+					if _, unsupported := unsupportedUpstreamModels[model]; unsupported {
+						continue
+					}
 					if _, covered := coveredUpstreamModels[model]; !covered {
 						set[model] = struct{}{}
 					}
+				}
+			}
+			for logical := range account.Config.ModelMap {
+				if _, unsupported := unsupportedUpstreamModels[account.Config.ModelMap[logical]]; unsupported {
+					continue
+				}
+				if _, routed := routedLogicalModels[logical]; !routed {
+					set[logical] = struct{}{}
 				}
 			}
 			continue
@@ -528,6 +575,11 @@ func (s *Scheduler) Models() []string {
 		for _, model := range account.Config.Models {
 			if model != "*" {
 				set[model] = struct{}{}
+			}
+		}
+		for logical := range account.Config.ModelMap {
+			if _, routed := routedLogicalModels[logical]; !routed {
+				set[logical] = struct{}{}
 			}
 		}
 	}
@@ -577,45 +629,15 @@ func (s *Scheduler) RouteAvailable(alias string, now time.Time) bool {
 	if !exists {
 		return false
 	}
-	availableForAnyOperation := func(account *AccountRuntime, upstreamModel, credential string) bool {
-		if account == nil || !account.Config.Enabled {
-			return false
-		}
-		operations := account.Config.Operations
-		if len(operations) == 0 {
-			operations = config.DefaultOperations(account.Config.Type)
-		}
-		for _, operation := range operations {
-			if account.available(now, operation, upstreamModel, credential) {
-				return true
-			}
-		}
-		return false
+	accounts := make([]config.Account, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		accounts = append(accounts, account.Config)
 	}
-	if len(route.Targets) > 0 {
-		for _, target := range route.Targets {
-			account := s.accounts[target.Account]
-			if account == nil {
-				continue
-			}
-			upstreamModel, _, compatible := config.ResolveRouteTarget(account.Config, route, target)
-			if compatible && availableForAnyOperation(account, upstreamModel, target.Credential) {
-				return true
-			}
-		}
-		return false
-	}
-	allowed := make(map[string]struct{}, len(route.Accounts))
-	for _, id := range route.Accounts {
-		allowed[id] = struct{}{}
-	}
-	for id, account := range s.accounts {
-		if !route.AllAccounts {
-			if _, ok := allowed[id]; !ok {
-				continue
-			}
-		}
-		if availableForAnyOperation(account, account.upstreamModel(alias, route.UpstreamModel), "") {
+	for _, target := range routeHealthTargets(alias, route, accounts) {
+		account := s.accounts[target.accountID]
+		if account != nil && target.available(account.Config, func(operation, model, credential string) bool {
+			return account.available(now, operation, model, credential)
+		}) {
 			return true
 		}
 	}
@@ -635,28 +657,24 @@ func (s *Scheduler) AttemptLimit(model string, legacyLimit int) int {
 }
 
 func (s *Scheduler) Select(ctx context.Context, model, operation, session string, excluded map[string]struct{}, wait time.Duration) (*Selection, error) {
+	return s.SelectForRequest(ctx, model, operation, session, excluded, wait, RequestRequirements{})
+}
+
+func (s *Scheduler) SelectForRequest(ctx context.Context, model, operation, session string, excluded map[string]struct{}, wait time.Duration, requirements RequestRequirements) (*Selection, error) {
 	deadline := time.Now().Add(wait)
 	for {
 		// Subscribe before inspecting capacity so a release between the failed
 		// selection and the select below cannot be lost.
 		changed := s.notify.subscribe()
-		selection, eligible, capacityBlocked := s.trySelect(model, operation, session, excluded)
+		selection, eligible, capacityBlocked := s.trySelect(model, operation, session, excluded, requirements)
 		if selection != nil {
-			// Claude Code may send or select a reasoning effort while using the
-			// Anthropic Messages endpoint. Lite2API accepts it for compatibility,
-			// but deliberately discards it before forwarding because upstream
-			// Anthropic-compatible schemas do not consistently accept the legacy
-			// top-level reasoning_effort field.
-			if operation == config.OperationAnthropic {
-				selection.ReasoningEffort = "none"
-			}
 			return selection, nil
 		}
 		if !eligible {
 			return nil, ErrNoEligibleAccount
 		}
 		if !capacityBlocked {
-			return nil, ErrNoCapacity
+			return nil, ErrKnownUnavailable
 		}
 		remaining := time.Until(deadline)
 		if wait <= 0 || remaining <= 0 {
@@ -675,7 +693,11 @@ func (s *Scheduler) Select(ctx context.Context, model, operation, session string
 	}
 }
 
-func (s *Scheduler) trySelect(model, operation, session string, excluded map[string]struct{}) (*Selection, bool, bool) {
+func (s *Scheduler) trySelect(model, operation, session string, excluded map[string]struct{}, requested ...RequestRequirements) (*Selection, bool, bool) {
+	var requirements RequestRequirements
+	if len(requested) > 0 {
+		requirements = requested[0]
+	}
 	s.mu.RLock()
 	route, routed := s.routes[model]
 	if routed && len(route.Targets) > 0 {
@@ -694,8 +716,11 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 				skipped = append(skipped, key)
 				continue
 			}
-			upstreamModel, reasoningEffort, compatible := config.ResolveRouteTarget(account.Config, route, target)
-			if !compatible {
+			upstreamModel, reasoningEffort, compatible := resolveRequestedReasoning(account.Config, route, target, requirements)
+			if operation == config.OperationAnthropic && reasoningEffort != "" && reasoningEffort != "auto" {
+				compatible = false
+			}
+			if !compatible || !requirementsCompatible(account.Config, upstreamModel, operation, requirements, target.Credential, reasoningEffort) {
 				skipped = append(skipped, key)
 				continue
 			}
@@ -764,8 +789,13 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 		if !routed && !account.supports(model) {
 			continue
 		}
+		upstreamModel := requestUpstreamModel(account, model, route.UpstreamModel, requirements)
+		if !config.AccountSupportsTargetModel(account.Config, upstreamModel) || !requirementsCompatible(account.Config, upstreamModel, operation, requirements) ||
+			(requirements.ReasoningEffort != "" && requirements.ReasoningEffort != "auto" && !supportsRequestedReasoning(account.Config, upstreamModel, requirements.ReasoningEffort)) {
+			continue
+		}
 		eligible = true
-		if !account.available(now, operation, account.upstreamModel(model, route.UpstreamModel)) {
+		if !account.available(now, operation, upstreamModel) {
 			continue
 		}
 		candidates = append(candidates, account)
@@ -790,7 +820,7 @@ func (s *Scheduler) trySelect(model, operation, session string, excluded map[str
 	if selected == nil {
 		return nil, eligible, true
 	}
-	return &Selection{Account: selected, Model: selected.upstreamModel(model, route.UpstreamModel), Key: selected.Config.ID, release: func() {
+	return &Selection{Account: selected, Model: requestUpstreamModel(selected, model, route.UpstreamModel, requirements), ReasoningEffort: requirements.ReasoningEffort, Key: selected.Config.ID, release: func() {
 		selected.release()
 		s.notify.broadcast()
 	}}, eligible, false

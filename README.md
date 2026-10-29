@@ -22,19 +22,27 @@
 - Sub2API/OpenAI 风格 `Authorization: Bearer` 与 `X-Api-Key` 接口
 - 托管客户端 Key：模型白名单、RPM、并发、过期、禁用、撤销和使用统计
 - Key 热路径使用 O(1) 内存快照、SHA-256 摘要和原子限流，不访问磁盘或数据库
-- 管理 Token 与客户端 Key 分离；VPN 白名单可自动签发短期 HttpOnly 会话，所有写操作仍要求 CSRF
+- 管理 Token 与客户端 Key 分离；VPN 白名单可自动签发短期 HttpOnly 会话，浏览器会话写操作要求 CSRF
 - 上游密钥支持环境变量，配置文件强制以 `0600` 原子写入
 - 限制请求体、过滤敏感与 hop-by-hop Header、禁止上游重定向
 - 入口总并发保护、慢请求读取保护和流空闲超时
 - 单 Go 二进制，无第三方 Go 依赖
 - AtomCode、Grok2API、Gemini Web、CLIProxyAPI 采用故障隔离的外置渠道适配器
 
+目标与验收依据见 [业务能力图](docs/BUSINESS_CAPABILITIES.md) 和 [八个业务用例](docs/BUSINESS_USE_CASES.md)，两轮实现与验证分别记录在 [第一轮记录](docs/BUSINESS_ALIGNMENT_2026-10-28.md) 和 [第二轮记录](docs/BUSINESS_ALIGNMENT_ROUND2_2026-10-28.md)。能力图表示职责归属，不表示执行顺序或部署结构。
+
+最新源码修复、完整回归、独立复核与外部验收限制见 [2026-10-29 收尾记录](docs/FINAL_CLOSEOUT_2026-10-29.md)；此前上线与真实客户端结果保留在 [接续验收](docs/CONTINUATION_ACCEPTANCE_2026-10-29.md)，只适用于其中标明的版本和范围。
+
+成功响应按接口检查完成条件：Chat 要求每项 choice 有消息与结束原因，Responses 要求 `completed` 和 `output`，Messages 要求内容与停止原因；流式还必须满足对应结束事件。200、连接结束、模型目录可达或授权刷新成功均不能单独证明调用完成。已经开始交付的流不会跨来源拼接；不完整的大 JSON 会中止连接，不给出正常传输完成信号。
+
+渠道 `capabilities[].evidence` 和 `features` 区分 `declared`、`verified`、`unsupported`、`unknown`，特性键使用 `接口:特性`，例如 `openai.chat:tools`。目录发现只形成声明，验证事实要求来源身份、具体上游模型、接口、特性、推理强度、凭据及观测时间。管理台现有渠道对话窗可对三种接口执行普通调用、完整流、图片输入或真实工具往返验收，并说明结果是否已保存；图片验收发送内置 PNG 的原生多模态请求，图片与流式工具组合仍需分别验收。失败不推断“不支持”，来源/凭据/映射变化使旧依据失效。运行时明确不支持的工具、图片或流式来源会被排除，包括备用来源；未知允许尝试，不能据此宣称已支持。显式推理强度冲突会拒绝；Messages 使用原生 `thinking`，不再静默丢弃 `reasoning_effort`。
+
 > `type: anthropic` 表示使用 `x-api-key` 认证并透传 Anthropic 格式；第一版不在 OpenAI Chat Completions 与 Anthropic Messages 之间自动翻译。
 
 ## 快速启动
 
 ```bash
-cd /root/lite2api
+cd /path/to/Lite2API
 chmod +x deploy/bootstrap.sh
 ./deploy/bootstrap.sh
 # 编辑 .env，填入实际的 ATOMCODE2API_KEY / DEEPSEEK_API_KEY
@@ -90,11 +98,11 @@ Claude 从真实请求响应采集 5 小时、7 天和模型周窗口；Codex、
 
 授权失效会在账号页显示“需重新授权”并提供登录入口。受信的本机适配器返回 401 时，网关合并并发刷新并最多重试一次；刷新成功会清除旧的授权冷却，永久失效的刷新令牌需要重新登录。客户端 Key 无效返回 401，上游授权失败返回 502 `upstream_auth_failed`。
 
-凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理平台白名单内的 OAuth 操作、脱敏账号列表、账号状态/删除/刷新/优先级以及认证池选号策略，所有写操作都要求管理会话与 CSRF。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
+凭据只写入 CLIProxyAPI 的隔离目录。浏览器不会收到 `CLIPROXYAPI_MANAGEMENT_KEY`、模型 API Key、原始响应头、Token 或 Cookie；Lite2API 只通过回环地址代理平台白名单内的 OAuth 操作、脱敏账号列表、账号状态/删除/刷新/优先级以及认证池选号策略，浏览器会话写操作要求 CSRF；显式管理 Token Header 调用使用独立的管理权限，不依赖 Cookie。账号页只在可见时每 15 秒读取内存快照，官方额度网络同步由 CLIProxyAPI 按凭据以 10 分钟 TTL 合并，其他页面不会持续读取认证池或探测上游。API Key、第三方兼容地址和高级请求头仍可从弹窗底部进入“手动添加”。
 
 Gemini Web 与 Grok Web/Console 属于 Cookie/SSO 型接入。管理页只在本地浏览器整理扩展导出的 Cookie-Editor JSON、Netscape Cookie、单行 Cookie 或 SSO 文本，然后提示写入对应隔离适配器；Lite2API 核心不会接收或保存这些内容。为节省资源，未配置凭据的 Web 适配器保持停止，配置完成后才按需启动。
 
-Docker Compose 与 systemd 两种部署方式均受支持。systemd 安装器从选定提交的隔离 worktree 构建，不会把现场 dirty/untracked 文件打入固定版本；升级失败会自动恢复旧二进制、unit、配置和环境文件。完整步骤和凭据位置见 [渠道适配层](channels/README.md)。
+Docker Compose 与 systemd 两种部署方式均受支持。systemd 安装器从选定提交的隔离 worktree 构建，不会把现场 dirty/untracked 文件打入固定版本；有启用来源时，升级必须提供关键调用验收清单；只有完整业务结果和访问边界通过才保留新版本。失败回退覆盖旧二进制、unit、配置、环境、Key 和必要状态。完整步骤和凭据位置见 [渠道适配层](channels/README.md)。
 
 ## 批量导入与导出账号
 
@@ -125,11 +133,11 @@ Docker Compose 与 systemd 两种部署方式均受支持。systemd 安装器从
 }
 ```
 
-接口为 `POST /admin/api/accounts/import`，请求使用 `data`、`mode` 和 `dry_run` 字段。`mode` 可选 `skip`（跳过已有 ID）或 `upsert`（更新已有 ID；未提供密钥时保留旧密钥）。导入允许部分成功，并在 `errors` 中返回每一项失败的索引和原因。
+接口为 `POST /admin/api/accounts/import`，请求使用 `data`、`mode` 和 `dry_run` 字段。`mode` 可选 `skip`（跳过已有 ID）或 `upsert`（更新已有 ID；未提供密钥时保留旧密钥）。导入允许部分成功，并在 `errors` 中返回每一项失败的索引和原因；有失败项时管理台保留逐项结果，重试前需要重新预检查。
 
-导出接口为 `POST /admin/api/accounts/export`，可指定账号 ID，并可选择是否包含代理定义。导出文件包含可恢复的账号凭据，管理页会明确警告，文件应按密钥材料保管。两个写接口都要求登录会话和 CSRF；管理页面不会通过不安全的 GET 暴露凭据。
+导出接口为 `POST /admin/api/accounts/export`，可指定账号 ID，并可选择是否包含代理定义。导出文件包含可恢复的账号凭据，管理页会明确警告，文件应按密钥材料保管。两个写接口都要求管理认证；浏览器会话写入还要求 CSRF；管理页面不会通过不安全的 GET 暴露凭据。
 
-路由连接可通过 `DELETE /admin/api/accounts/:id` 删除，服务端会同步移除模型路由中对该连接的引用。OAuth 认证账号可通过 `DELETE /admin/api/oauth/accounts` 删除，请求体为 `{"id":"auth_index"}`；该操作会从隔离 OAuth 适配器中移除对应凭据，并要求管理会话与 CSRF。
+路由连接可通过 `DELETE /admin/api/accounts/:id` 删除，服务端会同步移除模型路由中对该连接的引用。OAuth 认证账号可通过 `DELETE /admin/api/oauth/accounts` 删除，请求体为 `{"id":"auth_index"}`；该操作会从隔离 OAuth 适配器中移除对应凭据，并要求管理认证，浏览器会话还需 CSRF。
 
 Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refresh token 等凭据不会被误当作 API Key；Codex、Claude、Gemini CLI、Antigravity 和 Kimi 可在“添加账号”中重新快捷认证，其他类型仍需先通过外部适配器暴露兼容 `base_url`。工作流参考来源见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。
 
@@ -140,6 +148,8 @@ Sub2API 的 API Key 账号和代理会映射到 Lite2API。OAuth、Cookie、refr
 - 管理页和管理 API 同时受 Nginx 来源白名单与应用层可信代理/CIDR 校验保护；伪造 `X-Real-IP` 无效。
 - VPN-only 部署可显式设置 `LITE2API_ADMIN_AUTO_LOGIN=true`，应用在 CIDR 校验通过后签发短期、`HttpOnly`、`Secure`、`SameSite=Strict` 会话；浏览器无需输入 Token，写操作仍需 CSRF Token。此选项默认关闭。
 - 托管客户端 Key 的明文只显示一次；磁盘仅保存 SHA-256 摘要，撤销通过原子内存快照立即生效。
+- 旧配置 `server.api_keys` / `api_key_env` 是最长 512 字节、不能使用托管保留前缀 `sk-l2a-` 的全模型兼容凭据，没有单 Key RPM 或并发限制；仍受网关全局与账号资源限制。需要限制的客户端应使用托管 Key；移除所有配置和环境来源后热加载才能撤销旧凭据。管理员与客户端的凭据值禁止相同；撤销拒绝后续请求，已接纳的在途调用继续完成。
+- 管理展示隐藏 URL 查询值、代理用户信息和请求头凭据；原样保存掩码会保留原值，编辑掩码地址需提供完整新地址。可恢复凭据仅通过显式管理导出返回。
 - 建议所有上游密钥只通过 `.env` 提供。
 - HTTP 上游默认仅允许 loopback；AtomCode2Api 等同机服务需要显式开启 `allow_private_http_upstream`。
 - 生产入口必须使用 HTTPS，并限制 `/admin` 的来源 IP 或仅通过 VPN 访问。
@@ -157,3 +167,9 @@ Lite2API 只面向单机、单管理员。单机默认使用内存 Key/限流状
 管理页“适配器”页面和 `GET /admin/api/adapters` 提供统一目录，区分原生就绪、运行就绪、待授权、运行未配置、未运行和仅收录状态，并展示操作类型、认证方式、本机延迟与模型数量。运行探针只在读取管理目录时按需执行：同一适配器请求 singleflight 合并、最多 4 路并行、整体等待预算 750 ms，带 Key 的适配器必须通过鉴权模型目录才会判定 ready；成功结果缓存 60 秒，失败最多缓存 5 秒。普通请求路径没有轮询、注册中心或额外网络开销。“收录”不等同于自动安装或信任第三方代码。
 
 Grok2API 使用不可变 OCI digest，Gemini Web 使用固定 Git 子模块，CLIProxyAPI 使用固定提交加仓库维护补丁；三者都在独立、非 root、能力清空的容器或 systemd 服务中运行，不增加 Lite2API 核心镜像体积。旧 Sub2API 凭据拆分迁移、启动和升级流程见 [channels/README.md](channels/README.md)；新增适配器的类型选择、能力契约和资源预算见 [Adapter Design](docs/ADAPTER_DESIGN.md)。
+
+## 受控变更与生命周期验收
+
+管理台保存审阅时的 `config_revision`，通过 `If-Match` 防止旧草稿覆盖新配置；删除连接前读取服务端影响预览，显示受影响模型、受限 Key、在途调用和隐式扩源冲突。显式路由移除后若同名隐式模型会扩大来源范围，API 与手工热加载均拒绝。无 `If-Match` 的直接管理 API 明确表示对当前状态执行。
+
+安装器使用 `deploy/verify_service.py` 与已审阅的 `acceptance.json` 检验完整调用、匿名拒绝、管理/调用凭据分离及可选 `expect_account` 来源关联。只存活但返回不完整 200 的候选会回退；无启用来源的首次安装仅报告 bootstrap，不能宣称模型服务可用。备份用真实 age 加密，`deploy/state_archive.py restore` 只恢复到新私有目录，再以真实客户端和权限检查结束；恢复旧授权文件不能恢复被平台撤销的 grant。具体命令与已验证边界见 [Operations](docs/OPERATIONS.md)。

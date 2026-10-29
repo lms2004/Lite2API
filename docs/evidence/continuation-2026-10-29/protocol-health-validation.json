@@ -1,0 +1,24 @@
+{
+  "scope": "local loopback HTTP fixtures; no production config, credentials or external provider calls",
+  "command": [
+    "go",
+    "test",
+    "./internal/gateway",
+    "-run",
+    "TestOperations|TestReadiness|TestPromptTestEnforces|TestAdminPrompt|TestPromptVerification|TestHTTPClientCancellationAndTimeoutReleaseAllLeases|TestQueuedCancellation|TestStreamIdleTimeout|TestDownstreamWriteFailure|TestUpstreamRequestWriteIsBounded|TestRetryableErrorBodyHasIdleBoundary",
+    "-count=1",
+    "-timeout=120s",
+    "-json"
+  ],
+  "exit_code": 0,
+  "duration_seconds": 13.205,
+  "sha256": {
+    "internal/gateway/operations.go": "76521987e3d11c91646e0ec3591d1e27eb73d0cefb9af182ef3c3fe57f3006f4",
+    "internal/gateway/runtime.go": "0502694432f163ca5dd3a6b1e8d879e5576e3d4bfd44bba725057690a0489542",
+    "internal/gateway/prompttest.go": "2fb946f3545075410ffd1f74c958d707dae9ca2c659c524af7c5d6a156627062",
+    "internal/gateway/operations_test.go": "ae8aed1ac512013ddaad3c067c20dbf1dc5cf328f2cbeb031902d626563f0175",
+    "internal/gateway/operations_scope_test.go": "d7a3e14fba95cc1be899157bc82e89b8fc7f2b852b92507d3484f0979528733a",
+    "internal/gateway/prompt_scope_test.go": "b6fec7d7d3134be993e65acdb26f06be9f6cf92cba04a821cfc8d6053a73588f",
+    "internal/gateway/cancellation_release_test.go": "76b13858971ce4d574e51c258d40176f743b94f5dafe1da6429e5c881eb07ed4"
+  }
+}

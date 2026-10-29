@@ -1,0 +1,88 @@
+{
+  "observed_at": "2026-10-29T08:58:45.731473+00:00",
+  "route": "Shadow",
+  "isolation": "temporary_config_keys_logs_and_port",
+  "cases": [
+    {
+      "case": "chat_json",
+      "client": "curl",
+      "operation": "chat",
+      "stream": false,
+      "http_status": 200,
+      "transport_exit": 0,
+      "latency_ms": 2507,
+      "complete": true,
+      "body_bytes": 352,
+      "body_sha256": "0c7ec05ecfb17ae48be1c202d01b72a95638cc5b7a558427cfd0512a94a2a4a7"
+    },
+    {
+      "case": "chat_stream",
+      "client": "curl",
+      "operation": "chat",
+      "stream": true,
+      "http_status": 200,
+      "transport_exit": 0,
+      "latency_ms": 2249,
+      "complete": true,
+      "body_bytes": 1242,
+      "body_sha256": "2943842053b57f00580c45a3ccde50ed89599b3dfa67f1fa8a20f0eb785d2cf5"
+    },
+    {
+      "client": "Codex CLI",
+      "operation": "responses",
+      "tool_roundtrip": true,
+      "transport_exit": 0,
+      "complete": true,
+      "latency_ms": 12780
+    }
+  ],
+  "binary_sha256": "800ceea4924ae40754883e34203b529dc6cea0588b7ab9fcc3e081984788e6c9",
+  "source_evidence": [],
+  "logical_calls": [
+    {
+      "request_id": "eca964fb11f87a7edfee58c0",
+      "operation": "openai.chat",
+      "stream": null,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    },
+    {
+      "request_id": "01057ef36bea39793efd61a0",
+      "operation": "openai.chat",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    },
+    {
+      "request_id": "2edd1b96d819791f02006add",
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    },
+    {
+      "request_id": "837fd6bc6bfb7e052a629aa9",
+      "operation": "openai.responses",
+      "stream": true,
+      "status": 200,
+      "outcome": "success",
+      "account_id": "cliproxy-antigravity",
+      "upstream_model": "antigravity/claude-opus-4-6-thinking",
+      "credential_id": "08a41398ec92b336",
+      "attempt_count": 1
+    }
+  ],
+  "ok": true
+}

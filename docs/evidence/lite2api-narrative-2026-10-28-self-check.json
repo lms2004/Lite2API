@@ -1,0 +1,24 @@
+{
+  "checked_at": "2026-10-28T22:10:23.153097+08:00",
+  "source_commit": "9956f7749b39a1fa941a1f4acc2040e87fc51256",
+  "document": "/root/Lite2API/docs/LITE2API_PROJECT_NARRATIVE_2026-10-28.md",
+  "document_sha256": "9e85dedc77d193aaf0972d42646c93829f8b33fb0f22de2f906b2fcd1f3c99a9",
+  "checks": {
+    "source_matches_reused_validation": true,
+    "tracked_source_unchanged": true,
+    "scheduler_unchanged_since_comparison": true,
+    "raw_output_hashes_match": true,
+    "local_links_valid": true,
+    "required_sections_present": true,
+    "three_process_paragraphs": true
+  },
+  "local_link_count": 36,
+  "evidence_reused": "/root/Lite2API/docs/evidence/lite2api-overview-2026-10-28-validation.json",
+  "scope": "Document and evidence consistency checks only; no new product tests, model requests, deployment or service changes.",
+  "manual_review": [
+    "A/B/C pain points correspond to H1/H2/H3, D1/D2/D3 and section 12 results.",
+    "The main argument retains evidence and results when section 4 and the appendix are omitted.",
+    "Historical live calls, local scheduler comparison, current-code regression and unverified business benefits are distinguished."
+  ],
+  "result": "PASS"
+}

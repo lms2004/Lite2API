@@ -1,0 +1,196 @@
+{
+  "observed_at": "2026-10-29T09:05:41.196834+00:00",
+  "services": {
+    "lite2api": {
+      "MainPID": "282086",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running",
+      "ActiveEnterTimestamp": "Thu 2026-10-29 09:04:54 UTC",
+      "process_sha256": "f81c05f81d8aaa2859805f079b75e1c53a5ab044157dd968b3155aea53ea25d0",
+      "installed_sha256": "f81c05f81d8aaa2859805f079b75e1c53a5ab044157dd968b3155aea53ea25d0"
+    },
+    "cliproxyapi": {
+      "MainPID": "209931",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running",
+      "ActiveEnterTimestamp": "Wed 2026-10-28 13:13:50 UTC",
+      "process_sha256": "6ba0cb5c2219594d962ab7aeccca411ae725d18ed4c1bd70989040fab8a42449",
+      "installed_sha256": "6ba0cb5c2219594d962ab7aeccca411ae725d18ed4c1bd70989040fab8a42449"
+    }
+  },
+  "http_checks": [
+    {
+      "path": "/livez",
+      "http_status": 200,
+      "status": {
+        "status": "ok"
+      }
+    },
+    {
+      "path": "/health",
+      "http_status": 200,
+      "status": {
+        "status": "unknown",
+        "reason": "\u8def\u7531\u5df2\u914d\u7f6e\uff0c\u7b49\u5f85\u6700\u8fd1\u771f\u5b9e\u8bf7\u6c42\u9a8c\u8bc1",
+        "liveness": "ok"
+      }
+    },
+    {
+      "path": "/readyz",
+      "http_status": 200,
+      "status": {
+        "status": "unknown",
+        "reason": "routes are structurally ready and awaiting first observation",
+        "failed_routes": [],
+        "unavailable_routes": [],
+        "unobserved_routes": [
+          "claude",
+          "claude_code",
+          "gpt",
+          "grok",
+          "life"
+        ]
+      }
+    },
+    {
+      "path": "/admin/api/oauth/accounts",
+      "http_status": 200,
+      "accounts": [
+        {
+          "id": "f4a4c7dc99a43610",
+          "provider": "anthropic",
+          "status": "error",
+          "ready": false,
+          "health_code": "upstream_error",
+          "next_retry_after": null
+        },
+        {
+          "id": "08a41398ec92b336",
+          "provider": "antigravity",
+          "status": "active",
+          "ready": true,
+          "health_code": null,
+          "next_retry_after": null
+        },
+        {
+          "id": "1d1a1dea063ee3ab",
+          "provider": "antigravity",
+          "status": "reauth_required",
+          "ready": false,
+          "health_code": "reauth_required",
+          "next_retry_after": null
+        },
+        {
+          "id": "81c1278c15019737",
+          "provider": "codex",
+          "status": "reauth_required",
+          "ready": false,
+          "health_code": "reauth_required",
+          "next_retry_after": null
+        }
+      ]
+    },
+    {
+      "path": "/admin/api/state",
+      "http_status": 200,
+      "active": 0,
+      "accounts": [
+        {
+          "id": "cliproxy-antigravity",
+          "active": 0,
+          "enabled": true
+        },
+        {
+          "id": "cliproxy-claude-code",
+          "active": 0,
+          "enabled": true
+        },
+        {
+          "id": "cliproxy-codex",
+          "active": 0,
+          "enabled": true
+        }
+      ],
+      "recent_accepted": [
+        {
+          "request_id": "4e070ad5977942eee1996f38",
+          "operation": "anthropic.messages",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": 1
+        },
+        {
+          "request_id": "0428110bad2588a11459e2c7",
+          "operation": "openai.responses",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": 1
+        },
+        {
+          "request_id": "ceed21337d55b99708c5dce2",
+          "operation": "openai.chat",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": 1
+        },
+        {
+          "request_id": "3c18393b2f285b877b178c4a",
+          "operation": "openai.chat",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": null
+        },
+        {
+          "request_id": "e693ea2bac9de9100f79b276",
+          "operation": "openai.chat",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": null
+        },
+        {
+          "request_id": "158d2dd1b6ee6e01575d1bc4",
+          "operation": "anthropic.messages",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": null
+        },
+        {
+          "request_id": "8c1c48ec92687451644de322",
+          "operation": "openai.responses",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": null
+        },
+        {
+          "request_id": "38a635e8234aea40ecdca4d5",
+          "operation": "openai.chat",
+          "status": 200,
+          "outcome": "success",
+          "account_id": "cliproxy-antigravity",
+          "upstream_model": "antigravity/claude-opus-4-6-thinking",
+          "attempt_count": null
+        }
+      ]
+    }
+  ],
+  "listeners": [
+    "State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess",
+    "LISTEN 0      128        127.0.0.1:45679      0.0.0.0:*    users:((\"lite2api\",pid=282086,fd=6))"
+  ]
+}

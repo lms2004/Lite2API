@@ -21,6 +21,55 @@ test('connection test fingerprint changes with secrets and advertised models', (
   assert.equal(core.accountFingerprint(base).includes('password'), false);
 });
 
+test('catalog declarations never impersonate an exact operation and credential verification', () => {
+  const evidence = {
+    status: 'verified', source: 'isolated fixture', source_identity: 'a'.repeat(64),
+    upstream_model: 'upstream-logical', reasoning_effort: 'high', credential_id: '0123456789abcdef',
+    observed_at: '2026-10-28T00:00:00Z', last_check_outcome: 'passed',
+  };
+  const account = { ...connection, adapter_id: 'cli-proxy-api', capabilities: [{
+    ...connection.capabilities[0], features: { 'openai.chat:call#high@0123456789abcdef': evidence },
+  }] };
+  assert.equal(core.capabilityResolution(connection, 'logical', 'high').verified, false);
+  assert.equal(core.capabilityResolution(account, 'logical', 'high').verified, false);
+  const scope = { operation: 'openai.chat', credential: '0123456789abcdef' };
+  assert.equal(core.capabilityResolution(account, 'logical', 'high', scope).verified, true);
+  for (const changed of [{ ...scope, operation: 'openai.responses' }, { ...scope, feature: 'stream' }, { ...scope, credential: 'fedcba9876543210' }])
+    assert.equal(core.capabilityResolution(account, 'logical', 'high', changed).verified, false);
+  assert.equal(core.capabilityResolution(account, 'logical', 'auto', scope).verified, false);
+  evidence.last_check_outcome = 'failed';
+  assert.equal(core.capabilityResolution(account, 'logical', 'high', scope).verified, false);
+  assert.equal(core.directResolution(connection, 'upstream-direct').verified, false);
+});
+
+test('capability resolution skips an unsupported duplicate before a usable mapping', () => {
+  const account = {
+    capabilities: [
+      { model: 'logical', upstream_model: 'blocked', reasoning_efforts: ['auto'], evidence: { status: 'unsupported' } },
+      { model: 'logical', upstream_model: 'usable', reasoning_efforts: ['auto'] },
+    ],
+  };
+  const resolution = core.capabilityResolution(account, 'logical');
+  assert.equal(resolution.ok, true);
+  assert.equal(resolution.upstream_model, 'usable');
+});
+
+test('mapped direct models report the effective upstream and reject scoped negatives', () => {
+  const mapped = {
+    id: 'mapped', models: ['alias'], model_map: { alias: 'real-model' },
+    capabilities: [{ model: 'alias', upstream_model: 'real-model', reasoning_efforts: ['auto'],
+      features: { 'openai.chat:call': { status: 'unsupported' } } }],
+  };
+  assert.equal(core.directResolution(mapped, 'alias', { operation: 'openai.chat' }).ok, false);
+  const plain = { ...mapped, capabilities: [] };
+  assert.equal(core.directResolution(plain, 'alias').upstream_model, 'real-model');
+});
+
+test('client availability accepts a logical model_map key without a capability catalog entry', () => {
+  const data = { config: { accounts: [{ id: 'mapped', enabled: true, operations: ['openai.responses'], models: ['real-model'], model_map: { alias: 'real-model' } },], routes: {} } };
+  assert.equal(core.clientModelAvailability(data, 'alias', 'codex').possible, true);
+});
+
 test('gateway base derives the public prefix from the admin mount', () => {
   assert.equal(core.gatewayBaseFromPath('https://gateway.test', '/lite-admin/'), 'https://gateway.test/lite');
   assert.equal(core.gatewayAPIBaseFromPath('https://gateway.test', '/lite-admin/'), 'https://gateway.test/lite/v1');
@@ -112,7 +161,7 @@ test('blank model declarations never become an automatic global model catalog', 
   const resolution = core.directResolution({ id: 'unknown', models: [] }, 'manual-model');
   assert.equal(resolution.ok, true);
   assert.equal(resolution.verified, false);
-  assert.equal(core.directResolution({ id: 'wildcard', models: ['*'] }, 'manual-model').verified, true);
+  assert.equal(core.directResolution({ id: 'wildcard', models: ['*'] }, 'manual-model').verified, false);
 });
 
 test('channel chat exposes accepted aliases and only chat-capable connections', () => {
@@ -123,6 +172,8 @@ test('channel chat exposes accepted aliases and only chat-capable connections', 
   assert.equal(core.channelChatSupported({ operations: ['openai.chat', 'openai.embeddings'] }), true);
   assert.equal(core.channelChatSupported({ operations: ['anthropic.messages'] }), true);
   assert.equal(core.channelChatSupported({ operations: ['openai.embeddings'] }), false);
+  assert.equal(core.channelVerificationSupported({ operations: ['openai.responses'] }), true);
+  assert.equal(core.channelVerificationSupported({ operations: ['openai.embeddings'] }), false);
 });
 
 test('channel chat normalizes OpenAI and Anthropic text, usage, and finish metadata', () => {
@@ -205,6 +256,16 @@ test('route validation rejects duplicate connection targets', () => {
   assert.equal(validation.errors.some(item => item.message.includes('重复选择')), true);
 });
 
+test('route validation permits one connection to expose distinct model targets', () => {
+  const validation = core.routeValidation({
+    split: { targets: [
+      { account: 'primary', model: 'upstream-direct' },
+      { account: 'primary', model: 'upstream-mapped' },
+    ] },
+  }, [connection]);
+  assert.equal(validation.ok, true);
+});
+
 test('CLIProxy routes preserve distinct credential pins on one connection', () => {
   const pool = { ...connection, id: 'pool', adapter_id: 'cli-proxy-api' };
   const route = {
@@ -223,7 +284,7 @@ test('CLIProxy routes preserve distinct credential pins on one connection', () =
 test('direct routes distinguish declared models from explicit unknown models', () => {
   const declared = core.routeValidation({ direct: { targets: [{ account: 'primary', model: 'upstream-direct' }] } }, [connection]);
   assert.equal(declared.ok, true);
-  assert.equal(declared.warnings.length, 0);
+  assert.equal(declared.warnings.some((item) => item.message.includes('目录仅为声明')), true);
   const unsupported = core.routeValidation({ direct: { targets: [{ account: 'primary', model: 'invented' }] } }, [connection]);
   assert.equal(unsupported.ok, false);
   const manual = core.routeValidation({ direct: { targets: [{ account: 'unknown', model: 'manual' }] } }, [{ id: 'unknown', models: [] }]);

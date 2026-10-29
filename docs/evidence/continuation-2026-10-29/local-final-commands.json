@@ -1,0 +1,43 @@
+[
+  {
+    "name": "vet-final-local",
+    "command": [
+      "go",
+      "vet",
+      "./..."
+    ],
+    "exit_code": 0,
+    "seconds": 7.01
+  },
+  {
+    "name": "config-final-local",
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "./internal/config",
+      "-count=1"
+    ],
+    "exit_code": 0,
+    "seconds": 1.31
+  },
+  {
+    "name": "web-final-local",
+    "command": [
+      "make",
+      "test-web"
+    ],
+    "exit_code": 0,
+    "seconds": 5.34
+  },
+  {
+    "name": "diff-final-local",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.17
+  }
+]

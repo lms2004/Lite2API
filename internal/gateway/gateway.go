@@ -67,10 +67,11 @@ const (
 )
 
 var (
-	errTooManyRequestFields = errors.New("request has too many top-level fields")
-	errRequestFieldTooLong  = errors.New("request field name is too long")
-	errInvalidEnvelopeShape = errors.New("request body must be a JSON object")
-	errSessionKeyTooLong    = errors.New("session key must not exceed 4096 bytes")
+	errTooManyRequestFields  = errors.New("request has too many top-level fields")
+	errDuplicateRequestField = errors.New("request contains duplicate top-level fields")
+	errRequestFieldTooLong   = errors.New("request field name is too long")
+	errInvalidEnvelopeShape  = errors.New("request body must be a JSON object")
+	errSessionKeyTooLong     = errors.New("session key must not exceed 4096 bytes")
 )
 
 func New(configPath string) (*Gateway, error) {
@@ -118,6 +119,10 @@ func New(configPath string) (*Gateway, error) {
 		g.Close()
 		return nil, err
 	}
+	if clientKeys.ConflictsWith(state.cfg.ResolvedAdminToken()) {
+		g.Close()
+		return nil, errors.New("admin token and managed client keys must be different")
+	}
 	g.clientKeys = clientKeys
 	g.adminAuth = NewAdminAuthenticator(state.cfg.Server.AdminSessionTTL.Duration)
 	return g, nil
@@ -164,7 +169,15 @@ func (g *Gateway) commitStateLocked(state *runtimeState, persist func() error) e
 		}
 	}()
 	oldState := g.state.Load()
+	if oldState != nil {
+		if aliases := implicitlyReexposedModels(oldState.cfg, state.cfg); len(aliases) > 0 {
+			return fmt.Errorf("removing explicit routes would expose implicit sources for %s; configure explicit replacement targets or remove their implicit model declarations first", strings.Join(aliases, ", "))
+		}
+	}
 	if g.clientKeys != nil {
+		if g.clientKeys.ConflictsWith(state.cfg.ResolvedAdminToken()) {
+			return errors.New("admin token and managed client keys must be different")
+		}
 		if oldState != nil && (state.cfg.Server.Listen != oldState.cfg.Server.Listen || state.cfg.Server.RequestReadTimeout.Duration != oldState.cfg.Server.RequestReadTimeout.Duration) {
 			return errors.New("server.listen and server.request_read_timeout require a process restart")
 		}
@@ -433,14 +446,17 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	requestBytes := int64(len(body))
 	// Enforce map cardinality before json.Unmarshal constructs client-sized
-	// strings and map buckets. This scanner retains no keys or values and stops
-	// after the first over-budget top-level field.
+	// strings and map buckets. The scanner retains at most 256 short decoded
+	// keys (to reject ambiguous duplicates), never copies values, and stops at
+	// the first over-budget field.
 	if err := validateTopLevelEnvelope(body); err != nil {
 		switch {
 		case errors.Is(err, errTooManyRequestFields):
 			writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "too_many_request_fields")
 		case errors.Is(err, errRequestFieldTooLong):
 			writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "request_field_too_long")
+		case errors.Is(err, errDuplicateRequestField):
+			writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "duplicate_request_field")
 		default:
 			writeError(http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error", "invalid_request_error")
 		}
@@ -508,12 +524,35 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		retainedBytes := requestBytes + int64(len(body))
 		bodyLease.ShrinkTo(retainedBytes)
 	}
+	requirements, err := requestRequirements(envelope, operation)
+	if err != nil {
+		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request_requirement")
+		return
+	}
+	if err := validateOperationRequest(envelope, operation); err != nil {
+		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request_requirement")
+		return
+	}
+	completionRequirements, err := requestCompletionRequirements(envelope, operation)
+	if err != nil {
+		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request_requirement")
+		return
+	}
+	if err := validateRouteRequirements(state.cfg.Routes[model], requirements); err != nil {
+		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request_requirement")
+		return
+	}
+	if err := state.scheduler.ValidateContinuation(model, operation, requirements); err != nil {
+		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_parameter")
+		return
+	}
 	session, err := sessionKey(r, envelope)
 	if err != nil {
 		writeError(http.StatusBadRequest, err.Error(), "invalid_request_error", "session_key_too_long")
 		return
 	}
 	requestID := requestID()
+	w.Header().Set(logicalRequestIDHeader, requestID)
 	start := time.Now()
 	g.stats.Begin()
 	input := contentSummary{}
@@ -526,8 +565,16 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	var stream bool
 	_ = json.Unmarshal(envelope["stream"], &stream)
+	featureScope := append([]string(nil), requirements.Features...)
+	slices.Sort(featureScope)
+	contractBody, _ := json.Marshal(completionRequirements)
+	contractIdentity := sha256.Sum256(contractBody)
 	record := RequestRecord{
 		Operation:        operation,
+		RequiredFeatures: strings.Join(featureScope, ","),
+		RequestContract:  fmt.Sprintf("%x", contractIdentity),
+		ExpectedChoices:  completionRequirements.ExpectedChoices,
+		ToolMode:         completionRequirements.ToolMode,
 		InputType:        input.Kind(),
 		InputParts:       input.Total(),
 		TextParts:        input.Text,
@@ -583,7 +630,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			// the client queued for another account to recover.
 			wait = 0
 		}
-		selection, err := state.scheduler.Select(r.Context(), model, operation, session, excluded, wait)
+		selection, err := state.scheduler.SelectForRequest(r.Context(), model, operation, session, excluded, wait, requirements)
 		if err != nil {
 			if last != nil {
 				releaseRetainedBody()
@@ -602,7 +649,25 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			}
 			record.Error = err.Error()
 			releaseRetainedBody()
-			writeError(http.StatusServiceUnavailable, err.Error(), "upstream_unavailable", "upstream_unavailable")
+			if r.Context().Err() != nil {
+				record.Status = 499
+				record.Outcome = "client_cancelled"
+				return
+			}
+			code := "upstream_unavailable"
+			switch {
+			case errors.Is(err, ErrNoEligibleAccount):
+				code = "no_eligible_source"
+			case errors.Is(err, ErrKnownUnavailable):
+				code = "source_unavailable"
+			case errors.Is(err, ErrNoCapacity):
+				code = "capacity_exhausted"
+				if wait > 0 {
+					code = "queue_timeout"
+				}
+			}
+			record.Outcome = code
+			writeError(http.StatusServiceUnavailable, err.Error(), "upstream_unavailable", code)
 			record.Status = http.StatusServiceUnavailable
 			return
 		}
@@ -611,7 +676,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		record.CredentialID = selection.Credential
 		record.UpstreamModel = selection.Model
 		record.ReasoningEffort = selection.ReasoningEffort
-		rewriteReserved := requestRewriteRequired(body, model, selection.Model, selection.ReasoningEffort)
+		rewriteReserved := operationRequestRewriteRequired(operation, body, envelope, model, selection.Model, selection.ReasoningEffort)
 		attemptReservation := rewriteBodyReservation(state.cfg.Server.MaxBodyBytes)
 		if rewriteReserved && !bodyLease.Acquire(attemptReservation) {
 			selection.Release()
@@ -623,7 +688,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.Error = "request rewrite memory budget reached"
 			return
 		}
-		attemptBody, err := rewriteRequestBody(body, envelope, model, selection.Model, selection.ReasoningEffort)
+		attemptBody, err := rewriteOperationRequestBody(operation, body, envelope, model, selection.Model, selection.ReasoningEffort)
 		if err != nil {
 			bodyLease.ShrinkTo(baseBodyReservation)
 			selection.Release()
@@ -647,7 +712,23 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		}
 		attemptStart := time.Now()
 		attemptHealth := selection.Account.beginAttempt(operation, selection.Model, selection.Credential)
-		resp, err := g.doUpstreamWithOAuthRecovery(r.Context(), state, selection, r, attemptBody, requestID)
+		resp, err := g.doUpstreamWithOAuthRecovery(r.Context(), state, selection, r, attemptBody, requestID, func(response *http.Response, callErr error, latency time.Duration) {
+			observed := UpstreamAttempt{AccountID: selection.Account.Config.ID, CredentialID: selection.Credential, UpstreamModel: selection.Model, LatencyMS: latency.Milliseconds(), Outcome: "response_received"}
+			if response != nil {
+				observed.Status = response.StatusCode
+				observed.CredentialID = selectedOAuthCredential(selection.Account.Config, response, observed.CredentialID)
+			}
+			if callErr != nil {
+				observed.Outcome = "transport_error"
+				if retryableTransportError(callErr) {
+					observed.Outcome = "not_submitted"
+				}
+			}
+			record.AttemptCount++
+			if len(record.Attempts) < maxObservedAttempts {
+				record.Attempts = append(record.Attempts, observed)
+			}
+		})
 		bodyLease.ShrinkTo(baseBodyReservation)
 		if err != nil {
 			selection.Release()
@@ -696,9 +777,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			record.Status = http.StatusBadGateway
 			return
 		}
-		if selectedCredential := strings.TrimSpace(resp.Header.Get(credentialSelectedHeader)); selectedCredential != "" {
-			record.CredentialID = selectedCredential
-		}
+		record.CredentialID = selectedOAuthCredential(selection.Account.Config, resp, record.CredentialID)
 		statusRetryable, uncertainStatus := retryableStatusForOperation(operation, resp.StatusCode)
 		retrySafeCredentialFailure := trustedOAuthAccount(selection.Account.Config) &&
 			strings.EqualFold(strings.TrimSpace(resp.Header.Get(credentialRetrySafeHeader)), "true")
@@ -758,7 +837,11 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		}
 		record.Status = resp.StatusCode
 		record.Error = ""
-		ok = resp.StatusCode < 400
+		ok = false
+		var completion *responseCompletion
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			completion = newResponseCompletion(operation, r.URL.Path, resp.Header.Get("Content-Type"), stream, completionRequirements)
+		}
 		capture := newResponseCapture(resp.Body, resp.Header.Get("Content-Type"))
 		resp.Body = capture
 		// No branch after this point can replay the request. Drop every handler
@@ -770,7 +853,7 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		releaseRetainedBody()
 		streamErr := func() error {
 			defer selection.Release()
-			return streamResponse(w, resp, state.cfg.Server.StreamIdleTimeout.Duration)
+			return streamResponse(w, resp, state.cfg.Server.StreamIdleTimeout.Duration, completion)
 		}()
 		applyCapturedResponseMetadata(&record, capture)
 		if record.OutputType == "" && operation == config.OperationImages {
@@ -779,6 +862,16 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 		if streamErr != nil {
 			ok = false
 			record.Error = streamErr.Error()
+			var completionErr *responseCompletionError
+			if completion != nil && r.Context().Err() == nil {
+				if errors.As(streamErr, &completionErr) {
+					record.Outcome = "incomplete_response"
+				}
+				if !completion.committed {
+					record.Status = http.StatusBadGateway
+				}
+				completion.writeError(w)
+			}
 			var transferErr *streamTransferError
 			if errors.As(streamErr, &transferErr) && transferErr.source == streamFailureDownstream {
 				var networkErr net.Error
@@ -789,6 +882,11 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 				}
 			} else if r.Context().Err() == nil {
 				selection.Account.reportFailure(attemptHealth, streamErr.Error(), state.cfg.Server.FailureThreshold, state.cfg.Server.CircuitCooldown.Duration, false)
+			}
+			if completion != nil && completion.committed && !completion.stream && r.Context().Err() == nil && (transferErr == nil || transferErr.source != streamFailureDownstream) {
+				// The status/body are already on the wire. Closing the HTTP
+				// stream is the only honest failure signal for ordinary JSON.
+				panic(http.ErrAbortHandler)
 			}
 			return
 		}
@@ -808,6 +906,13 @@ func (g *Gateway) ServeGateway(w http.ResponseWriter, r *http.Request) {
 			selection.Account.reportNeutral(attemptHealth)
 			return
 		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			record.Error = "upstream returned " + strconv.Itoa(resp.StatusCode)
+			record.Outcome = "upstream_rejected"
+			selection.Account.reportNeutral(attemptHealth)
+			return
+		}
+		ok = true
 		selection.Account.reportSuccess(attemptHealth, time.Since(attemptStart))
 		return
 	}
@@ -1044,6 +1149,10 @@ func (g *Gateway) doUpstream(ctx context.Context, state *runtimeState, account *
 	for name, value := range account.CustomHeaders {
 		req.Header.Set(name, value)
 	}
+	// Let Transport negotiate and decode gzip itself. Forwarding a client's
+	// Accept-Encoding disables that decoding and would feed compressed bytes
+	// into the protocol completion checker.
+	req.Header.Del("Accept-Encoding")
 	if strings.EqualFold(strings.TrimSpace(account.Config.AdapterID), "cli-proxy-api") && len(credential) > 0 {
 		if publicID := strings.TrimSpace(credential[0]); publicID != "" {
 			req.Header.Set(credentialPinHeader, publicID)
@@ -1163,6 +1272,7 @@ func validateTopLevelEnvelope(data []byte) error {
 		return nil
 	}
 	fields := 0
+	var keys [maxRequestEnvelopeFields][2]int
 	for {
 		if index >= len(data) || data[index] != '"' {
 			return errInvalidEnvelopeShape
@@ -1172,8 +1282,7 @@ func validateTopLevelEnvelope(data []byte) error {
 		if err != nil {
 			return errInvalidEnvelopeShape
 		}
-		// Escaped JSON may use six source bytes for one decoded key byte. The
-		// exact 256-byte contract is enforced after bounded-cardinality Unmarshal.
+		// Bound the encoded key before decoding its escaped spelling.
 		if keyEnd-keyStart-2 > maxRequestEnvelopeKeyBytes*6 {
 			return errRequestFieldTooLong
 		}
@@ -1181,6 +1290,7 @@ func validateTopLevelEnvelope(data []byte) error {
 		if fields > maxRequestEnvelopeFields {
 			return errTooManyRequestFields
 		}
+		keys[fields-1] = [2]int{keyStart, keyEnd}
 		index = skipJSONWhitespace(data, keyEnd)
 		if index >= len(data) || data[index] != ':' {
 			return errInvalidEnvelopeShape
@@ -1202,11 +1312,32 @@ func validateTopLevelEnvelope(data []byte) error {
 			if index != len(data) {
 				return errInvalidEnvelopeShape
 			}
-			return nil
+			return validateEnvelopeKeys(data, keys[:fields])
 		default:
 			return errInvalidEnvelopeShape
 		}
 	}
+}
+
+func validateEnvelopeKeys(data []byte, spans [][2]int) error {
+	// Decode only after cardinality is known safe. Oversized envelopes keep the
+	// original zero-allocation rejection path; escaped spellings still compare
+	// by the same decoded name used by the actual request map.
+	seen := make(map[string]struct{}, len(spans))
+	for _, span := range spans {
+		var key string
+		if json.Unmarshal(data[span[0]:span[1]], &key) != nil {
+			return errInvalidEnvelopeShape
+		}
+		if len(key) > maxRequestEnvelopeKeyBytes {
+			return errRequestFieldTooLong
+		}
+		if _, exists := seen[key]; exists {
+			return errDuplicateRequestField
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func skipJSONWhitespace(data []byte, index int) int {
@@ -1368,8 +1499,6 @@ func rewriteRequestBody(original []byte, envelope map[string]json.RawMessage, re
 	switch reasoningEffort {
 	case "", "auto":
 		// Preserve a client-supplied value when the target delegates reasoning.
-	case "none":
-		delete(copyEnvelope, "reasoning_effort")
 	default:
 		encodedEffort, _ := json.Marshal(reasoningEffort)
 		copyEnvelope["reasoning_effort"] = encodedEffort
@@ -1446,12 +1575,13 @@ func buildUpstreamURL(base, requestPath, rawQuery string) (string, error) {
 }
 
 const (
+	logicalRequestIDHeader    = "X-Lite2API-Request-Id"
 	credentialPinHeader       = "X-Lite2API-Auth-Index"
 	credentialSelectedHeader  = "X-Lite2API-Selected-Auth-Index"
 	credentialRetrySafeHeader = "X-Lite2API-Retry-Safe"
 )
 
-var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "host": {}, strings.ToLower(credentialPinHeader): {}, strings.ToLower(credentialSelectedHeader): {}, strings.ToLower(credentialRetrySafeHeader): {}}
+var hopHeaders = map[string]struct{}{"connection": {}, "proxy-connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailer": {}, "transfer-encoding": {}, "upgrade": {}, "authorization": {}, "x-api-key": {}, "cookie": {}, "x-admin-token": {}, "x-csrf-token": {}, "host": {}, strings.ToLower(logicalRequestIDHeader): {}, strings.ToLower(credentialPinHeader): {}, strings.ToLower(credentialSelectedHeader): {}, strings.ToLower(credentialRetrySafeHeader): {}}
 
 func copyRequestHeaders(dst, src http.Header) {
 	connectionBlocked := connectionHeaderNames(src)
@@ -1497,12 +1627,49 @@ func connectionHeaderNames(header http.Header) map[string]struct{} {
 	return blocked
 }
 
-func streamResponse(w http.ResponseWriter, resp *http.Response, idleTimeout time.Duration) error {
+func streamResponse(w http.ResponseWriter, resp *http.Response, idleTimeout time.Duration, checks ...*responseCompletion) error {
 	if idleTimeout <= 0 {
 		idleTimeout = 15 * time.Minute
 	}
-	copyResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
+	var completion *responseCompletion
+	if len(checks) > 0 {
+		completion = checks[0]
+	}
+	if completion != nil && completion.err != nil {
+		_ = resp.Body.Close()
+		return &responseCompletionError{err: completion.err}
+	}
+	// Hold only a small ordinary response until its completion is proven. Large
+	// responses retain streaming delivery and bounded inspection memory.
+	var preview []byte
+	committed := false
+	commit := func() error {
+		if !committed {
+			copyResponseHeaders(w.Header(), resp.Header)
+			if completion != nil {
+				w.Header().Del("Content-Length")
+				if !completion.stream {
+					w.Header().Set("Content-Type", "application/json")
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			committed = true
+			if completion != nil {
+				completion.committed = true
+			}
+		}
+		if len(preview) > 0 {
+			err := writeDownstreamChunk(w, preview, min(idleTimeout, 30*time.Second))
+			preview = nil
+			return err
+		}
+		return nil
+	}
+	if completion == nil || completion.stream {
+		if err := commit(); err != nil {
+			return &streamTransferError{source: streamFailureDownstream, err: err}
+		}
+	}
 	type readEvent struct {
 		data []byte
 		err  error
@@ -1553,13 +1720,45 @@ func streamResponse(w http.ResponseWriter, resp *http.Response, idleTimeout time
 					default:
 					}
 				}
-				if err := writeDownstreamChunk(w, event.data, min(idleTimeout, 30*time.Second)); err != nil {
-					return &streamTransferError{source: streamFailureDownstream, err: err}
+				if completion != nil {
+					completion.Feed(event.data)
+					if completion.err != nil {
+						return &responseCompletionError{err: completion.err}
+					}
+					if completion.stream && completion.terminal {
+						// Validate all bytes already read before delivering a terminal
+						// chunk. A partial trailing event must not bypass Finish just
+						// because the upstream keeps its transport open.
+						if err := completion.Finish(); err != nil {
+							return &responseCompletionError{err: err}
+						}
+					}
+				}
+				if !committed && len(preview)+len(event.data) <= completionPreviewBytes {
+					preview = append(preview, event.data...)
+				} else {
+					if err := commit(); err != nil {
+						return &streamTransferError{source: streamFailureDownstream, err: err}
+					}
+					if err := writeDownstreamChunk(w, event.data, min(idleTimeout, 30*time.Second)); err != nil {
+						return &streamTransferError{source: streamFailureDownstream, err: err}
+					}
 				}
 				timer.Reset(idleTimeout)
+				if completion != nil && completion.stream && completion.terminal {
+					return nil
+				}
 			}
 			if event.err != nil {
 				if errors.Is(event.err, io.EOF) {
+					if completion != nil {
+						if err := completion.Finish(); err != nil {
+							return &responseCompletionError{err: err}
+						}
+					}
+					if err := commit(); err != nil {
+						return &streamTransferError{source: streamFailureDownstream, err: err}
+					}
 					return nil
 				}
 				return &streamTransferError{source: streamFailureUpstream, err: event.err}

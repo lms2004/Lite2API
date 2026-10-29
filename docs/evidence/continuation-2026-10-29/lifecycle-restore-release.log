@@ -1,0 +1,8 @@
+test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access (__main__.RestoreLifecycle.test_real_crypto_restore_keeps_absolute_keys_and_enforces_business_access) ... ok
+test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate (__main__.RestoreLifecycle.test_restored_expired_or_revoked_grant_is_material_only_and_fails_gate) ... ok
+test_compose_restored_material_runs_in_a_private_docker_volume (__main__.RestoreLifecycle.test_compose_restored_material_runs_in_a_private_docker_volume) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 7.547s
+
+OK

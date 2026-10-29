@@ -6,6 +6,20 @@ const { createIndex, createRouteUsageIndex } = require('./app-metrics.js');
 const Core = require('./app-core.js');
 require('./app-shared.js');
 
+test('HTTP 200 incomplete streams remain failures in request and channel metrics', () => {
+  const shared = globalThis.Lite2APIShared({ Core, now: Date.now, indexData: () => ({}), resourcesState: {} });
+  const recent = [
+    { account_id: 'a', status: 200, outcome: 'success' },
+    { account_id: 'a', status: 200, outcome: 'incomplete_response' },
+    { account_id: 'a', status: 200, outcome: 'client_cancelled' },
+    { account_id: 'a', status: 200, error: 'legacy transport error' },
+  ];
+  assert.deepEqual(recent.map(shared.requestOK), [true, false, false, false]);
+  const indexed = createIndex()({ config: { accounts: [{ id: 'a' }] }, stats: { recent } });
+  assert.equal(indexed.connections[0].samples, 4);
+  assert.equal(indexed.connections[0].failures, 3);
+});
+
 test('expired authorization has a distinct account state and never looks like cooldown', () => {
   const shared = globalThis.Lite2APIShared({ Core, now: Date.now, indexData: () => ({}), resourcesState: {} });
   assert.equal(shared.accountStatus({ ready: false, status: 'reauth_required', health_code: 'reauth_required' }).label, '需重新授权');
@@ -52,6 +66,24 @@ test('GET requests share in-flight work and mutations retain their CSRF boundary
   assert.equal(calls[1].init.headers.get('X-CSRF-Token'), 'csrf-test');
   await request('/state');
   assert.equal(calls.length, 3, 'completed GET results are not a stale response cache');
+});
+
+test('all management mutations carry the reviewed revision and preserve an explicit older review', async () => {
+  const calls = [];
+  let revision = 'current-a';
+  const request = createRequestClient({
+    base: '/api', csrf: () => 'csrf', revision: () => revision, unauthorized: () => {},
+    fetch: async (path, init) => { calls.push({ path, init }); return response({ ok: true }); },
+  });
+  await request('/accounts', { method: 'PUT', body: '{}' });
+  assert.equal(calls[0].init.headers.get('If-Match'), '"current-a"');
+  revision = 'new-b';
+  await request('/routes', { method: 'PUT', body: '{}', headers: { 'If-Match': '"review-a"' } });
+  assert.equal(calls[1].init.headers.get('If-Match'), '"review-a"');
+  await request('/accounts/import', { method: 'POST', body: '{}' });
+  assert.equal(calls[2].init.headers.get('If-Match'), '"new-b"');
+  await request('/state');
+  assert.equal(calls[3].init.headers.has('If-Match'), false);
 });
 
 test('caller cancellation is isolated and abort listeners are removed after completion', async () => {

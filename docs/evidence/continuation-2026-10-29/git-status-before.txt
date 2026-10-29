@@ -1,0 +1,113 @@
+ M AGENTS.md
+ M Makefile
+ M README.md
+ M channels/README.md
+ M compose.channels.yml
+ M config.example.json
+ M deploy/install-cliproxyapi-systemd.sh
+ M deploy/install-lite2api-systemd.sh
+ M deploy/server-ops/README.md
+ M deploy/server-ops/backup-configs.sh
+ M deploy/server-ops/verify-systemd-backup.sh
+ M deploy/snapshot-compose-state.sh
+ M deploy/verify-compose-snapshot.sh
+ M docs/ADAPTER_DESIGN.md
+ M docs/ARCHITECTURE.md
+ M docs/DEVELOPMENT.md
+ M docs/OPERATIONS.md
+ M docs/canonical-preview/README.md
+ M internal/config/config.go
+ M internal/config/config_test.go
+ M internal/gateway/accountimport.go
+ M internal/gateway/accountimport_test.go
+ M internal/gateway/accounttest.go
+ M internal/gateway/accounttest_test.go
+ M internal/gateway/adapters.go
+ M internal/gateway/adapters_export_test.go
+ M internal/gateway/admin.go
+ M internal/gateway/capabilitysync.go
+ M internal/gateway/claude_compat_test.go
+ M internal/gateway/clientkeys.go
+ M internal/gateway/clientkeys_preflight.go
+ M internal/gateway/clientkeys_test.go
+ M internal/gateway/gateway.go
+ M internal/gateway/gateway_test.go
+ M internal/gateway/oauthadapter.go
+ M internal/gateway/oauthadapter_test.go
+ M internal/gateway/oauthrecovery.go
+ M internal/gateway/oauthrecovery_test.go
+ M internal/gateway/operations.go
+ M internal/gateway/operations_test.go
+ M internal/gateway/prompttest.go
+ M internal/gateway/request_inspector_test.go
+ M internal/gateway/requestlog.go
+ M internal/gateway/runtime.go
+ M internal/gateway/runtime_test.go
+ M internal/gateway/server.go
+ M internal/gateway/stats.go
+ M internal/web/app-accounts.js
+ M internal/web/app-chat.js
+ M internal/web/app-clients.js
+ M internal/web/app-core.js
+ M internal/web/app-core.test.js
+ M internal/web/app-metrics.js
+ M internal/web/app-onboarding.js
+ M internal/web/app-routes.js
+ M internal/web/app-runtime.js
+ M internal/web/app-runtime.test.js
+ M internal/web/app-shared.js
+ M internal/web/app-usage.js
+ M internal/web/app.html
+ M internal/web/app.js
+?? deploy/__pycache__/
+?? deploy/acceptance.example.json
+?? deploy/compose_snapshot_test.py
+?? deploy/lifecycle_review_test.py
+?? deploy/restore_lifecycle_test.py
+?? deploy/state_archive.py
+?? deploy/upgrade_lifecycle_test.py
+?? deploy/verify_service.py
+?? docs/BUSINESS_ALIGNMENT_2026-10-28.md
+?? docs/BUSINESS_ALIGNMENT_ROUND2_2026-10-28.md
+?? docs/BUSINESS_CAPABILITIES.md
+?? docs/BUSINESS_USE_CASES.md
+?? docs/LITE2API_PROJECT_NARRATIVE_2026-10-28.md
+?? docs/LITE2API_PROJECT_OVERVIEW_2026-10-28.md
+?? docs/PROJECT_CASE_STUDY.md
+?? docs/TEMP_EXECUTION_STATE_2026-10-29.md
+?? docs/evidence/
+?? internal/config/capability_evidence.go
+?? internal/config/capability_evidence_test.go
+?? internal/config/credential_boundary_test.go
+?? internal/gateway/capability_evidence_lifecycle_test.go
+?? internal/gateway/capability_probe.go
+?? internal/gateway/capability_verification.go
+?? internal/gateway/capability_verification_test.go
+?? internal/gateway/changecontrol.go
+?? internal/gateway/changecontrol_test.go
+?? internal/gateway/clientkeys_access_test.go
+?? internal/gateway/completion_contract_test.go
+?? internal/gateway/completion_json_contract.go
+?? internal/gateway/completion_requirements.go
+?? internal/gateway/completion_review_test.go
+?? internal/gateway/completion_round2_review_test.go
+?? internal/gateway/completion_roundtrip_test.go
+?? internal/gateway/completion_stream_contract.go
+?? internal/gateway/continuation.go
+?? internal/gateway/continuation_test.go
+?? internal/gateway/evidence_test.go
+?? internal/gateway/information.go
+?? internal/gateway/information_test.go
+?? internal/gateway/maintenance_admission.go
+?? internal/gateway/maintenance_admission_test.go
+?? internal/gateway/recovery_scope_test.go
+?? internal/gateway/request_integrity_test.go
+?? internal/gateway/request_requirements.go
+?? internal/gateway/request_requirements_test.go
+?? internal/gateway/request_rewrite_operation.go
+?? internal/gateway/response_completion.go
+?? internal/gateway/response_completion_test.go
+?? internal/gateway/response_delta_compat_test.go
+?? internal/web/app-controls.test.js
+?? tools/__pycache__/
+?? tools/verify-business-runtime.py

@@ -1,0 +1,16 @@
+{
+  "observed_at": "2026-10-29T09:04:54.240582+00:00",
+  "version": "continuation-20261029-b30368e8257e",
+  "binary_sha256": "f81c05f81d8aaa2859805f079b75e1c53a5ab044157dd968b3155aea53ea25d0",
+  "rollback_directory": "/root/lite2api-release-continuation-b30368e8257e/rollback-20261029T090454Z",
+  "scope": "gateway_binary_only_existing_systemd_unit_loopback_45679",
+  "ok": true,
+  "service": {
+    "MainPID": "282086",
+    "NRestarts": "0",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "process_sha256": "f81c05f81d8aaa2859805f079b75e1c53a5ab044157dd968b3155aea53ea25d0",
+  "unit_environment_adapter_unchanged": true
+}

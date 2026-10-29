@@ -1,0 +1,163 @@
+{
+  "version": "closeout-20261029-c9069a6cd858",
+  "source_sha256": "c9069a6cd858b23b9223fc890445cb4d1eb9146c9e709e0b018a0080368fcb5e",
+  "source_stable": true,
+  "commands": [
+    {
+      "name": "final-oauth-race",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "./internal/gateway",
+        "-run",
+        "^TestAccountImportRollsBackNewAndReplacedCredentialsOnCommitFailure$",
+        "-count=10",
+        "-timeout=90s",
+        "-json"
+      ],
+      "exit_code": 0,
+      "seconds": 27.68,
+      "tests": {
+        "pass": 70,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "name": "final-go-test",
+      "command": [
+        "go",
+        "test",
+        "-p",
+        "2",
+        "-json",
+        "./...",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "seconds": 13.95,
+      "tests": {
+        "pass": 617,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "name": "final-go-race",
+      "command": [
+        "go",
+        "test",
+        "-p",
+        "2",
+        "-race",
+        "-json",
+        "./...",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "seconds": 25.31,
+      "tests": {
+        "pass": 617,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "name": "final-go-vet",
+      "command": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 2.29
+    },
+    {
+      "name": "final-go-build",
+      "command": [
+        "go",
+        "build",
+        "-buildvcs=false",
+        "-trimpath",
+        "-ldflags=-s -w -X main.version=closeout-20261029-c9069a6cd858",
+        "-o",
+        "/tmp/lite2api-final-closeout/lite2api-candidate",
+        "./cmd/lite2api"
+      ],
+      "exit_code": 0,
+      "seconds": 5.07
+    },
+    {
+      "name": "final-example-config",
+      "command": [
+        "/tmp/lite2api-final-closeout/lite2api-candidate",
+        "-check-config",
+        "-config",
+        "config.example.json"
+      ],
+      "exit_code": 0,
+      "seconds": 0.06
+    },
+    {
+      "name": "final-deploy",
+      "command": [
+        "make",
+        "test-deploy"
+      ],
+      "exit_code": 0,
+      "seconds": 8.27
+    },
+    {
+      "name": "final-age-version",
+      "command": [
+        "age",
+        "--version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03
+    },
+    {
+      "name": "final-restore",
+      "command": [
+        "python3",
+        "deploy/restore_lifecycle_test.py"
+      ],
+      "exit_code": 0,
+      "seconds": 11.25
+    },
+    {
+      "name": "final-upgrade",
+      "command": [
+        "python3",
+        "deploy/upgrade_lifecycle_test.py",
+        "--output",
+        "/tmp/lite2api-final-closeout/upgrade-results.json"
+      ],
+      "exit_code": 0,
+      "seconds": 13.92
+    },
+    {
+      "name": "final-compose",
+      "command": [
+        "python3",
+        "deploy/compose_snapshot_test.py"
+      ],
+      "exit_code": 0,
+      "seconds": 7.55
+    },
+    {
+      "name": "final-systemd",
+      "command": [
+        "python3",
+        "deploy/systemd_lifecycle_test.py",
+        "--binary",
+        "/tmp/lite2api-final-closeout/lite2api-candidate",
+        "--output",
+        "/tmp/lite2api-final-closeout/systemd-results.json"
+      ],
+      "exit_code": 0,
+      "seconds": 4.92
+    }
+  ]
+}

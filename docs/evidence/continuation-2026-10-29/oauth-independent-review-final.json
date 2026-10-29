@@ -1,0 +1,52 @@
+{
+  "reviewer": "protocol_health",
+  "scope": "independent source review and local HTTP fixtures only; no production credential mutations or external provider calls",
+  "command": [
+    "go",
+    "test",
+    "./internal/gateway",
+    "-run",
+    "^(TestOAuthCredentialMutationCompensatesFailure|TestOAuthCredentialDeleteRequiresSnapshotBeforeMutation|TestOAuthCredentialRemovalPreservesScopedRoutesAndOtherProviders|TestOAuthPoolEnsurePreservesProviderScopeAndManualDisable)$",
+    "-count=1",
+    "-timeout=90s",
+    "-json"
+  ],
+  "exit_code": 1,
+  "duration_seconds": 14.806,
+  "source_stable": true,
+  "pass_events": 30,
+  "fail_events": 3,
+  "sha256": {
+    "internal/gateway/oauthadapter.go": "acf8463a1eb1d2778bf29f25540e64fa97f044d81342670516f645d860c6ac2a",
+    "internal/gateway/accountimport.go": "4f121651940082c4ca82d6b16b7929064055b3759af3d57ee629528eec4d936f",
+    "internal/gateway/admin.go": "44d80ab72f5d3206b29f08e42ef63e086e335bb577d5bf57d2c27cabe4fe4416",
+    "internal/gateway/oauth_boundary_regression_test.go": "ce24c0ace447334470f4eff6ea2a84f56717ae91b264289a35fdda09f3332581",
+    "internal/gateway/oauth_mutation_compensation_test.go": "ba8474bfd6f2c802f4b65df2e0c7f02212aee2ab3582a95b5c89ccb26ad1b6c5",
+    "internal/config/capability_discovery.go": "d49cc8725c66a44e988d52cfffc40c8276b8eb953f5260efea4bb0de0e04d6d3"
+  },
+  "findings": [
+    {
+      "status": "fixed",
+      "issue": "Removing a routed OAuth model originally invalidated config after adapter mutation, leaving the old source enabled.",
+      "resolution": "Preserve reviewed routes and declarations, disable affected connection when pruning cannot validate, and keep unrelated provider scopes isolated."
+    },
+    {
+      "status": "fixed",
+      "issue": "A successful or ambiguously acknowledged credential deletion/status change followed by local commit failure previously left remote and local state inconsistent.",
+      "resolution": "Capture exact prior credential/status in memory before mutation, hold reloadMu through bounded compensation, restore using a cleanup context independent of cancellation, confirm status and effective config, and distinguish completed rollback from incomplete rollback without leaking secrets."
+    },
+    {
+      "status": "requires_fix_at_this_snapshot",
+      "issue": "enable/cancelled returned HTTP 200 when apply completed before cancellation and catalog refresh swallowed context cancellation; unchanged disabled pool config bypassed rollback.",
+      "regression": "TestOAuthCredentialMutationCompensatesFailure/enable/cancelled",
+      "expected": "HTTP 502 oauth_credential_change_rolled_back and original disabled state restored",
+      "observed": "HTTP 200 disabled=false ok=true pool_ready=false with catalog refresh warning",
+      "resolution_request": "Return ctx.Err after mutation and discovery before committing, so canceled work compensates."
+    }
+  ],
+  "limits": [
+    "Local fixtures prove transaction and request behavior only; actual provider grants were not revoked, deleted, disabled or restored by this review.",
+    "If adapter or filesystem recovery remains unavailable, oauth_credential_rollback_incomplete explicitly requires restoring connectivity/write access and inspecting state before retrying.",
+    "Connections disabled due to missing credentials or invalid reviewed routes remain disabled until reviewed repair and explicit re-enable."
+  ]
+}

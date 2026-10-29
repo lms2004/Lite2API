@@ -1,0 +1,72 @@
+{
+  "reviewer": "protocol_health",
+  "scope": "independent source review, real loopback HTTP clients with simulated provider only; no production credentials/services or real provider calls",
+  "checks": [
+    {
+      "command": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "^TestOAuthCredentialMutationCompensatesFailure$/.*/^cancelled(_after_apply)?$",
+        "-count=20",
+        "-timeout=90s",
+        "-json"
+      ],
+      "log": "oauth-independent-cancellation-stress.jsonl",
+      "exit_code": 0,
+      "duration_seconds": 13.166,
+      "pass_events": 180,
+      "fail_events": 0
+    },
+    {
+      "command": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "^(TestOAuthCredentialMutationCompensatesFailure|TestOAuthCredentialDeleteRequiresSnapshotBeforeMutation|TestOAuthCredentialRemovalPreservesScopedRoutesAndOtherProviders|TestOAuthPoolEnsurePreservesProviderScopeAndManualDisable)$",
+        "-count=1",
+        "-timeout=90s",
+        "-json"
+      ],
+      "log": "oauth-independent-review-accepted-tests.jsonl",
+      "exit_code": 0,
+      "duration_seconds": 2.443,
+      "pass_events": 36,
+      "fail_events": 0
+    }
+  ],
+  "source_stable": true,
+  "sha256": {
+    "internal/gateway/oauthadapter.go": "e62310d8ad1ac68f09de5ee34a6adb3e58b7ccd305849c33dc00a836fb3307b1",
+    "internal/gateway/accountimport.go": "4f121651940082c4ca82d6b16b7929064055b3759af3d57ee629528eec4d936f",
+    "internal/gateway/admin.go": "44d80ab72f5d3206b29f08e42ef63e086e335bb577d5bf57d2c27cabe4fe4416",
+    "internal/gateway/oauth_boundary_regression_test.go": "ce24c0ace447334470f4eff6ea2a84f56717ae91b264289a35fdda09f3332581",
+    "internal/gateway/oauth_mutation_compensation_test.go": "9c5f9e9b91c54e698323a6e8fcd480a33e67641c329569d49652dd1fdeb8f832",
+    "internal/config/capability_discovery.go": "d49cc8725c66a44e988d52cfffc40c8276b8eb953f5260efea4bb0de0e04d6d3"
+  },
+  "findings": [
+    {
+      "status": "fixed",
+      "issue": "Removing a routed OAuth model invalidated config after remote mutation.",
+      "resolution": "Preserve reviewed aliases/declarations, disable affected connection, and preserve unrelated provider scopes."
+    },
+    {
+      "status": "fixed",
+      "issue": "Remote deletion/status followed by local commit failure or uncertain acknowledgement left divergent state.",
+      "resolution": "In-memory original file/status plus bounded compensation under reloadMu; explicit confirmed/incomplete rollback result."
+    },
+    {
+      "status": "fixed",
+      "issue": "Independent review reproduced HTTP 200 on enable/cancelled when directory failure swallowed cancellation.",
+      "prior_failure_log": "oauth-independent-review-final-tests.jsonl",
+      "resolution": "Check ctx.Err after mutation and before reconciliation callback returns; deterministic cancelled_after_apply test and repeated cancellation regression."
+    }
+  ],
+  "limits": [
+    "This review does not establish external provider credential recovery; fixtures prove local transaction behavior.",
+    "If compensation itself fails, oauth_credential_rollback_incomplete preserves uncertainty and gives connectivity/write-access recovery conditions.",
+    "Automatically disabled connections require reviewed repair and explicit re-enable."
+  ]
+}

@@ -2,8 +2,12 @@ package gateway
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/lms2004/lite2api/internal/config"
 )
 
 func TestAccountImportPreviewAndApply(t *testing.T) {
@@ -89,6 +93,39 @@ func TestAccountImportPartialSuccess(t *testing.T) {
 	}
 	if len(g.Config().Accounts) != 1 || g.Config().Accounts[0].ID != "good" {
 		t.Fatalf("accounts=%+v", g.Config().Accounts)
+	}
+}
+
+func TestAccountImportOAuthDoesNotClaimDisabledPoolAsApplied(t *testing.T) {
+	const managementKey = "disabled-pool-management"
+	adapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{{"id": "gpt-fixture"}}})
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v0/management/auth-files" {
+			writeJSON(w, http.StatusOK, map[string]any{"files": []any{}})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v0/management/auth-files" {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer adapter.Close()
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_URL", adapter.URL)
+	t.Setenv("CLIPROXYAPI_MANAGEMENT_KEY", managementKey)
+	enabled := false
+	g := newTestGateway(t, []config.Account{{ID: "pool", Type: "openai", AdapterID: "cli-proxy-api", BaseURL: adapter.URL + "/v1", APIKey: "service-key", Enabled: enabled}}, nil)
+	result, err := g.ImportAccounts(context.Background(), AccountImportRequest{Data: newAccountImportData([]AccountImportItem{{
+		Name: "Codex disabled pool", Platform: "codex", Type: "oauth", Credentials: map[string]any{"access_token": "access", "refresh_token": "refresh"},
+	}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OAuthImported != 1 || result.OAuthSkipped != 1 || result.Applied || len(result.Errors) != 1 {
+		t.Fatalf("disabled OAuth pool was reported as applied: %+v", result)
 	}
 }
 

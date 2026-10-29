@@ -135,6 +135,25 @@ func ResolveClientKeysPath(configPath, configured string) string {
 
 func (s *ClientKeyStore) Path() string { return s.path }
 
+// ConflictsWith reports whether a protected value hashes to any managed key.
+// The raw key is never persisted or exposed; this is used at the gateway
+// boundary to keep an administrator credential out of the client namespace.
+func (s *ClientKeyStore) ConflictsWith(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	digest := sha256.Sum256([]byte(raw))
+	snapshot := s.snapshot.Load()
+	for _, runtime := range *snapshot {
+		meta := runtime.meta.Load()
+		if meta != nil && subtle.ConstantTimeCompare(digest[:], meta.hash[:]) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ClientKeyStore) load() error {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -185,7 +204,7 @@ func (s *ClientKeyStore) Authenticate(raw string, legacy map[[sha256.Size]byte]s
 			return nil, KeyAuthInvalid
 		}
 		now := time.Now()
-		if meta.expiresUnix > 0 && now.Unix() >= meta.expiresUnix {
+		if meta.record.ExpiresAt != "" && now.Unix() >= meta.expiresUnix {
 			return nil, KeyAuthInvalid
 		}
 		if !acquireRPM(&runtime.rate, meta.record.RPM, now) {

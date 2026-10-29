@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-10-29T08:55:41.956227+00:00",
+  "scope": "read_only_auth_pool_after_private_acceptance",
+  "accounts": [
+    {
+      "id": "f4a4c7dc99a43610",
+      "provider": "anthropic",
+      "status": "error",
+      "ready": false,
+      "health_code": "upstream_error",
+      "next_retry_after": null
+    },
+    {
+      "id": "08a41398ec92b336",
+      "provider": "antigravity",
+      "status": "error",
+      "ready": false,
+      "health_code": "upstream_error",
+      "next_retry_after": null
+    },
+    {
+      "id": "1d1a1dea063ee3ab",
+      "provider": "antigravity",
+      "status": "reauth_required",
+      "ready": false,
+      "health_code": "reauth_required",
+      "next_retry_after": null
+    },
+    {
+      "id": "81c1278c15019737",
+      "provider": "codex",
+      "status": "reauth_required",
+      "ready": false,
+      "health_code": "reauth_required",
+      "next_retry_after": null
+    }
+  ]
+}

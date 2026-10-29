@@ -7,6 +7,12 @@ if [[ $# -ne 1 ]]; then
 fi
 
 snapshot_dir=$1
+age_identity_args=()
+if [[ -n ${AGE_IDENTITY_FILE:-} ]]; then
+    [[ -f $AGE_IDENTITY_FILE && ! -L $AGE_IDENTITY_FILE ]] || { echo 'unsafe age identity file' >&2; exit 1; }
+    age_identity_args=(--identity "$AGE_IDENTITY_FILE")
+fi
+decrypt() { age --decrypt "${age_identity_args[@]}" "$1"; }
 for command in age sha256sum tar; do
     command -v "$command" >/dev/null || {
         echo "missing required command: $command" >&2
@@ -77,20 +83,20 @@ validate_archive_types() {
 )
 for artifact in lite2api-data.tar.age grok2api-data.tar.age grok2api-quality.tar.age channel-runtime.tar.age; do
     if [[ -n ${listed_artifacts[$artifact]:-} ]]; then
-        age --decrypt "$snapshot_dir/$artifact" | tar -tf - | validate_archive_paths
-        age --decrypt "$snapshot_dir/$artifact" | tar -tvf - | validate_archive_types
+        decrypt "$snapshot_dir/$artifact" | tar -tf - | validate_archive_paths
+        decrypt "$snapshot_dir/$artifact" | tar -tvf - | validate_archive_types
     fi
 done
-lite2api_listing=$(age --decrypt "$snapshot_dir/lite2api-data.tar.age" | tar -tf -)
+lite2api_listing=$(decrypt "$snapshot_dir/lite2api-data.tar.age" | tar -tf -)
 grep -Eq '^([.]/)?config[.]json$' <<<"$lite2api_listing"
 if [[ -n ${listed_artifacts[channel-runtime.tar.age]:-} ]]; then
-    channel_listing=$(age --decrypt "$snapshot_dir/channel-runtime.tar.age" | tar -tf -)
+    channel_listing=$(decrypt "$snapshot_dir/channel-runtime.tar.age" | tar -tf -)
     for required_channel_path in \
         cliproxyapi/config.yaml gemini-web2api/config.json grok2api/config.yaml; do
         grep -Eq "^([.]/)?${required_channel_path//./[.]}$" <<<"$channel_listing"
     done
 fi
-age --decrypt "$snapshot_dir/environment.age" |
+decrypt "$snapshot_dir/environment.age" |
     awk -F= '
         $1 == "LITE2API_API_KEYS" || $1 == "LITE2API_ADMIN_TOKEN" {
             value = substr($0, index($0, "=") + 1)
